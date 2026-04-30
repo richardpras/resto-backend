@@ -1,0 +1,35 @@
+<?php
+
+namespace App\Providers;
+
+use App\Modules\Inventory\Repositories\EloquentIngredientRepository;
+use App\Modules\Inventory\Repositories\EloquentStockMovementRepository;
+use App\Modules\Inventory\Repositories\IngredientRepositoryInterface;
+use App\Modules\Inventory\Repositories\StockMovementRepositoryInterface;
+use App\Modules\Menu\Repositories\EloquentMenuRepository;
+use App\Modules\Menu\Repositories\MenuRepositoryInterface;
+use App\Modules\Orders\Repositories\EloquentOrderRepository;
+use App\Modules\Orders\Repositories\OrderRepositoryInterface;
+use Illuminate\Support\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{
+    /**
+     * Register any application services.
+     */
+    public function register(): void
+    {
+        $this->app->bind(OrderRepositoryInterface::class, EloquentOrderRepository::class);
+        $this->app->bind(IngredientRepositoryInterface::class, EloquentIngredientRepository::class);
+        $this->app->bind(StockMovementRepositoryInterface::class, EloquentStockMovementRepository::class);
+        $this->app->bind(MenuRepositoryInterface::class, EloquentMenuRepository::class);
+    }
+
+    /**
+     * Bootstrap any application services.
+     */
+    public function boot(): void
+    {
+        //
+    }
+}

@@ -1,0 +1,33 @@
+<?php
+
+namespace App\Models\Modules\Orders\Domain;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Payment extends Model
+{
+    protected $fillable = [
+        'order_id',
+        'method',
+        'amount',
+        'split_bill_label',
+        'split_bill_group',
+        'paid_at',
+    ];
+
+    protected $casts = [
+        'paid_at' => 'datetime',
+    ];
+
+    public function order(): BelongsTo
+    {
+        return $this->belongsTo(Order::class);
+    }
+
+    public function allocations(): HasMany
+    {
+        return $this->hasMany(OrderPaymentAllocation::class);
+    }
+}
