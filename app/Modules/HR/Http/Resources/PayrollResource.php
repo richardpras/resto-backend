@@ -9,6 +9,8 @@ class PayrollResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $attendanceSummary = (array) data_get($this->adjustments, 'attendanceSummary', []);
+
         return [
             'id' => (int) $this->id,
             'tenantId' => $this->tenant_id,
@@ -22,6 +24,13 @@ class PayrollResource extends JsonResource
             'status' => $this->status,
             'journalId' => $this->journal_id,
             'adjustments' => $this->adjustments,
+            'attendanceSummary' => [
+                'lateCount' => (int) ($attendanceSummary['lateCount'] ?? 0),
+                'absentCount' => (int) ($attendanceSummary['absentCount'] ?? 0),
+                'overtimeMinutes' => (int) ($attendanceSummary['overtimeMinutes'] ?? 0),
+                'derivedAdjustmentAmount' => (float) ($attendanceSummary['derivedAdjustmentAmount'] ?? 0),
+                'derivedDeductionAmount' => (float) ($attendanceSummary['derivedDeductionAmount'] ?? 0),
+            ],
             'createdAt' => $this->created_at?->toISOString(),
         ];
     }

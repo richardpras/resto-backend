@@ -2,6 +2,7 @@
 
 namespace App\Models\Modules\HR\Domain;
 
+use App\Models\Modules\HR\Domain\Attendance;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 

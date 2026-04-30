@@ -14,6 +14,7 @@ class PayrollService
 {
     public function __construct(
         private readonly AuthorizationService $authorizationService,
+        private readonly AttendancePayrollInputService $attendancePayrollInputService,
     ) {}
 
     public function listByTenant(int $tenantId)
@@ -33,8 +34,17 @@ class PayrollService
             abort_if($employee === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Employee not found.');
 
             $baseAmount = (float) $employee->base_salary;
-            $adjustmentAmount = (float) ($payload['adjustmentAmount'] ?? 0);
-            $deductionAmount = (float) ($payload['deductionAmount'] ?? 0);
+            $attendanceSummary = $this->attendancePayrollInputService->summarizeForPeriod(
+                employeeId: (int) $employee->id,
+                periodStart: $payload['periodStart'],
+                periodEnd: $payload['periodEnd'],
+            );
+
+            $attendanceAdjustmentAmount = $this->deriveAttendanceAdjustmentAmount($attendanceSummary, $payload);
+            $attendanceDeductionAmount = $this->deriveAttendanceDeductionAmount($attendanceSummary, $payload);
+
+            $adjustmentAmount = (float) ($payload['adjustmentAmount'] ?? 0) + $attendanceAdjustmentAmount;
+            $deductionAmount = (float) ($payload['deductionAmount'] ?? 0) + $attendanceDeductionAmount;
             $netAmount = $baseAmount + $adjustmentAmount - $deductionAmount;
             abort_if($netAmount < 0, Response::HTTP_UNPROCESSABLE_ENTITY, 'Net payroll amount cannot be negative.');
 
@@ -57,9 +67,33 @@ class PayrollService
                 'net_amount' => $netAmount,
                 'status' => 'posted',
                 'journal_id' => $journal->id,
-                'adjustments' => $payload['adjustments'] ?? [],
+                'adjustments' => array_merge(
+                    $payload['adjustments'] ?? [],
+                    [
+                        'attendanceSummary' => array_merge($attendanceSummary, [
+                            'derivedAdjustmentAmount' => $attendanceAdjustmentAmount,
+                            'derivedDeductionAmount' => $attendanceDeductionAmount,
+                        ]),
+                    ]
+                ),
             ]);
         });
+    }
+
+    private function deriveAttendanceAdjustmentAmount(array $attendanceSummary, array $payload): float
+    {
+        $overtimeAdjustmentPerMinute = (float) ($payload['overtimeAdjustmentPerMinute'] ?? 0);
+
+        return (float) $attendanceSummary['overtimeMinutes'] * $overtimeAdjustmentPerMinute;
+    }
+
+    private function deriveAttendanceDeductionAmount(array $attendanceSummary, array $payload): float
+    {
+        $lateDeductionPerCount = (float) ($payload['lateDeductionPerCount'] ?? 0);
+        $absentDeductionPerCount = (float) ($payload['absentDeductionPerCount'] ?? 0);
+
+        return ((float) $attendanceSummary['lateCount'] * $lateDeductionPerCount)
+            + ((float) $attendanceSummary['absentCount'] * $absentDeductionPerCount);
     }
 
     private function createPayrollJournal(

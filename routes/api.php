@@ -2,8 +2,10 @@
 
 use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
+use App\Modules\HR\Http\Controllers\AttendanceController;
 use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\PayrollController;
+use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Orders\Http\Controllers\OrderController;
 use App\Modules\UserManagement\Http\Controllers\AuthController;
@@ -35,11 +37,20 @@ Route::prefix('v1')->group(function (): void {
     Route::get('permissions', [PermissionController::class, 'index']);
     Route::post('permissions', [PermissionController::class, 'store']);
 
-    Route::get('employees', [EmployeeController::class, 'index']);
-    Route::post('employees', [EmployeeController::class, 'store']);
     Route::middleware('auth:api')->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
+
+        Route::get('employees', [EmployeeController::class, 'index']);
+        Route::post('employees', [EmployeeController::class, 'store']);
+
+        Route::get('shifts', [ShiftController::class, 'index']);
+        Route::post('shifts', [ShiftController::class, 'store']);
+        Route::put('shifts/{shift}', [ShiftController::class, 'update']);
+
+        Route::get('attendances', [AttendanceController::class, 'index']);
+        Route::post('attendances/sync', [AttendanceController::class, 'sync']);
+        Route::post('attendances/{attendance}/manual-correction', [AttendanceController::class, 'manualCorrection']);
 
         Route::get('payrolls', [PayrollController::class, 'index'])->middleware('permission:payroll.view');
         Route::post('payrolls', [PayrollController::class, 'store'])->middleware('permission:payroll.create');
