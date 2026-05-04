@@ -21,13 +21,17 @@ class AuthController extends Controller
             ], Response::HTTP_UNAUTHORIZED);
         }
 
-        $token = $user->createToken('api-access')->accessToken;
+        $tokenResult = $user->createToken('api-access');
+        $tokenModel = $tokenResult->getToken();
 
         return response()->json([
             'message' => 'Login successful.',
             'data' => [
-                'accessToken' => $token,
-                'tokenType' => 'Bearer',
+                'accessToken' => $tokenResult->accessToken,
+                'tokenType' => $tokenResult->tokenType ?? 'Bearer',
+                /** OAuth2-style lifetime in seconds (Passport personal access token). Mobile clients should refresh before expiry. */
+                'expiresIn' => $tokenResult->expiresIn ?? null,
+                'expiresAt' => $tokenModel?->expires_at?->toIso8601String(),
                 'user' => [
                     'id' => (int) $user->id,
                     'name' => $user->name,
@@ -39,13 +43,25 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $user = $request->user()->load(['roles.permissions']);
+
+        $permissionCodes = $user->roles
+            ->flatMap(fn ($role) => $role->permissions)
+            ->pluck('code')
+            ->unique()
+            ->values()
+            ->all();
 
         return response()->json([
             'data' => [
                 'id' => (int) $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'roles' => $user->roles->map(fn ($role) => [
+                    'id' => (int) $role->id,
+                    'name' => $role->name,
+                ])->values()->all(),
+                'permissionCodes' => $permissionCodes,
             ],
         ]);
     }

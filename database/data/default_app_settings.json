@@ -1,0 +1,79 @@
+{
+  "merchant": {
+    "name": "RestoHub",
+    "businessType": "Restaurant",
+    "address": "Jl. Sudirman No. 123, Jakarta",
+    "phone": "+62 812 3456 7890",
+    "email": "hello@restohub.com",
+    "currency": "IDR",
+    "timezone": "Asia/Jakarta",
+    "language": "en"
+  },
+  "outlets": [
+    {
+      "id": "o-main",
+      "name": "Main Outlet",
+      "address": "Jl. Sudirman No. 123",
+      "phone": "+62 812 3456 7890",
+      "manager": "Sarah Lee",
+      "status": "active",
+      "receiptHeader": "Thank you for visiting RestoHub",
+      "receiptFooter": "See you again!",
+      "showLogo": true,
+      "showTaxBreakdown": true,
+      "invoicePrefix": "INV-MAIN",
+      "orderPrefix": "ORD-MAIN"
+    }
+  ],
+  "taxes": [
+    {
+      "id": "tax-default",
+      "name": "PB1 Service Tax",
+      "type": "percentage",
+      "value": 10,
+      "applyDineIn": true,
+      "applyTakeaway": true,
+      "inclusive": false,
+      "status": "active"
+    }
+  ],
+  "printers": [
+    {
+      "id": "printer-default",
+      "name": "Kitchen Printer",
+      "printerType": "kitchen",
+      "connection": "lan",
+      "ip": "192.168.1.50",
+      "outletId": "o-main",
+      "assignedCategories": ["Main Course"]
+    }
+  ],
+  "paymentMethods": [
+    { "id": "pm-cash", "name": "Cash", "type": "cash", "status": "active" }
+  ],
+  "system": {
+    "enableSplitBill": true,
+    "enableMultiPayment": true,
+    "confirmBeforePayment": true,
+    "enableQROrdering": true
+  },
+  "integration": {
+    "paymentGatewayKey": "",
+    "webhookUrl": "",
+    "printAgentUrl": "http://localhost:9100",
+    "thirdPartyNotes": ""
+  },
+  "numbering": {
+    "invoiceFormat": "INV-{YYYY}{MM}-{0000}",
+    "orderFormat": "ORD-{YYYY}{MM}{DD}-{000}"
+  },
+  "banks": [
+    {
+      "id": "bank-default",
+      "bankName": "BCA",
+      "accountName": "PT RestoHub Indonesia",
+      "accountNumber": "1234567890",
+      "isDefault": true
+    }
+  ]
+}

@@ -15,6 +15,7 @@ class Journal extends Model
         'journal_date',
         'status',
         'description',
+        'outlet',
         'created_by',
     ];
 

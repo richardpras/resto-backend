@@ -6,15 +6,17 @@ use App\Models\Modules\HR\Domain\Attendance;
 use App\Models\Modules\HR\Domain\Employee;
 use App\Models\Modules\HR\Domain\Shift;
 use App\Models\User;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Laravel\Passport\Passport;
+use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class UserManagementPayrollIntegrationTest extends TestCase
 {
     use RefreshDatabase;
+    use UserManagementApiFixture;
 
     protected function setUp(): void
     {
@@ -27,6 +29,8 @@ class UserManagementPayrollIntegrationTest extends TestCase
     public function test_user_with_role_permission_can_post_payroll_and_create_balanced_journal(): void
     {
         $this->seedPayrollAccounts();
+
+        $this->actingAsUserManagementApiAdministrator();
 
         $permission = $this->postJson('/api/v1/permissions', [
             'code' => 'payroll.create',
@@ -81,6 +85,8 @@ class UserManagementPayrollIntegrationTest extends TestCase
     public function test_payroll_posting_applies_attendance_derived_inputs_and_returns_snapshot(): void
     {
         $this->seedPayrollAccounts();
+
+        $this->actingAsUserManagementApiAdministrator();
 
         $permission = $this->postJson('/api/v1/permissions', [
             'code' => 'payroll.create',
@@ -201,6 +207,8 @@ class UserManagementPayrollIntegrationTest extends TestCase
 
     public function test_user_without_permission_cannot_create_payroll(): void
     {
+        $this->actingAsUserManagementApiAdministrator();
+
         $user = $this->postJson('/api/v1/users', [
             'name' => 'Regular User',
             'email' => 'regular@example.com',

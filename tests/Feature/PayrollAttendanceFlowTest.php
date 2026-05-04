@@ -7,15 +7,17 @@ use App\Models\Modules\HR\Domain\AttendanceAuditLog;
 use App\Models\Modules\HR\Domain\Employee;
 use App\Models\Modules\HR\Domain\Shift;
 use App\Models\User;
-use Laravel\Passport\Passport;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Laravel\Passport\Passport;
+use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class PayrollAttendanceFlowTest extends TestCase
 {
     use RefreshDatabase;
+    use UserManagementApiFixture;
 
     protected function setUp(): void
     {
@@ -209,6 +211,8 @@ class PayrollAttendanceFlowTest extends TestCase
                 'updated_at' => now(),
             ],
         ]);
+
+        $this->actingAsUserManagementApiAdministrator();
 
         $permission = $this->postJson('/api/v1/permissions', [
             'code' => 'payroll.create',

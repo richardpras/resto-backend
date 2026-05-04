@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Services;
 
 use App\Models\Modules\HR\Domain\Employee;
+use Symfony\Component\HttpFoundation\Response;
 
 class EmployeeService
 {
@@ -28,5 +29,44 @@ class EmployeeService
             'hire_date' => $payload['hireDate'] ?? null,
             'status' => $payload['status'] ?? 'active',
         ]);
+    }
+
+    public function find(int $employeeId): Employee
+    {
+        $employee = Employee::query()->find($employeeId);
+        abort_if($employee === null, Response::HTTP_NOT_FOUND, 'Employee not found.');
+
+        return $employee;
+    }
+
+    public function update(int $employeeId, array $payload): Employee
+    {
+        $employee = $this->find($employeeId);
+        $employee->fill([
+            'user_id' => $payload['userId'] ?? null,
+            'tenant_id' => $payload['tenantId'] ?? null,
+            'employee_no' => $payload['employeeNo'],
+            'full_name' => $payload['fullName'],
+            'email' => $payload['email'] ?? null,
+            'phone' => $payload['phone'] ?? null,
+            'position' => $payload['position'],
+            'base_salary' => $payload['baseSalary'],
+            'hire_date' => $payload['hireDate'] ?? null,
+            'status' => $payload['status'] ?? 'active',
+        ])->save();
+
+        return $employee->refresh();
+    }
+
+    public function delete(int $employeeId): void
+    {
+        $employee = Employee::query()->find($employeeId);
+        abort_if($employee === null, Response::HTTP_NOT_FOUND, 'Employee not found.');
+        abort_if(
+            $employee->payrolls()->exists() || $employee->attendances()->exists(),
+            Response::HTTP_CONFLICT,
+            'Employee cannot be deleted while payroll or attendance records exist.',
+        );
+        $employee->delete();
     }
 }

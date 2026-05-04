@@ -13,7 +13,9 @@ class Account extends Model
         'code',
         'name',
         'type',
+        'subtype',
         'parent_id',
+        'description',
         'is_active',
     ];
 

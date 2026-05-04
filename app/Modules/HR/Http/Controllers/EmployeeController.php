@@ -4,6 +4,7 @@ namespace App\Modules\HR\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\HR\Http\Requests\StoreEmployeeRequest;
+use App\Modules\HR\Http\Requests\UpdateEmployeeRequest;
 use App\Modules\HR\Http\Resources\EmployeeResource;
 use App\Modules\HR\Services\EmployeeService;
 use Illuminate\Http\JsonResponse;
@@ -32,5 +33,31 @@ class EmployeeController extends Controller
             'message' => 'Employee created successfully.',
             'data' => new EmployeeResource($employee),
         ], Response::HTTP_CREATED);
+    }
+
+    public function show(int $employee): JsonResponse
+    {
+        return response()->json([
+            'data' => new EmployeeResource($this->service->find($employee)),
+        ]);
+    }
+
+    public function update(UpdateEmployeeRequest $request, int $employee): JsonResponse
+    {
+        $updated = $this->service->update($employee, $request->validated());
+
+        return response()->json([
+            'message' => 'Employee updated successfully.',
+            'data' => new EmployeeResource($updated),
+        ]);
+    }
+
+    public function destroy(int $employee): JsonResponse
+    {
+        $this->service->delete($employee);
+
+        return response()->json([
+            'message' => 'Employee deleted successfully.',
+        ]);
     }
 }
