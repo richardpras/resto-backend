@@ -13,12 +13,11 @@ return new class extends Migration
     {
         Schema::create('stock_movements', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('ingredient_id')->constrained('ingredients')->cascadeOnDelete();
-            $table->enum('movement_type', ['in', 'out', 'adjustment']);
+            $table->foreignId('inventory_item_id')->constrained('ingredients')->cascadeOnDelete();
+            $table->enum('type', ['purchase', 'sale', 'adjustment', 'waste']);
             $table->decimal('quantity', 14, 2);
-            $table->string('source');
-            $table->string('reference_no')->nullable();
-            $table->string('note')->nullable();
+            $table->string('source_type');
+            $table->string('source_id')->nullable();
             $table->timestamps();
         });
     }

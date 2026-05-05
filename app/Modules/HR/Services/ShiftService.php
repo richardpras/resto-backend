@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Services;
 
 use App\Models\Modules\HR\Domain\Shift;
+use Illuminate\Database\QueryException;
 use Symfony\Component\HttpFoundation\Response;
 
 class ShiftService
@@ -28,6 +29,17 @@ class ShiftService
         $shift->fill($this->normalizePayload($payload))->save();
 
         return $shift->refresh();
+    }
+
+    public function delete(int $shiftId): void
+    {
+        $shift = Shift::query()->find($shiftId);
+        abort_if($shift === null, Response::HTTP_NOT_FOUND, 'Shift not found.');
+        try {
+            $shift->delete();
+        } catch (QueryException $exception) {
+            abort(Response::HTTP_CONFLICT, 'Shift cannot be deleted while attendance records exist.');
+        }
     }
 
     private function normalizePayload(array $payload): array

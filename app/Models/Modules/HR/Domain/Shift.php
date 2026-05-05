@@ -17,6 +17,9 @@ class Shift extends Model
         'late_tolerance_minutes',
         'overtime_after_minutes',
         'active',
+        'notes',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [

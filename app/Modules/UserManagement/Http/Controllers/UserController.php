@@ -3,6 +3,7 @@
 namespace App\Modules\UserManagement\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\UserManagement\Http\Requests\AdminSetUserScreenPinRequest;
 use App\Modules\UserManagement\Http\Requests\AssignUserRolesRequest;
 use App\Modules\UserManagement\Http\Requests\StoreUserRequest;
 use App\Modules\UserManagement\Http\Resources\UserResource;
@@ -40,6 +41,28 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'User roles updated successfully.',
+            'data' => new UserResource($updated),
+        ]);
+    }
+
+    public function adminSetScreenPin(AdminSetUserScreenPinRequest $request, int $user): JsonResponse
+    {
+        $updated = $this->service->adminSetUserScreenPin($user, $request->validated('pin'));
+        abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
+
+        return response()->json([
+            'message' => 'User screen PIN updated successfully.',
+            'data' => new UserResource($updated),
+        ]);
+    }
+
+    public function adminClearScreenPin(int $user): JsonResponse
+    {
+        $updated = $this->service->adminClearUserScreenPin($user);
+        abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
+
+        return response()->json([
+            'message' => 'User screen PIN cleared successfully.',
             'data' => new UserResource($updated),
         ]);
     }

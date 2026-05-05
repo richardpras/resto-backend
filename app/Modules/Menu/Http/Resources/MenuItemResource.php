@@ -18,8 +18,8 @@ class MenuItemResource extends JsonResource
             'available' => (bool) $this->available,
             'recipes' => $this->whenLoaded('recipes', fn () => $this->recipes->map(fn ($recipe) => [
                 'id' => $recipe->id,
-                'ingredientId' => (string) $recipe->ingredient_id,
-                'qty' => (float) $recipe->qty,
+                'inventoryItemId' => (string) $recipe->inventory_item_id,
+                'quantity' => (float) $recipe->quantity,
             ])),
             'createdAt' => $this->created_at?->toISOString(),
         ];

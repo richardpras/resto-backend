@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Http\Requests\AddOrderPaymentsRequest;
 use App\Modules\Orders\Http\Requests\ListOrdersRequest;
+use App\Modules\Orders\Http\Requests\ShiftClosePostingRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderStatusRequest;
 use App\Modules\Orders\Http\Resources\OrderResource;
@@ -91,6 +92,23 @@ class OrderController extends Controller
         return response()->json([
             'message' => 'Order payments recorded successfully.',
             'data' => new OrderResource($updated),
+        ]);
+    }
+
+    public function closeShift(ShiftClosePostingRequest $request): JsonResponse
+    {
+        $result = $this->orderService->closeShiftAndPostJournal(
+            $request->validated('tenantId'),
+            $request->validated('outletId'),
+            $request->validated('cashAccountCode'),
+            $request->validated('revenueAccountCode'),
+            $request->validated('cogsAccountCode'),
+            $request->validated('inventoryAccountCode')
+        );
+
+        return response()->json([
+            'message' => 'Shift close posting completed successfully.',
+            'data' => $result,
         ]);
     }
 }

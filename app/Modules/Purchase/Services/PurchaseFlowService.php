@@ -117,12 +117,11 @@ class PurchaseFlowService
                 $ingredient->update(['stock' => $nextStock]);
 
                 StockMovement::query()->create([
-                    'ingredient_id' => $ingredient->id,
-                    'movement_type' => 'in',
+                    'inventory_item_id' => $ingredient->id,
+                    'type' => 'purchase',
                     'quantity' => $receiveQty,
-                    'source' => 'purchase_grn',
-                    'reference_no' => $grn->number,
-                    'note' => 'Stock increased from GRN posting.',
+                    'source_type' => 'purchase_grn',
+                    'source_id' => $grn->number,
                 ]);
             }
 

@@ -15,11 +15,43 @@ class UserManagementService
 
     public function createUser(array $payload): User
     {
-        return User::query()->create([
+        $data = [
             'name' => $payload['name'],
             'email' => $payload['email'],
             'password' => $payload['password'],
-        ]);
+        ];
+        if (! empty($payload['pin'])) {
+            $data['pin_hash'] = $payload['pin'];
+        }
+
+        return User::query()->create($data);
+    }
+
+    /** @param non-empty-string $pin plaintext 4-digit PIN (hashed on save) */
+    public function adminSetUserScreenPin(int $userId, string $pin): ?User
+    {
+        $user = User::query()->find($userId);
+        if ($user === null) {
+            return null;
+        }
+
+        $user->pin_hash = $pin;
+        $user->save();
+
+        return $user->load('roles');
+    }
+
+    public function adminClearUserScreenPin(int $userId): ?User
+    {
+        $user = User::query()->find($userId);
+        if ($user === null) {
+            return null;
+        }
+
+        $user->pin_hash = null;
+        $user->save();
+
+        return $user->load('roles');
     }
 
     public function assignRoles(int $userId, array $roleIds): ?User

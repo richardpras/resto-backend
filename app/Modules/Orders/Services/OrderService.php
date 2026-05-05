@@ -5,9 +5,10 @@ namespace App\Modules\Orders\Services;
 use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
+use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
-use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
+use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
 use App\Modules\Orders\DTOs\CreateOrderData;
@@ -47,6 +48,7 @@ class OrderService
                 'subtotal' => $data->subtotal,
                 'tax' => $data->tax,
                 'total' => $data->total,
+                'discount_amount' => $data->discountAmount,
                 'paid_total' => $paidTotal,
                 'balance_due' => max(0, $data->total - $paidTotal),
                 'customer_name' => $data->customerName,
@@ -55,6 +57,7 @@ class OrderService
                 'split_bill' => $data->splitBill,
                 'created_at' => $data->createdAt,
                 'confirmed_at' => $data->confirmedAt,
+                'is_posted' => false,
             ]);
 
             foreach ($data->items as $item) {
@@ -78,7 +81,6 @@ class OrderService
 
             if ($paymentStatus === 'paid') {
                 $this->recipeStockDeductionService->deductForPaidOrder($order);
-                $this->postSalesJournal($order->id, $paidTotal);
                 $this->createPrintJob($order->id, 'receipt');
             }
 
@@ -109,7 +111,7 @@ class OrderService
         ?string $cashAccountCode = null,
         ?string $revenueAccountCode = null
     ) {
-        return DB::transaction(function () use ($id, $payments, $cashAccountCode, $revenueAccountCode) {
+        return DB::transaction(function () use ($id, $payments) {
             $order = $this->orderRepository->findById($id);
             if ($order === null) {
                 return null;
@@ -131,11 +133,108 @@ class OrderService
 
             if ($paymentStatus === 'paid') {
                 $this->recipeStockDeductionService->deductForPaidOrder($order->fresh(['items']));
-                $this->postSalesJournal($order->id, $paidTotal, $cashAccountCode, $revenueAccountCode);
                 $this->createPrintJob($order->id, 'receipt');
             }
 
             return $this->orderRepository->findWithRelations($order->id);
+        });
+    }
+
+    public function closeShiftAndPostJournal(
+        ?int $tenantId = null,
+        ?int $outletId = null,
+        ?string $cashAccountCode = null,
+        ?string $revenueAccountCode = null,
+        ?string $cogsAccountCode = null,
+        ?string $inventoryAccountCode = null
+    ): array {
+        return DB::transaction(function () use ($tenantId, $outletId, $cashAccountCode, $revenueAccountCode, $cogsAccountCode, $inventoryAccountCode): array {
+            $orders = Order::query()
+                ->where('payment_status', 'paid')
+                ->where('is_posted', false)
+                ->when($tenantId !== null && $tenantId > 0, fn ($query) => $query->where('tenant_id', $tenantId))
+                ->when($outletId !== null && $outletId > 0, fn ($query) => $query->where('outlet_id', $outletId))
+                ->lockForUpdate()
+                ->with('items:id,order_id,item_id,qty')
+                ->get(['id', 'code', 'tenant_id', 'outlet_id', 'total', 'paid_total']);
+
+            if ($orders->isEmpty()) {
+                return [
+                    'orderCount' => 0,
+                    'totalSales' => 0.0,
+                    'totalCogs' => 0.0,
+                    'journalId' => null,
+                ];
+            }
+
+            $totalSales = (float) $orders->sum(fn (Order $order): float => (float) $order->paid_total);
+            $totalCogs = $this->calculateCogsForOrders($orders);
+
+            $cashAccount = $this->resolveAccount($cashAccountCode, ['1100', '1001'], ['asset']);
+            $revenueAccount = $this->resolveAccount($revenueAccountCode, ['4100', '4001'], ['revenue']);
+            $cogsAccount = $this->resolveAccount($cogsAccountCode, ['5100'], ['expense'], 'cogs');
+            $inventoryAccount = $this->resolveAccount($inventoryAccountCode, ['1300'], ['asset']);
+
+            if ($cashAccount === null || $revenueAccount === null || $cogsAccount === null || $inventoryAccount === null) {
+                throw ValidationException::withMessages([
+                    'accounts' => ['Shift close posting requires mapped Cash, Revenue, COGS, and Inventory accounts.'],
+                ]);
+            }
+
+            $journal = Journal::query()->create([
+                'tenant_id' => $tenantId,
+                'journal_no' => 'JRN-SHIFT-'.now()->format('YmdHis'),
+                'source_type' => 'shift_close',
+                'source_id' => now()->format('YmdHis'),
+                'journal_date' => now()->toDateString(),
+                'status' => 'posted',
+                'description' => 'POS shift close posting',
+            ]);
+
+            JournalEntry::query()->create([
+                'journal_id' => $journal->id,
+                'account_id' => $cashAccount->id,
+                'debit' => $totalSales,
+                'credit' => 0,
+                'memo' => 'Cash received from paid POS orders',
+                'line_no' => 1,
+            ]);
+            JournalEntry::query()->create([
+                'journal_id' => $journal->id,
+                'account_id' => $revenueAccount->id,
+                'debit' => 0,
+                'credit' => $totalSales,
+                'memo' => 'Revenue recognized on shift close',
+                'line_no' => 2,
+            ]);
+            JournalEntry::query()->create([
+                'journal_id' => $journal->id,
+                'account_id' => $cogsAccount->id,
+                'debit' => $totalCogs,
+                'credit' => 0,
+                'memo' => 'COGS recognized on shift close',
+                'line_no' => 3,
+            ]);
+            JournalEntry::query()->create([
+                'journal_id' => $journal->id,
+                'account_id' => $inventoryAccount->id,
+                'debit' => 0,
+                'credit' => $totalCogs,
+                'memo' => 'Inventory reduction on shift close',
+                'line_no' => 4,
+            ]);
+
+            Order::query()
+                ->whereIn('id', $orders->pluck('id')->all())
+                ->where('is_posted', false)
+                ->update(['is_posted' => true]);
+
+            return [
+                'orderCount' => $orders->count(),
+                'totalSales' => round($totalSales, 2),
+                'totalCogs' => round($totalCogs, 2),
+                'journalId' => (string) $journal->id,
+            ];
         });
     }
 
@@ -257,50 +356,79 @@ class OrderService
         ]);
     }
 
-    private function postSalesJournal(
-        int $orderId,
-        float $amount,
-        ?string $cashAccountCode = null,
-        ?string $revenueAccountCode = null
-    ): void {
-        $existing = Journal::query()
-            ->where('source_type', 'order_payment')
-            ->where('source_id', $orderId)
-            ->exists();
-        if ($existing) {
-            return;
+    private function calculateCogsForOrders(Collection $orders): float
+    {
+        $menuIds = $orders->flatMap(fn (Order $order) => $order->items->pluck('item_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        if ($menuIds === []) {
+            return 0.0;
         }
 
-        $cashAccount = Account::query()->where('code', $cashAccountCode ?? '1001')->first();
-        $revenueAccount = Account::query()->where('code', $revenueAccountCode ?? '4001')->first();
-        if ($cashAccount === null || $revenueAccount === null) {
-            return;
+        $recipes = DB::table('menu_recipes')
+            ->whereIn('menu_item_id', $menuIds)
+            ->get(['menu_item_id', 'inventory_item_id', 'quantity'])
+            ->groupBy('menu_item_id');
+        $ingredientIds = $recipes->flatMap(fn ($rows) => collect($rows)->pluck('inventory_item_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $ingredientPrices = DB::table('ingredients')
+            ->whereIn('id', $ingredientIds)
+            ->pluck('price', 'id');
+
+        $totalCogs = 0.0;
+        foreach ($orders as $order) {
+            foreach ($order->items as $item) {
+                $itemRecipes = $recipes->get((string) $item->item_id) ?? $recipes->get((int) $item->item_id);
+                if ($itemRecipes === null) {
+                    continue;
+                }
+                foreach ($itemRecipes as $recipe) {
+                    $unitCost = (float) ($ingredientPrices[$recipe->inventory_item_id] ?? 0);
+                    $requiredQty = (float) $item->qty * (float) $recipe->quantity;
+                    $totalCogs += $requiredQty * $unitCost;
+                }
+            }
         }
 
-        $journal = Journal::query()->create([
-            'journal_no' => 'JRN-ORD-'.$orderId.'-'.now()->format('YmdHis'),
-            'source_type' => 'order_payment',
-            'source_id' => $orderId,
-            'journal_date' => now()->toDateString(),
-            'status' => 'posted',
-            'description' => 'POS order payment posting',
-        ]);
+        return $totalCogs;
+    }
 
-        JournalEntry::query()->create([
-            'journal_id' => $journal->id,
-            'account_id' => $cashAccount->id,
-            'debit' => $amount,
-            'credit' => 0,
-            'memo' => 'Cash/bank received from POS payment',
-            'line_no' => 1,
-        ]);
-        JournalEntry::query()->create([
-            'journal_id' => $journal->id,
-            'account_id' => $revenueAccount->id,
-            'debit' => 0,
-            'credit' => $amount,
-            'memo' => 'Revenue recognized from POS payment',
-            'line_no' => 2,
-        ]);
+    private function resolveAccount(
+        ?string $requestedCode,
+        array $fallbackCodes,
+        array $allowedTypes,
+        ?string $subtype = null
+    ): ?Account {
+        if (is_string($requestedCode) && $requestedCode !== '') {
+            $query = Account::query()->where('code', $requestedCode)->whereIn('type', $allowedTypes);
+            if ($subtype !== null) {
+                $query->where('subtype', $subtype);
+            }
+
+            return $query->first();
+        }
+
+        foreach ($fallbackCodes as $code) {
+            $query = Account::query()->where('code', $code)->whereIn('type', $allowedTypes);
+            if ($subtype !== null) {
+                $query->where('subtype', $subtype);
+            }
+            $account = $query->first();
+            if ($account !== null) {
+                return $account;
+            }
+        }
+
+        $query = Account::query()->whereIn('type', $allowedTypes);
+        if ($subtype !== null) {
+            $query->where('subtype', $subtype);
+        }
+
+        return $query->orderBy('id')->first();
     }
 }

@@ -29,6 +29,11 @@ class UserManagementAuthorizationTest extends TestCase
         $this->getJson('/api/v1/permissions')->assertUnauthorized();
     }
 
+    public function test_unauthenticated_non_json_request_redirects_to_login(): void
+    {
+        $this->get('/api/v1/users')->assertRedirect('/login');
+    }
+
     public function test_authenticated_user_without_required_permission_cannot_list_users(): void
     {
         $user = User::factory()->create();

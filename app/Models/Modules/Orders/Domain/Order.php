@@ -18,6 +18,7 @@ class Order extends Model
         'subtotal',
         'tax',
         'total',
+        'discount_amount',
         'paid_total',
         'balance_due',
         'customer_name',
@@ -26,12 +27,14 @@ class Order extends Model
         'split_bill',
         'confirmed_at',
         'stock_deducted_at',
+        'is_posted',
     ];
 
     protected $casts = [
         'split_bill' => 'array',
         'confirmed_at' => 'datetime',
         'stock_deducted_at' => 'datetime',
+        'is_posted' => 'boolean',
     ];
 
     public function items(): HasMany

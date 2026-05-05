@@ -18,14 +18,22 @@ class Employee extends Model
         'email',
         'phone',
         'position',
+        'outlet',
+        'salary_type',
         'base_salary',
+        'overtime_rate',
         'hire_date',
+        'termination_date',
         'status',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [
         'hire_date' => 'date',
+        'termination_date' => 'date',
         'base_salary' => 'decimal:2',
+        'overtime_rate' => 'decimal:2',
     ];
 
     public function user(): BelongsTo

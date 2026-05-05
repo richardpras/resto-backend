@@ -23,6 +23,20 @@
       "showTaxBreakdown": true,
       "invoicePrefix": "INV-MAIN",
       "orderPrefix": "ORD-MAIN"
+    },
+    {
+      "id": "o-branch",
+      "name": "Branch - Downtown",
+      "address": "Jl. Thamrin No. 45",
+      "phone": "+62 812 0000 1111",
+      "manager": "Mike Tan",
+      "status": "active",
+      "receiptHeader": "Welcome to RestoHub Downtown",
+      "receiptFooter": "Thank you!",
+      "showLogo": true,
+      "showTaxBreakdown": true,
+      "invoicePrefix": "INV-DT",
+      "orderPrefix": "ORD-DT"
     }
   ],
   "taxes": [
@@ -39,17 +53,41 @@
   ],
   "printers": [
     {
-      "id": "printer-default",
-      "name": "Kitchen Printer",
+      "id": "printer-kitchen-1",
+      "name": "Kitchen Printer 1",
       "printerType": "kitchen",
       "connection": "lan",
       "ip": "192.168.1.50",
       "outletId": "o-main",
       "assignedCategories": ["Main Course"]
+    },
+    {
+      "id": "printer-cashier-1",
+      "name": "Cashier Printer",
+      "printerType": "cashier",
+      "connection": "lan",
+      "ip": "192.168.1.51",
+      "outletId": "o-main"
     }
   ],
   "paymentMethods": [
-    { "id": "pm-cash", "name": "Cash", "type": "cash", "status": "active" }
+    { "id": "pm-cash", "name": "Cash", "type": "cash", "status": "active" },
+    {
+      "id": "pm-qris",
+      "name": "QRIS",
+      "type": "digital",
+      "integration": "Midtrans",
+      "fee": 0.7,
+      "status": "active"
+    },
+    {
+      "id": "pm-gopay",
+      "name": "GoPay",
+      "type": "digital",
+      "integration": "Gojek",
+      "fee": 1.5,
+      "status": "active"
+    }
   ],
   "system": {
     "enableSplitBill": true,
@@ -75,5 +113,195 @@
       "accountNumber": "1234567890",
       "isDefault": true
     }
-  ]
+  ],
+  "templateOfflineSeed": {
+    "source": "template/src/stores — mirrored for API-backed demo catalog",
+    "suppliers": [
+      {
+        "id": "s-1",
+        "name": "PT Sumber Pangan",
+        "contact": "08123456789",
+        "email": "info@sumberpangan.id",
+        "address": "Jl. Merdeka 12, Jakarta",
+        "notes": null,
+        "status": "active"
+      },
+      {
+        "id": "s-2",
+        "name": "CV Maju Bersama",
+        "contact": "08198765432",
+        "email": "order@majubersama.id",
+        "address": "Jl. Sudirman 88, Bandung",
+        "notes": null,
+        "status": "active"
+      },
+      {
+        "id": "s-3",
+        "name": "UD Tani Makmur",
+        "contact": "08111222333",
+        "email": "sales@tanimakmur.id",
+        "address": "Jl. Diponegoro 5, Surabaya",
+        "notes": null,
+        "status": "active"
+      },
+      {
+        "id": "s-4",
+        "name": "Fresh Daily Co",
+        "contact": "08144556677",
+        "email": "hello@freshdaily.id",
+        "address": "Jl. Gatot Subroto 21, Jakarta",
+        "notes": null,
+        "status": "inactive"
+      }
+    ],
+    "purchaseSuppliersMinimal": [
+      { "id": "sup-1", "name": "PT Sumber Pangan", "contact": "08123456789", "email": "info@sumberpangan.id" },
+      { "id": "sup-2", "name": "CV Maju Bersama", "contact": "08198765432", "email": "order@majubersama.id" },
+      { "id": "sup-3", "name": "UD Tani Makmur", "contact": "08111222333", "email": "sales@tanimakmur.id" }
+    ],
+    "members": [
+      {
+        "id": "m-1",
+        "name": "Budi Santoso",
+        "phone": "081234560001",
+        "email": "budi@email.com",
+        "points": 1250,
+        "status": "active",
+        "birthday": "1990-05-12"
+      },
+      {
+        "id": "m-2",
+        "name": "Siti Aminah",
+        "phone": "081234560002",
+        "email": "siti@email.com",
+        "points": 480,
+        "status": "active"
+      },
+      {
+        "id": "m-3",
+        "name": "Andi Wijaya",
+        "phone": "081234560003",
+        "points": 2300,
+        "status": "active",
+        "birthday": "1985-11-03"
+      },
+      {
+        "id": "m-4",
+        "name": "Dewi Lestari",
+        "phone": "081234560004",
+        "email": "dewi@email.com",
+        "points": 0,
+        "status": "inactive"
+      },
+      {
+        "id": "m-5",
+        "name": "Rizky Pratama",
+        "phone": "081234560005",
+        "points": 850,
+        "status": "active"
+      }
+    ],
+    "payrollEmployees": [
+      {
+        "id": "e1",
+        "name": "Andi Wijaya",
+        "position": "Cashier",
+        "outlet": "Main",
+        "joinDate": "2024-06-01",
+        "salaryType": "monthly",
+        "baseSalary": 5000000,
+        "overtimeRate": 30000,
+        "status": "active"
+      },
+      {
+        "id": "e2",
+        "name": "Siti Rahma",
+        "position": "Chef",
+        "outlet": "Main",
+        "joinDate": "2023-01-15",
+        "salaryType": "monthly",
+        "baseSalary": 8000000,
+        "overtimeRate": 50000,
+        "status": "active"
+      },
+      {
+        "id": "e3",
+        "name": "Budi Santoso",
+        "position": "Waiter",
+        "outlet": "Main",
+        "joinDate": "2025-02-10",
+        "salaryType": "daily",
+        "baseSalary": 150000,
+        "overtimeRate": 25000,
+        "status": "active"
+      }
+    ],
+    "orderTables": [
+      { "id": "table-1", "name": "Table 1", "seats": 2, "status": "available" },
+      { "id": "table-2", "name": "Table 2", "seats": 2, "status": "available" },
+      { "id": "table-3", "name": "Table 3", "seats": 2, "status": "available" },
+      { "id": "table-4", "name": "Table 4", "seats": 2, "status": "available" },
+      { "id": "table-5", "name": "Table 5", "seats": 4, "status": "available" },
+      { "id": "table-6", "name": "Table 6", "seats": 4, "status": "available" },
+      { "id": "table-7", "name": "Table 7", "seats": 4, "status": "available" },
+      { "id": "table-8", "name": "Table 8", "seats": 4, "status": "available" },
+      { "id": "table-9", "name": "Table 9", "seats": 6, "status": "available" },
+      { "id": "table-10", "name": "Table 10", "seats": 6, "status": "available" },
+      { "id": "table-11", "name": "Table 11", "seats": 6, "status": "available" },
+      { "id": "table-12", "name": "Table 12", "seats": 6, "status": "available" }
+    ],
+    "userDirectoryDemo": [
+      {
+        "id": "u-1",
+        "name": "John Doe",
+        "email": "john@restohub.com",
+        "roleId": "r-owner",
+        "outletIds": ["o-main", "o-branch"],
+        "status": "active"
+      },
+      {
+        "id": "u-2",
+        "name": "Sarah Lee",
+        "email": "sarah@restohub.com",
+        "roleId": "r-manager",
+        "outletIds": ["o-main"],
+        "status": "active"
+      },
+      {
+        "id": "u-3",
+        "name": "Mike Tan",
+        "email": "mike@restohub.com",
+        "roleId": "r-cashier",
+        "outletIds": ["o-main"],
+        "status": "active"
+      }
+    ],
+    "rolesDirectoryDemo": [
+      {
+        "id": "r-owner",
+        "name": "Owner",
+        "description": "Full access to all modules",
+        "isSystem": true
+      },
+      {
+        "id": "r-manager",
+        "name": "Manager",
+        "description": "Manage outlet operations",
+        "isSystem": true
+      },
+      {
+        "id": "r-cashier",
+        "name": "Cashier",
+        "description": "POS operations only",
+        "isSystem": true
+      },
+      {
+        "id": "r-kitchen",
+        "name": "Kitchen",
+        "description": "Kitchen display access",
+        "isSystem": true
+      }
+    ],
+    "promotions": []
+  }
 }

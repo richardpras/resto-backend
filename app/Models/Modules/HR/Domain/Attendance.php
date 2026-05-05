@@ -19,6 +19,8 @@ class Attendance extends Model
         'status',
         'sync_key',
         'notes',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [

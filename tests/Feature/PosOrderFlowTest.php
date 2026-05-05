@@ -94,7 +94,7 @@ class PosOrderFlowTest extends TestCase
         $response->assertJsonPath('data.0.source', 'pos');
     }
 
-    public function test_paying_order_creates_balanced_sales_journal_and_deducts_stock(): void
+    public function test_paying_order_deducts_stock_without_posting_journal(): void
     {
         $ingredient = Ingredient::query()->create([
             'tenant_id' => 1,
@@ -106,15 +106,15 @@ class PosOrderFlowTest extends TestCase
             'min' => 5,
         ]);
 
-        $cashId = DB::table('accounts')->insertGetId([
-            'code' => '1001',
+        DB::table('accounts')->insertGetId([
+            'code' => '1100',
             'name' => 'Cash',
             'type' => 'asset',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
-        $revenueId = DB::table('accounts')->insertGetId([
-            'code' => '4001',
+        DB::table('accounts')->insertGetId([
+            'code' => '4100',
             'name' => 'Sales Revenue',
             'type' => 'revenue',
             'created_at' => now(),
@@ -132,8 +132,8 @@ class PosOrderFlowTest extends TestCase
 
         DB::table('menu_recipes')->insert([
             'menu_item_id' => $menuId,
-            'ingredient_id' => $ingredient->id,
-            'qty' => 2,
+            'inventory_item_id' => $ingredient->id,
+            'quantity' => 2,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -162,8 +162,6 @@ class PosOrderFlowTest extends TestCase
             'payments' => [
                 ['method' => 'cash', 'amount' => 30000],
             ],
-            'cashAccountCode' => '1001',
-            'revenueAccountCode' => '4001',
         ]);
 
         $partialPay->assertOk();
@@ -183,8 +181,6 @@ class PosOrderFlowTest extends TestCase
             'payments' => [
                 ['method' => 'qris', 'amount' => 25000],
             ],
-            'cashAccountCode' => '1001',
-            'revenueAccountCode' => '4001',
         ]);
 
         $finalPay->assertOk();
@@ -203,26 +199,102 @@ class PosOrderFlowTest extends TestCase
             'stock' => 46.00,
         ]);
 
-        $this->assertDatabaseHas('journals', [
+        $this->assertDatabaseMissing('journals', [
             'source_type' => 'order_payment',
             'source_id' => (int) $orderId,
         ]);
+        $this->assertDatabaseHas('orders', [
+            'id' => (int) $orderId,
+            'is_posted' => false,
+        ]);
+    }
 
-        $journalId = DB::table('journals')->where('source_type', 'order_payment')->where('source_id', (int) $orderId)->value('id');
+    public function test_shift_close_posts_sales_and_cogs_journal_then_marks_orders_posted(): void
+    {
+        $ingredient = Ingredient::query()->create([
+            'tenant_id' => 1,
+            'outlet_id' => 1,
+            'name' => 'Chicken',
+            'type' => 'ingredient',
+            'unit' => 'gram',
+            'stock' => 100,
+            'min' => 5,
+            'price' => 2000,
+        ]);
+
+        DB::table('accounts')->insert([
+            ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset', 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '1300', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset', 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '4100', 'name' => 'Sales Revenue', 'type' => 'revenue', 'subtype' => 'revenue', 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '5100', 'name' => 'COGS', 'type' => 'expense', 'subtype' => 'cogs', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $menuId = DB::table('menu_items')->insertGetId([
+            'tenant_id' => 1,
+            'outlet_id' => 1,
+            'name' => 'Fried Chicken',
+            'price' => 30000,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('menu_recipes')->insert([
+            'menu_item_id' => $menuId,
+            'inventory_item_id' => $ingredient->id,
+            'quantity' => 2,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $create = $this->postJson('/api/v1/orders', [
+            'tenantId' => 1,
+            'outletId' => 1,
+            'code' => 'POS-SHIFT-1',
+            'source' => 'pos',
+            'orderType' => 'Dine-in',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
+            'items' => [
+                ['id' => (string) $menuId, 'name' => 'Fried Chicken', 'qty' => 2, 'price' => 30000],
+            ],
+            'subtotal' => 60000,
+            'tax' => 0,
+            'total' => 60000,
+            'payments' => [],
+        ]);
+        $create->assertCreated();
+        $orderId = (int) $create->json('data.id');
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 60000]],
+        ])->assertOk();
+
+        $close = $this->postJson('/api/v1/orders/shift-close', [
+            'tenantId' => 1,
+            'outletId' => 1,
+        ]);
+        $close->assertOk();
+        $close->assertJsonPath('data.orderCount', 1);
+        $this->assertEquals(60000.0, (float) $close->json('data.totalSales'));
+        $this->assertEquals(8000.0, (float) $close->json('data.totalCogs'));
+
+        $journalId = DB::table('journals')->where('source_type', 'shift_close')->value('id');
+        $this->assertNotNull($journalId);
+
         $totalDebit = (float) DB::table('journal_entries')->where('journal_id', $journalId)->sum('debit');
         $totalCredit = (float) DB::table('journal_entries')->where('journal_id', $journalId)->sum('credit');
         $this->assertSame($totalDebit, $totalCredit);
 
-        $this->assertDatabaseHas('journal_entries', [
-            'journal_id' => $journalId,
-            'account_id' => $cashId,
-            'debit' => 55000.00,
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'is_posted' => true,
         ]);
-        $this->assertDatabaseHas('journal_entries', [
-            'journal_id' => $journalId,
-            'account_id' => $revenueId,
-            'credit' => 55000.00,
+
+        $closeAgain = $this->postJson('/api/v1/orders/shift-close', [
+            'tenantId' => 1,
+            'outletId' => 1,
         ]);
+        $closeAgain->assertOk();
+        $closeAgain->assertJsonPath('data.orderCount', 0);
     }
 
     public function test_payment_allocations_are_accepted_and_returned(): void

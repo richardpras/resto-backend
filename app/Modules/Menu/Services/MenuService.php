@@ -75,7 +75,11 @@ class MenuService
 
     private function syncRecipes(int $menuItemId, array $recipes): void
     {
-        $ingredientIds = collect($recipes)->pluck('ingredientId')->map(static fn ($id) => (int) $id)->unique()->values();
+        $ingredientIds = collect($recipes)
+            ->map(static fn (array $recipe): int => (int) ($recipe['inventoryItemId'] ?? 0))
+            ->filter(static fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values();
         $validIngredientCount = Ingredient::query()
             ->whereIn('id', $ingredientIds)
             ->where('type', 'ingredient')
@@ -91,8 +95,8 @@ class MenuService
         foreach ($recipes as $recipe) {
             MenuRecipe::query()->create([
                 'menu_item_id' => $menuItemId,
-                'ingredient_id' => (int) $recipe['ingredientId'],
-                'qty' => (float) $recipe['qty'],
+                'inventory_item_id' => (int) $recipe['inventoryItemId'],
+                'quantity' => (float) $recipe['quantity'],
             ]);
         }
     }

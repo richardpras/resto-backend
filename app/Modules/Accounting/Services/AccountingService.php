@@ -5,8 +5,10 @@ namespace App\Modules\Accounting\Services;
 use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
@@ -175,6 +177,212 @@ class AccountingService
     }
 
     /**
+     * @return array{
+     *   account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}|null,
+     *   rows: list<array{id:string, date:string, reference:string, description:string, debit:float, credit:float, balance:float}>,
+     *   opening: float,
+     *   closing: float
+     * }
+     */
+    public function buildLedgerReport(string $accountId, ?string $from, ?string $to, ?string $outlet = null, ?int $tenantId = null): array
+    {
+        $account = Account::query()->find($accountId);
+        if (! $account instanceof Account) {
+            return ['account' => null, 'rows' => [], 'opening' => 0.0, 'closing' => 0.0];
+        }
+
+        $allPosted = $this->listPostedJournalsForReports($tenantId, $outlet, null, null);
+        $opening = 0.0;
+        if ($from !== null && $from !== '') {
+            $openingRows = $allPosted->filter(function (Journal $j) use ($from): bool {
+                return $j->journal_date instanceof \DateTimeInterface
+                    ? $j->journal_date->format('Y-m-d') < $from
+                    : (string) $j->journal_date < $from;
+            });
+            $opening = $this->accountBalance($account->id, $openingRows, $account->type);
+        }
+
+        $periodPosted = $this->listPostedJournalsForReports($tenantId, $outlet, $from, $to);
+        $rows = [];
+        $running = $opening;
+
+        foreach ($periodPosted as $journal) {
+            foreach ($journal->entries as $entry) {
+                if ((string) $entry->account_id !== (string) $account->id) {
+                    continue;
+                }
+
+                $debit = (float) $entry->debit;
+                $credit = (float) $entry->credit;
+                $delta = in_array($account->type, ['asset', 'expense'], true)
+                    ? ($debit - $credit)
+                    : ($credit - $debit);
+                $running += $delta;
+
+                $rows[] = [
+                    'id' => (string) $entry->id,
+                    'date' => $journal->journal_date instanceof \DateTimeInterface
+                        ? $journal->journal_date->format('Y-m-d')
+                        : (string) $journal->journal_date,
+                    'reference' => $journal->journal_no ?? '',
+                    'description' => $journal->description ?? '',
+                    'debit' => $debit,
+                    'credit' => $credit,
+                    'balance' => $running,
+                ];
+            }
+        }
+
+        return [
+            'account' => $this->mapAccountForReport($account),
+            'rows' => $rows,
+            'opening' => $opening,
+            'closing' => $running,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   revenue: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   cogs: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   expenses: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   totalRevenue: float,
+     *   totalCOGS: float,
+     *   grossProfit: float,
+     *   totalExpenses: float,
+     *   netProfit: float
+     * }
+     */
+    public function buildProfitLossReport(?string $from, ?string $to, ?string $outlet = null, ?int $tenantId = null): array
+    {
+        $accounts = $this->listAccounts($tenantId);
+        $posted = $this->listPostedJournalsForReports($tenantId, $outlet, $from, $to);
+
+        $revenue = [];
+        $cogs = [];
+        $expenses = [];
+        foreach ($accounts as $account) {
+            $amount = $this->accountBalance($account->id, $posted, $account->type);
+            $row = ['account' => $this->mapAccountForReport($account), 'amount' => $amount];
+            if ($account->type === 'revenue') {
+                $revenue[] = $row;
+                continue;
+            }
+            if ($account->subtype === 'cogs') {
+                $cogs[] = $row;
+                continue;
+            }
+            if ($account->type === 'expense' && $account->subtype !== 'cogs') {
+                $expenses[] = $row;
+            }
+        }
+
+        $totalRevenue = array_reduce($revenue, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0);
+        $totalCOGS = array_reduce($cogs, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0);
+        $grossProfit = $totalRevenue - $totalCOGS;
+        $totalExpenses = array_reduce($expenses, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0);
+        $netProfit = $grossProfit - $totalExpenses;
+
+        return [
+            'revenue' => $revenue,
+            'cogs' => $cogs,
+            'expenses' => $expenses,
+            'totalRevenue' => $totalRevenue,
+            'totalCOGS' => $totalCOGS,
+            'grossProfit' => $grossProfit,
+            'totalExpenses' => $totalExpenses,
+            'netProfit' => $netProfit,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   currentAssets: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   fixedAssets: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   shortLiab: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   longLiab: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   equity: list<array{account: array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}, amount: float}>,
+     *   totalAssets: float,
+     *   totalLiabilities: float,
+     *   totalEquity: float,
+     *   netProfit: float,
+     *   balanced: bool
+     * }
+     */
+    public function buildBalanceSheetReport(?string $to, ?string $outlet = null, ?int $tenantId = null): array
+    {
+        $accounts = $this->listAccounts($tenantId);
+        $posted = $this->listPostedJournalsForReports($tenantId, $outlet, null, $to);
+
+        $group = function (string $subtype) use ($accounts, $posted): array {
+            $rows = [];
+            foreach ($accounts as $account) {
+                if ($account->subtype !== $subtype) {
+                    continue;
+                }
+                $rows[] = [
+                    'account' => $this->mapAccountForReport($account),
+                    'amount' => $this->accountBalance($account->id, $posted, $account->type),
+                ];
+            }
+
+            return $rows;
+        };
+
+        $currentAssets = $group('current_asset');
+        $fixedAssets = $group('fixed_asset');
+        $shortLiab = $group('short_term_liability');
+        $longLiab = $group('long_term_liability');
+        $equity = $group('equity');
+
+        $pl = $this->buildProfitLossReport(null, $to, $outlet, $tenantId);
+
+        $totalAssets = array_reduce($currentAssets, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0)
+            + array_reduce($fixedAssets, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0);
+        $totalLiabilities = array_reduce($shortLiab, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0)
+            + array_reduce($longLiab, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0);
+        $totalEquity = array_reduce($equity, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0)
+            + (float) $pl['netProfit'];
+
+        $diff = abs($totalAssets - ($totalLiabilities + $totalEquity));
+        $balanced = $diff <= 0.01;
+        if (! $balanced) {
+            Log::warning('Accounting balance sheet out of balance.', [
+                'totalAssets' => $totalAssets,
+                'totalLiabilities' => $totalLiabilities,
+                'totalEquity' => $totalEquity,
+                'difference' => $diff,
+                'tolerance' => 0.01,
+                'outlet' => $outlet,
+                'to' => $to,
+                'tenantId' => $tenantId,
+            ]);
+            if ((bool) config('app.debug')) {
+                Log::debug('Balance sheet debug details', [
+                    'currentAssets' => $currentAssets,
+                    'fixedAssets' => $fixedAssets,
+                    'shortLiab' => $shortLiab,
+                    'longLiab' => $longLiab,
+                    'equity' => $equity,
+                ]);
+            }
+        }
+
+        return [
+            'currentAssets' => $currentAssets,
+            'fixedAssets' => $fixedAssets,
+            'shortLiab' => $shortLiab,
+            'longLiab' => $longLiab,
+            'equity' => $equity,
+            'totalAssets' => $totalAssets,
+            'totalLiabilities' => $totalLiabilities,
+            'totalEquity' => $totalEquity,
+            'netProfit' => (float) $pl['netProfit'],
+            'balanced' => $balanced,
+        ];
+    }
+
+    /**
      * @param  list<array{account_id: int|string, debit: float|int|string, credit: float|int|string, memo?: string|null}>  $lines
      */
     private function assertBalancedLines(array $lines): void
@@ -238,5 +446,73 @@ class AccountingService
             'expense' => 'expense',
             default => 'expense',
         };
+    }
+
+    /**
+     * @return array{id:string, code:string, name:string, type:string, subtype:string, parentId:?string, description:?string, active:bool}
+     */
+    private function mapAccountForReport(Account $account): array
+    {
+        return [
+            'id' => (string) $account->id,
+            'code' => $account->code,
+            'name' => $account->name,
+            'type' => $account->type,
+            'subtype' => $account->subtype ?? $this->defaultSubtypeForType($account->type),
+            'parentId' => $account->parent_id !== null ? (string) $account->parent_id : null,
+            'description' => $account->description,
+            'active' => (bool) $account->is_active,
+        ];
+    }
+
+    /**
+     * @return Collection<int, Journal>
+     */
+    private function listPostedJournalsForReports(
+        ?int $tenantId,
+        ?string $outlet,
+        ?string $from,
+        ?string $to
+    ): Collection {
+        $query = Journal::query()
+            ->with(['entries' => fn ($q) => $q->orderBy('line_no')])
+            ->where('status', 'posted')
+            ->orderBy('journal_date')
+            ->orderBy('id');
+
+        if ($tenantId !== null && $tenantId > 0) {
+            $query->where('tenant_id', $tenantId);
+        }
+        if ($outlet !== null && $outlet !== '' && $outlet !== 'all') {
+            $query->where('outlet', $outlet);
+        }
+        if ($from !== null && $from !== '') {
+            $query->whereDate('journal_date', '>=', Carbon::parse($from)->toDateString());
+        }
+        if ($to !== null && $to !== '') {
+            $query->whereDate('journal_date', '<=', Carbon::parse($to)->toDateString());
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * @param  Collection<int, Journal>  $journals
+     */
+    private function accountBalance(int|string $accountId, Collection $journals, string $accountType): float
+    {
+        $debit = 0.0;
+        $credit = 0.0;
+        foreach ($journals as $journal) {
+            foreach ($journal->entries as $entry) {
+                if ((string) $entry->account_id !== (string) $accountId) {
+                    continue;
+                }
+                $debit += (float) $entry->debit;
+                $credit += (float) $entry->credit;
+            }
+        }
+
+        return in_array($accountType, ['asset', 'expense'], true) ? ($debit - $credit) : ($credit - $debit);
     }
 }

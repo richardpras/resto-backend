@@ -11,13 +11,12 @@ class StockMovementResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'ingredient_id' => $this->ingredient_id,
-            'ingredient_name' => $this->ingredient?->name,
-            'movement_type' => $this->movement_type,
+            'inventory_item_id' => $this->inventory_item_id,
+            'inventory_item_name' => $this->ingredient?->name,
+            'type' => $this->type,
             'quantity' => (float) $this->quantity,
-            'source' => $this->source,
-            'reference_no' => $this->reference_no,
-            'note' => $this->note,
+            'source_type' => $this->source_type,
+            'source_id' => $this->source_id,
             'created_at' => $this->created_at?->toISOString(),
         ];
     }

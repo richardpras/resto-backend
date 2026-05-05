@@ -14,12 +14,11 @@ class StoreStockMovementRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'ingredient_id' => ['required', 'integer', 'min:1'],
-            'movement_type' => ['required', 'in:in,out,adjustment'],
+            'inventory_item_id' => ['required', 'integer', 'min:1'],
+            'type' => ['required', 'in:purchase,sale,adjustment,waste'],
             'quantity' => ['required', 'numeric', 'gt:0'],
-            'source' => ['required', 'string', 'max:100'],
-            'reference_no' => ['nullable', 'string', 'max:100'],
-            'note' => ['nullable', 'string', 'max:255'],
+            'source_type' => ['required', 'string', 'max:100'],
+            'source_id' => ['nullable', 'string', 'max:100'],
         ];
     }
 }

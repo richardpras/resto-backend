@@ -22,54 +22,36 @@ class SettingsApiTest extends TestCase
         Artisan::call('passport:keys', ['--force' => true]);
     }
 
-    public function test_unauthenticated_get_settings_returns_401(): void
+    public function test_unauthenticated_get_merchant_settings_returns_401(): void
     {
-        $this->getJson('/api/v1/settings')->assertUnauthorized();
+        $this->getJson('/api/v1/merchant-settings')->assertUnauthorized();
     }
 
-    public function test_authenticated_user_without_settings_permission_cannot_read_settings(): void
+    public function test_authenticated_user_without_settings_permission_cannot_read_merchant_settings(): void
     {
         $user = User::factory()->create();
         Passport::actingAs($user);
 
-        $this->getJson('/api/v1/settings')->assertForbidden();
+        $this->getJson('/api/v1/merchant-settings')->assertForbidden();
     }
 
-    public function test_administrator_can_get_settings_with_expected_shape(): void
+    public function test_administrator_can_get_and_patch_merchant_settings(): void
     {
         $this->actingAsUserManagementApiAdministrator();
 
-        $this->getJson('/api/v1/settings')
+        $before = $this->getJson('/api/v1/merchant-settings')->assertOk()->json('data');
+
+        $this->assertArrayHasKey('name', $before);
+        $this->assertArrayHasKey('currency', $before);
+
+        $payload = array_merge($before, ['name' => 'Updated Merchant Co']);
+
+        $this->patchJson('/api/v1/merchant-settings', $payload)
             ->assertOk()
-            ->assertJsonStructure([
-                'data' => [
-                    'merchant' => ['name', 'email', 'currency'],
-                    'outlets',
-                    'taxes',
-                    'printers',
-                    'paymentMethods',
-                    'system',
-                    'integration',
-                    'numbering',
-                    'banks',
-                ],
-            ]);
-    }
+            ->assertJsonPath('data.name', 'Updated Merchant Co');
 
-    public function test_administrator_can_put_settings_and_read_back(): void
-    {
-        $this->actingAsUserManagementApiAdministrator();
-
-        $before = $this->getJson('/api/v1/settings')->assertOk()->json('data');
-        $payload = $before;
-        $payload['merchant']['name'] = 'Updated Merchant Co';
-
-        $this->putJson('/api/v1/settings', $payload)
+        $this->getJson('/api/v1/merchant-settings')
             ->assertOk()
-            ->assertJsonPath('data.merchant.name', 'Updated Merchant Co');
-
-        $this->getJson('/api/v1/settings')
-            ->assertOk()
-            ->assertJsonPath('data.merchant.name', 'Updated Merchant Co');
+            ->assertJsonPath('data.name', 'Updated Merchant Co');
     }
 }

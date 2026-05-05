@@ -66,13 +66,14 @@ class InventoryService
     public function addStockMovement(CreateStockMovementData $data)
     {
         return DB::transaction(function () use ($data) {
-            $ingredient = $this->ingredientRepository->findById($data->ingredientId);
+            $ingredient = $this->ingredientRepository->findById($data->inventoryItemId);
             abort_if($ingredient === null, Response::HTTP_NOT_FOUND, 'Ingredient not found');
 
-            $sign = match ($data->movementType) {
-                'in' => 1,
-                'out' => -1,
+            $sign = match ($data->type) {
+                'purchase' => 1,
                 'adjustment' => 1,
+                'sale' => -1,
+                'waste' => -1,
             };
 
             $nextStock = $sign === -1
@@ -84,12 +85,11 @@ class InventoryService
             $this->ingredientRepository->updateStock($ingredient, $nextStock);
 
             return $this->stockMovementRepository->create([
-                'ingredient_id' => $data->ingredientId,
-                'movement_type' => $data->movementType,
+                'inventory_item_id' => $data->inventoryItemId,
+                'type' => $data->type,
                 'quantity' => $data->quantity,
-                'source' => $data->source,
-                'reference_no' => $data->referenceNo,
-                'note' => $data->note,
+                'source_type' => $data->sourceType,
+                'source_id' => $data->sourceId,
             ]);
         });
     }

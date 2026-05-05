@@ -36,8 +36,8 @@ class RecipeStockDeductionService
             }
 
             foreach ($recipes[$item->item_id] as $recipe) {
-                $requiredByIngredient[$recipe->ingredient_id] = ($requiredByIngredient[$recipe->ingredient_id] ?? 0)
-                    + ((float) $item->qty * (float) $recipe->qty);
+                $requiredByIngredient[$recipe->inventory_item_id] = ($requiredByIngredient[$recipe->inventory_item_id] ?? 0)
+                    + ((float) $item->qty * (float) $recipe->quantity);
             }
         }
 
@@ -55,12 +55,11 @@ class RecipeStockDeductionService
             $ingredient->update(['stock' => $nextStock]);
 
             StockMovement::query()->create([
-                'ingredient_id' => $ingredient->id,
-                'movement_type' => 'out',
+                'inventory_item_id' => $ingredient->id,
+                'type' => 'sale',
                 'quantity' => $requiredQty,
-                'source' => 'order_payment',
-                'reference_no' => $order->code,
-                'note' => 'Deducted from paid order recipe usage.',
+                'source_type' => 'order_payment',
+                'source_id' => $order->code,
             ]);
         }
 

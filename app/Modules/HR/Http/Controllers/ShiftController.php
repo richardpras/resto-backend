@@ -44,4 +44,13 @@ class ShiftController extends Controller
             'data' => new ShiftResource($updatedShift),
         ]);
     }
+
+    public function destroy(int $shift): JsonResponse
+    {
+        $this->service->delete($shift);
+
+        return response()->json([
+            'message' => 'Shift deleted successfully.',
+        ]);
+    }
 }

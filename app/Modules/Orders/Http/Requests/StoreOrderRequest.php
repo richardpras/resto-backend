@@ -31,6 +31,7 @@ class StoreOrderRequest extends FormRequest
             'subtotal' => ['required', 'numeric', 'min:0'],
             'tax' => ['required', 'numeric', 'min:0'],
             'total' => ['required', 'numeric', 'min:0'],
+            'discountAmount' => ['nullable', 'numeric', 'min:0'],
             'customerName' => ['nullable', 'string', 'max:255'],
             'customerPhone' => ['nullable', 'string', 'max:50'],
             'tableNumber' => ['nullable', 'string', 'max:50'],

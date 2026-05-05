@@ -17,6 +17,7 @@ class StoreUserRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:6'],
+            'pin' => ['nullable', 'string', 'size:4', 'regex:/^[0-9]{4}$/'],
         ];
     }
 }

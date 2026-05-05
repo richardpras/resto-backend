@@ -21,12 +21,12 @@ class UpdateMenuItemRequest extends FormRequest
             'price' => ['sometimes', 'numeric', 'min:0'],
             'available' => ['sometimes', 'boolean'],
             'recipes' => ['sometimes', 'array'],
-            'recipes.*.ingredientId' => [
+            'recipes.*.inventoryItemId' => [
                 'required_with:recipes',
                 'integer',
                 Rule::exists('ingredients', 'id')->where(static fn ($query) => $query->where('type', 'ingredient')),
             ],
-            'recipes.*.qty' => ['required_with:recipes', 'numeric', 'gt:0'],
+            'recipes.*.quantity' => ['required_with:recipes', 'numeric', 'gt:0'],
         ];
     }
 }

@@ -8,16 +8,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class StockMovement extends Model
 {
     protected $fillable = [
-        'ingredient_id',
-        'movement_type',
+        'inventory_item_id',
+        'type',
         'quantity',
-        'source',
-        'reference_no',
-        'note',
+        'source_type',
+        'source_id',
     ];
 
     public function ingredient(): BelongsTo
     {
-        return $this->belongsTo(Ingredient::class);
+        return $this->belongsTo(Ingredient::class, 'inventory_item_id');
     }
 }

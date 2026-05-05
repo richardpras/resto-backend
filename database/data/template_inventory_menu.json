@@ -1,0 +1,104 @@
+{
+  "ingredients": [
+    { "legacy_id": "ing-1", "name": "Rice", "type": "ingredient", "stock": 45, "min": 20, "unit": "kg", "price": 12000 },
+    { "legacy_id": "ing-2", "name": "Chicken", "type": "ingredient", "stock": 8, "min": 10, "unit": "kg", "price": 35000 },
+    { "legacy_id": "ing-3", "name": "Cooking Oil", "type": "ingredient", "stock": 12, "min": 5, "unit": "L", "price": 18000 },
+    { "legacy_id": "ing-4", "name": "Eggs", "type": "ingredient", "stock": 30, "min": 50, "unit": "pcs", "price": 2500 },
+    { "legacy_id": "ing-5", "name": "Noodles", "type": "ingredient", "stock": 100, "min": 30, "unit": "pack", "price": 3500 },
+    { "legacy_id": "ing-6", "name": "Sugar", "type": "ingredient", "stock": 3, "min": 5, "unit": "kg", "price": 15000 },
+    { "legacy_id": "ing-7", "name": "Tea bags", "type": "ingredient", "stock": 15, "min": 5, "unit": "box", "price": 8000 },
+    { "legacy_id": "ing-8", "name": "Coffee beans", "type": "ingredient", "stock": 6, "min": 3, "unit": "kg", "price": 85000 },
+    { "legacy_id": "ing-9", "name": "Soy Sauce", "type": "ingredient", "stock": 10, "min": 3, "unit": "L", "price": 12000 },
+    { "legacy_id": "ing-10", "name": "Chili", "type": "ingredient", "stock": 5, "min": 2, "unit": "kg", "price": 25000 },
+    { "legacy_id": "ing-11", "name": "Garlic", "type": "ingredient", "stock": 4, "min": 2, "unit": "kg", "price": 30000 },
+    { "legacy_id": "ing-12", "name": "Onion", "type": "ingredient", "stock": 6, "min": 3, "unit": "kg", "price": 18000 },
+    { "legacy_id": "ing-13", "name": "Peanuts", "type": "ingredient", "stock": 8, "min": 3, "unit": "kg", "price": 28000 },
+    { "legacy_id": "ing-14", "name": "Coconut Milk", "type": "ingredient", "stock": 10, "min": 4, "unit": "L", "price": 15000 },
+    { "legacy_id": "ing-15", "name": "Flour", "type": "ingredient", "stock": 15, "min": 5, "unit": "kg", "price": 10000 },
+    { "legacy_id": "ing-16", "name": "Banana", "type": "ingredient", "stock": 20, "min": 10, "unit": "pcs", "price": 3000 },
+    { "legacy_id": "ing-17", "name": "Avocado", "type": "ingredient", "stock": 12, "min": 5, "unit": "pcs", "price": 8000 },
+    { "legacy_id": "ing-18", "name": "Orange", "type": "ingredient", "stock": 15, "min": 5, "unit": "pcs", "price": 5000 },
+    { "legacy_id": "ing-19", "name": "Shrimp Crackers", "type": "ingredient", "stock": 25, "min": 10, "unit": "pack", "price": 5000 },
+    { "legacy_id": "ing-20", "name": "Tofu", "type": "ingredient", "stock": 10, "min": 5, "unit": "pcs", "price": 4000 },
+    { "legacy_id": "atk-1", "name": "Thermal Paper", "type": "atk", "stock": 20, "min": 5, "unit": "pcs", "price": 15000 },
+    { "legacy_id": "atk-2", "name": "Tissue Box", "type": "atk", "stock": 12, "min": 5, "unit": "box", "price": 25000 },
+    { "legacy_id": "asset-1", "name": "Dining Chair", "type": "asset", "stock": 24, "min": 0, "unit": "pcs", "price": null, "notes": "Wooden chairs for dining area" },
+    { "legacy_id": "asset-2", "name": "Blender", "type": "asset", "stock": 2, "min": 0, "unit": "pcs", "price": null, "notes": "Philips HR2157" }
+  ],
+  "menu_items": [
+    { "legacy_num_id": 1, "name": "Nasi Goreng Special", "price": 30000, "category": "Main Course", "emoji": "🍛" },
+    { "legacy_num_id": 2, "name": "Ayam Bakar", "price": 40000, "category": "Main Course", "emoji": "🍗" },
+    { "legacy_num_id": 3, "name": "Mie Goreng", "price": 25000, "category": "Main Course", "emoji": "🍝" },
+    { "legacy_num_id": 4, "name": "Sate Ayam 10pcs", "price": 35000, "category": "Main Course", "emoji": "🥘" },
+    { "legacy_num_id": 5, "name": "Gado-Gado", "price": 22000, "category": "Appetizers", "emoji": "🥗" },
+    { "legacy_num_id": 6, "name": "Lumpia Goreng", "price": 15000, "category": "Appetizers", "emoji": "🌯" },
+    { "legacy_num_id": 7, "name": "Tahu Goreng", "price": 12000, "category": "Appetizers", "emoji": "🧈" },
+    { "legacy_num_id": 8, "name": "Es Teh Manis", "price": 10000, "category": "Drinks", "emoji": "🧊" },
+    { "legacy_num_id": 9, "name": "Jus Alpukat", "price": 18000, "category": "Drinks", "emoji": "🥑" },
+    { "legacy_num_id": 10, "name": "Kopi Susu", "price": 20000, "category": "Drinks", "emoji": "☕" },
+    { "legacy_num_id": 11, "name": "Es Jeruk", "price": 12000, "category": "Drinks", "emoji": "🍊" },
+    { "legacy_num_id": 12, "name": "Pisang Goreng", "price": 15000, "category": "Desserts", "emoji": "🍌" },
+    { "legacy_num_id": 13, "name": "Es Campur", "price": 18000, "category": "Desserts", "emoji": "🍧" },
+    { "legacy_num_id": 14, "name": "Kerupuk Udang", "price": 8000, "category": "Sides", "emoji": "🦐" },
+    { "legacy_num_id": 15, "name": "Sambal Extra", "price": 5000, "category": "Sides", "emoji": "🌶️" },
+    { "legacy_num_id": 16, "name": "Nasi Putih", "price": 7000, "category": "Sides", "emoji": "🍚" }
+  ],
+  "recipes": [
+    {
+      "menu_legacy_num_id": 1,
+      "lines": [
+        { "ingredient_legacy_id": "ing-1", "qty": 0.3 },
+        { "ingredient_legacy_id": "ing-4", "qty": 2 },
+        { "ingredient_legacy_id": "ing-3", "qty": 0.05 },
+        { "ingredient_legacy_id": "ing-9", "qty": 0.02 },
+        { "ingredient_legacy_id": "ing-11", "qty": 0.02 }
+      ]
+    },
+    {
+      "menu_legacy_num_id": 2,
+      "lines": [
+        { "ingredient_legacy_id": "ing-2", "qty": 0.25 },
+        { "ingredient_legacy_id": "ing-9", "qty": 0.03 },
+        { "ingredient_legacy_id": "ing-11", "qty": 0.02 }
+      ]
+    },
+    {
+      "menu_legacy_num_id": 3,
+      "lines": [
+        { "ingredient_legacy_id": "ing-5", "qty": 1 },
+        { "ingredient_legacy_id": "ing-4", "qty": 1 },
+        { "ingredient_legacy_id": "ing-3", "qty": 0.05 }
+      ]
+    },
+    {
+      "menu_legacy_num_id": 4,
+      "lines": [
+        { "ingredient_legacy_id": "ing-2", "qty": 0.3 },
+        { "ingredient_legacy_id": "ing-13", "qty": 0.05 },
+        { "ingredient_legacy_id": "ing-9", "qty": 0.03 }
+      ]
+    },
+    {
+      "menu_legacy_num_id": 8,
+      "lines": [
+        { "ingredient_legacy_id": "ing-7", "qty": 0.1 },
+        { "ingredient_legacy_id": "ing-6", "qty": 0.03 }
+      ]
+    },
+    {
+      "menu_legacy_num_id": 10,
+      "lines": [
+        { "ingredient_legacy_id": "ing-8", "qty": 0.02 },
+        { "ingredient_legacy_id": "ing-6", "qty": 0.02 }
+      ]
+    },
+    {
+      "menu_legacy_num_id": 12,
+      "lines": [
+        { "ingredient_legacy_id": "ing-16", "qty": 2 },
+        { "ingredient_legacy_id": "ing-15", "qty": 0.1 },
+        { "ingredient_legacy_id": "ing-3", "qty": 0.05 }
+      ]
+    }
+  ]
+}

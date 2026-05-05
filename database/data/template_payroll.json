@@ -1,0 +1,141 @@
+{
+  "employees": [
+    {
+      "id": "e1",
+      "name": "Andi Wijaya",
+      "position": "Cashier",
+      "outlet": "Main",
+      "joinDate": "2024-06-01",
+      "salaryType": "monthly",
+      "baseSalary": 5000000,
+      "overtimeRate": 30000,
+      "status": "active"
+    },
+    {
+      "id": "e2",
+      "name": "Siti Rahma",
+      "position": "Chef",
+      "outlet": "Main",
+      "joinDate": "2023-01-15",
+      "salaryType": "monthly",
+      "baseSalary": 8000000,
+      "overtimeRate": 50000,
+      "status": "active"
+    },
+    {
+      "id": "e3",
+      "name": "Budi Santoso",
+      "position": "Waiter",
+      "outlet": "Main",
+      "joinDate": "2025-02-10",
+      "salaryType": "daily",
+      "baseSalary": 150000,
+      "overtimeRate": 25000,
+      "status": "active"
+    }
+  ],
+  "attendance": [
+    {
+      "id": "a1",
+      "employeeId": "e1",
+      "date": "2026-04-01",
+      "checkIn": "08:02",
+      "checkOut": "17:10",
+      "status": "present",
+      "notes": "On time"
+    },
+    {
+      "id": "a2",
+      "employeeId": "e2",
+      "date": "2026-04-01",
+      "checkIn": "08:14",
+      "checkOut": "17:05",
+      "status": "late",
+      "notes": "Traffic delay"
+    },
+    {
+      "id": "a3",
+      "employeeId": "e3",
+      "date": "2026-04-01",
+      "status": "absent",
+      "notes": "Sick leave"
+    }
+  ],
+  "overtimes": [
+    {
+      "id": "o1",
+      "employeeId": "e1",
+      "date": "2026-04-01",
+      "hours": 1.5,
+      "status": "approved",
+      "notes": "Closing support"
+    },
+    {
+      "id": "o2",
+      "employeeId": "e2",
+      "date": "2026-04-01",
+      "hours": 2,
+      "status": "pending",
+      "notes": "Kitchen cleanup"
+    }
+  ],
+  "adjustments": [
+    {
+      "id": "ad1",
+      "employeeId": "e1",
+      "type": "allowance",
+      "category": "bonus",
+      "amount": 200000,
+      "date": "2026-04-01",
+      "notes": "Service bonus"
+    },
+    {
+      "id": "ad2",
+      "employeeId": "e2",
+      "type": "deduction",
+      "category": "lateness",
+      "amount": 100000,
+      "date": "2026-04-01",
+      "notes": "Late arrival deduction"
+    }
+  ],
+  "shifts": [
+    {
+      "id": "s1",
+      "employeeId": "e1",
+      "date": "2026-04-01",
+      "startTime": "08:00",
+      "endTime": "17:00",
+      "notes": "Morning regular"
+    },
+    {
+      "id": "s2",
+      "employeeId": "e2",
+      "date": "2026-04-01",
+      "startTime": "08:00",
+      "endTime": "17:00",
+      "notes": "Morning regular"
+    },
+    {
+      "id": "s3",
+      "employeeId": "e3",
+      "date": "2026-04-01",
+      "startTime": "09:00",
+      "endTime": "18:00",
+      "notes": "Late shift"
+    }
+  ],
+  "loans": [
+    {
+      "id": "l1",
+      "employeeId": "e2",
+      "amount": 1200000,
+      "installments": 6,
+      "paidInstallments": 2,
+      "startDate": "2026-02-01",
+      "notes": "Personal emergency",
+      "status": "active"
+    }
+  ],
+  "runs": []
+}

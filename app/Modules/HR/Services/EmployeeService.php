@@ -21,13 +21,19 @@ class EmployeeService
             'user_id' => $payload['userId'] ?? null,
             'tenant_id' => $payload['tenantId'] ?? null,
             'employee_no' => $payload['employeeNo'],
-            'full_name' => $payload['fullName'],
+            'full_name' => $payload['name'] ?? $payload['fullName'],
             'email' => $payload['email'] ?? null,
             'phone' => $payload['phone'] ?? null,
             'position' => $payload['position'],
+            'outlet' => $payload['outlet'] ?? null,
+            'salary_type' => $payload['salaryType'] ?? 'monthly',
             'base_salary' => $payload['baseSalary'],
-            'hire_date' => $payload['hireDate'] ?? null,
+            'overtime_rate' => $payload['overtimeRate'] ?? 0,
+            'hire_date' => $payload['joinDate'] ?? $payload['hireDate'] ?? null,
+            'termination_date' => $payload['terminationDate'] ?? null,
             'status' => $payload['status'] ?? 'active',
+            'created_by' => request()->user()?->id,
+            'updated_by' => request()->user()?->id,
         ]);
     }
 
@@ -46,13 +52,18 @@ class EmployeeService
             'user_id' => $payload['userId'] ?? null,
             'tenant_id' => $payload['tenantId'] ?? null,
             'employee_no' => $payload['employeeNo'],
-            'full_name' => $payload['fullName'],
+            'full_name' => $payload['name'] ?? $payload['fullName'],
             'email' => $payload['email'] ?? null,
             'phone' => $payload['phone'] ?? null,
             'position' => $payload['position'],
+            'outlet' => $payload['outlet'] ?? null,
+            'salary_type' => $payload['salaryType'] ?? 'monthly',
             'base_salary' => $payload['baseSalary'],
-            'hire_date' => $payload['hireDate'] ?? null,
+            'overtime_rate' => $payload['overtimeRate'] ?? 0,
+            'hire_date' => $payload['joinDate'] ?? $payload['hireDate'] ?? null,
+            'termination_date' => $payload['terminationDate'] ?? null,
             'status' => $payload['status'] ?? 'active',
+            'updated_by' => request()->user()?->id,
         ])->save();
 
         return $employee->refresh();

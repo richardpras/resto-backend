@@ -13,6 +13,7 @@ class UserResource extends JsonResource
             'id' => (int) $this->id,
             'name' => $this->name,
             'email' => $this->email,
+            'pinSet' => filled($this->pin_hash),
             'roles' => $this->whenLoaded('roles', fn () => $this->roles->map(fn ($role) => [
                 'id' => (int) $role->id,
                 'name' => $role->name,
