@@ -2,67 +2,73 @@
 
 namespace App\Modules\Inventory\Services;
 
-use App\Models\Modules\Inventory\Domain\Ingredient;
-use App\Models\Modules\Inventory\Domain\StockMovement;
 use App\Models\Modules\Orders\Domain\Order;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class RecipeStockDeductionService
 {
+    public function __construct(
+        private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
+    ) {}
+
     public function deductForPaidOrder(Order $order): void
     {
-        if ($order->stock_deducted_at !== null) {
-            return;
-        }
+        DB::transaction(function () use ($order): void {
+            /** @var Order|null $locked */
+            $locked = Order::query()->whereKey($order->id)->lockForUpdate()->first();
+            abort_if($locked === null, Response::HTTP_NOT_FOUND, 'Order not found.');
 
-        $order->loadMissing('items');
-        $requiredByIngredient = [];
-        $menuIds = $order->items->pluck('item_id')->filter()->values()->all();
-        if ($menuIds === []) {
-            $order->update(['stock_deducted_at' => now()]);
-
-            return;
-        }
-
-        $recipes = DB::table('menu_recipes')
-            ->whereIn('menu_item_id', $menuIds)
-            ->get()
-            ->groupBy('menu_item_id');
-
-        foreach ($order->items as $item) {
-            if ($item->item_id === null || ! isset($recipes[$item->item_id])) {
-                continue;
+            if ($locked->stock_deducted_at !== null) {
+                return;
             }
 
-            foreach ($recipes[$item->item_id] as $recipe) {
-                $requiredByIngredient[$recipe->inventory_item_id] = ($requiredByIngredient[$recipe->inventory_item_id] ?? 0)
-                    + ((float) $item->qty * (float) $recipe->quantity);
+            $locked->loadMissing('items');
+            $requiredByIngredient = [];
+            $menuIds = $locked->items->pluck('item_id')->filter()->values()->all();
+            if ($menuIds === []) {
+                $locked->update(['stock_deducted_at' => now()]);
+
+                return;
             }
-        }
 
-        foreach ($requiredByIngredient as $ingredientId => $requiredQty) {
-            $ingredient = Ingredient::query()->lockForUpdate()->find($ingredientId);
-            abort_if($ingredient === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Recipe ingredient not found.');
-
-            $nextStock = (float) $ingredient->stock - $requiredQty;
+            $outletId = $locked->outlet_id;
             abort_if(
-                $nextStock < 0,
+                $outletId === null || (int) $outletId < 1,
                 Response::HTTP_UNPROCESSABLE_ENTITY,
-                "Insufficient stock for ingredient {$ingredient->name}."
+                'Order outlet_id is required for stock deduction.'
             );
 
-            $ingredient->update(['stock' => $nextStock]);
+            $recipes = DB::table('menu_recipes')
+                ->whereIn('menu_item_id', $menuIds)
+                ->get()
+                ->groupBy('menu_item_id');
 
-            StockMovement::query()->create([
-                'inventory_item_id' => $ingredient->id,
-                'type' => 'sale',
-                'quantity' => $requiredQty,
-                'source_type' => 'order_payment',
-                'source_id' => $order->code,
-            ]);
-        }
+            foreach ($locked->items as $item) {
+                if ($item->item_id === null || ! isset($recipes[$item->item_id])) {
+                    continue;
+                }
 
-        $order->update(['stock_deducted_at' => now()]);
+                foreach ($recipes[$item->item_id] as $recipe) {
+                    $requiredByIngredient[$recipe->inventory_item_id] = ($requiredByIngredient[$recipe->inventory_item_id] ?? 0)
+                        + ((float) $item->qty * (float) $recipe->quantity);
+                }
+            }
+
+            $numericOutlet = (int) $outletId;
+
+            foreach ($requiredByIngredient as $ingredientId => $requiredQty) {
+                $this->ingredientOutletStockLedger->apply(
+                    $numericOutlet,
+                    (int) $ingredientId,
+                    'sale',
+                    $requiredQty,
+                    'order_payment',
+                    $locked->code
+                );
+            }
+
+            $locked->update(['stock_deducted_at' => now()]);
+        });
     }
 }

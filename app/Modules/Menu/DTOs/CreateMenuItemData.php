@@ -13,6 +13,7 @@ readonly class CreateMenuItemData
         public float $price,
         public bool $available,
         public array $recipes = [],
+        public array $menuItemOutlets = [],
     ) {}
 
     public static function fromArray(array $payload): self
@@ -26,6 +27,7 @@ readonly class CreateMenuItemData
             price: (float) $payload['price'],
             available: (bool) ($payload['available'] ?? true),
             recipes: $payload['recipes'] ?? [],
+            menuItemOutlets: $payload['menuItemOutlets'] ?? [],
         );
     }
 }

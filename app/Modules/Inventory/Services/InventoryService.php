@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Models\Modules\Inventory\Domain\InventoryStock;
 use App\Modules\Inventory\DTOs\CreateIngredientData;
 use App\Modules\Inventory\DTOs\CreateStockMovementData;
 use App\Modules\Inventory\Repositories\IngredientRepositoryInterface;
@@ -14,6 +15,7 @@ class InventoryService
     public function __construct(
         private readonly IngredientRepositoryInterface $ingredientRepository,
         private readonly StockMovementRepositoryInterface $stockMovementRepository,
+        private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
     ) {}
 
     public function listIngredients(int $tenantId, int $perPage = 20)
@@ -23,17 +25,40 @@ class InventoryService
 
     public function createIngredient(CreateIngredientData $data)
     {
-        return $this->ingredientRepository->create([
-            'tenant_id' => $data->tenantId,
-            'outlet_id' => $data->outletId,
-            'name' => $data->name,
-            'type' => $data->type,
-            'unit' => $data->unit,
-            'stock' => $data->stock,
-            'min' => $data->min,
-            'price' => $data->price,
-            'notes' => $data->notes,
-        ]);
+        return DB::transaction(function () use ($data) {
+            $ingredient = $this->ingredientRepository->create([
+                'tenant_id' => $data->tenantId,
+                'outlet_id' => $data->outletId,
+                'name' => $data->name,
+                'type' => $data->type,
+                'unit' => $data->unit,
+                'stock' => $data->stock,
+                'min' => $data->min,
+                'price' => $data->price,
+                'notes' => $data->notes,
+            ]);
+
+            $outletId = $data->outletId;
+            if ($outletId !== null && $outletId >= 1) {
+                if ($data->stock > 0) {
+                    $this->ingredientOutletStockLedger->apply(
+                        (int) $outletId,
+                        (int) $ingredient->id,
+                        'purchase',
+                        (float) $data->stock,
+                        'ingredient_create',
+                        (string) $ingredient->id
+                    );
+                } else {
+                    InventoryStock::query()->firstOrCreate(
+                        ['ingredient_id' => $ingredient->id, 'outlet_id' => $outletId],
+                        ['stock' => 0]
+                    );
+                }
+            }
+
+            return $ingredient;
+        });
     }
 
     public function updateIngredient(int $id, array $attributes)
@@ -58,39 +83,23 @@ class InventoryService
         return $this->ingredientRepository->delete($ingredient);
     }
 
-    public function listStockMovements(int $tenantId, int $perPage = 20)
+    public function listStockMovements(int $tenantId, int $perPage = 20, ?int $outletId = null)
     {
-        return $this->stockMovementRepository->paginateByTenant($tenantId, $perPage);
+        return $this->stockMovementRepository->paginateByTenant($tenantId, $perPage, $outletId);
     }
 
     public function addStockMovement(CreateStockMovementData $data)
     {
-        return DB::transaction(function () use ($data) {
-            $ingredient = $this->ingredientRepository->findById($data->inventoryItemId);
-            abort_if($ingredient === null, Response::HTTP_NOT_FOUND, 'Ingredient not found');
+        $ingredient = $this->ingredientRepository->findById($data->inventoryItemId);
+        abort_if($ingredient === null, Response::HTTP_NOT_FOUND, 'Ingredient not found');
 
-            $sign = match ($data->type) {
-                'purchase' => 1,
-                'adjustment' => 1,
-                'sale' => -1,
-                'waste' => -1,
-            };
-
-            $nextStock = $sign === -1
-                ? (float) $ingredient->stock - $data->quantity
-                : (float) $ingredient->stock + $data->quantity;
-
-            abort_if($nextStock < 0, Response::HTTP_UNPROCESSABLE_ENTITY, 'Stock cannot go below zero');
-
-            $this->ingredientRepository->updateStock($ingredient, $nextStock);
-
-            return $this->stockMovementRepository->create([
-                'inventory_item_id' => $data->inventoryItemId,
-                'type' => $data->type,
-                'quantity' => $data->quantity,
-                'source_type' => $data->sourceType,
-                'source_id' => $data->sourceId,
-            ]);
-        });
+        return $this->ingredientOutletStockLedger->apply(
+            $data->outletId,
+            $data->inventoryItemId,
+            $data->type,
+            $data->quantity,
+            $data->sourceType,
+            $data->sourceId,
+        );
     }
 }

@@ -17,9 +17,19 @@ class OrderInventoryIntegrationTest extends TestCase
             'tenant_id' => 1,
             'outlet_id' => 1,
             'name' => 'Chicken',
+            'type' => 'ingredient',
             'unit' => 'gram',
-            'current_stock' => 100,
-            'minimum_stock' => 10,
+            'stock' => 100,
+            'min' => 10,
+            'price' => 0,
+        ]);
+
+        DB::table('inventory_stocks')->insert([
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'stock' => 100,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
 
         $menuId = DB::table('menu_items')->insertGetId([
@@ -33,41 +43,51 @@ class OrderInventoryIntegrationTest extends TestCase
 
         DB::table('menu_recipes')->insert([
             'menu_item_id' => $menuId,
-            'ingredient_id' => $ingredient->id,
+            'inventory_item_id' => $ingredient->id,
             'quantity' => 2,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
         $response = $this->postJson('/api/v1/orders', [
-            'tenant_id' => 1,
-            'outlet_id' => 1,
-            'order_type' => 'dine_in',
+            'tenantId' => 1,
+            'outletId' => 1,
+            'code' => 'ORD-MULTIPAY-1',
+            'source' => 'pos',
+            'orderType' => 'Dine-in',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
             'items' => [
-                [
-                    'menu_id' => $menuId,
-                    'menu_name' => 'Fried Chicken',
-                    'qty' => 3,
-                    'price' => 10,
-                ],
+                ['id' => (string) $menuId, 'name' => 'Fried Chicken', 'qty' => 3, 'price' => 10],
             ],
-            'payments' => [
-                ['method' => 'cash', 'amount' => 15, 'split_bill_label' => 'Guest A'],
-                ['method' => 'qris', 'amount' => 15, 'split_bill_label' => 'Guest B'],
-            ],
+            'subtotal' => 30,
+            'tax' => 0,
+            'total' => 30,
+            'payments' => [],
         ]);
 
         $response->assertCreated();
-        $response->assertJsonPath('data.status', 'paid');
-        $this->assertDatabaseHas('ingredients', [
-            'id' => $ingredient->id,
-            'current_stock' => 94.00,
+        $orderId = (int) $response->json('data.id');
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [
+                ['method' => 'cash', 'amount' => 15],
+                ['method' => 'qris', 'amount' => 15],
+            ],
+        ])->assertOk()->assertJsonPath('data.paymentStatus', 'paid');
+
+        $required = 3 * 2.0;
+        $this->assertDatabaseHas('inventory_stocks', [
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'stock' => 100 - $required,
         ]);
         $this->assertDatabaseHas('stock_movements', [
-            'ingredient_id' => $ingredient->id,
-            'movement_type' => 'out',
-            'quantity' => 6.00,
-            'source' => 'order_payment',
+            'inventory_item_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'type' => 'sale',
+            'quantity' => $required,
+            'source_type' => 'order_payment',
         ]);
     }
 
@@ -77,9 +97,18 @@ class OrderInventoryIntegrationTest extends TestCase
             'tenant_id' => 1,
             'outlet_id' => 1,
             'name' => 'Rice',
+            'type' => 'ingredient',
             'unit' => 'gram',
-            'current_stock' => 100,
-            'minimum_stock' => 10,
+            'stock' => 100,
+            'min' => 10,
+        ]);
+
+        DB::table('inventory_stocks')->insert([
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'stock' => 100,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
 
         $menuId = DB::table('menu_items')->insertGetId([
@@ -93,38 +122,46 @@ class OrderInventoryIntegrationTest extends TestCase
 
         DB::table('menu_recipes')->insert([
             'menu_item_id' => $menuId,
-            'ingredient_id' => $ingredient->id,
+            'inventory_item_id' => $ingredient->id,
             'quantity' => 1,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
         $response = $this->postJson('/api/v1/orders', [
-            'tenant_id' => 1,
-            'outlet_id' => 1,
-            'order_type' => 'dine_in',
+            'tenantId' => 1,
+            'outletId' => 1,
+            'code' => 'ORD-PARTIAL-1',
+            'source' => 'pos',
+            'orderType' => 'Dine-in',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
             'items' => [
-                [
-                    'menu_id' => $menuId,
-                    'menu_name' => 'Rice Bowl',
-                    'qty' => 2,
-                    'price' => 20,
-                ],
+                ['id' => (string) $menuId, 'name' => 'Rice Bowl', 'qty' => 2, 'price' => 20],
             ],
-            'payments' => [
-                ['method' => 'cash', 'amount' => 10, 'split_bill_label' => 'Deposit'],
-            ],
+            'subtotal' => 40,
+            'tax' => 0,
+            'total' => 40,
+            'payments' => [],
         ]);
 
         $response->assertCreated();
-        $response->assertJsonPath('data.status', 'open');
-        $this->assertDatabaseHas('ingredients', [
-            'id' => $ingredient->id,
-            'current_stock' => 100.00,
+        $orderId = (int) $response->json('data.id');
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [
+                ['method' => 'cash', 'amount' => 10],
+            ],
+        ])->assertOk()->assertJsonPath('data.paymentStatus', 'partial');
+
+        $this->assertDatabaseHas('inventory_stocks', [
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'stock' => 100.00,
         ]);
         $this->assertDatabaseMissing('stock_movements', [
-            'ingredient_id' => $ingredient->id,
-            'source' => 'order_payment',
+            'inventory_item_id' => $ingredient->id,
+            'source_type' => 'order_payment',
         ]);
     }
 }

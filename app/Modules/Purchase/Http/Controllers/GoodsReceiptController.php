@@ -3,12 +3,11 @@
 namespace App\Modules\Purchase\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\Modules\Inventory\Domain\Ingredient;
-use App\Models\Modules\Inventory\Domain\StockMovement;
 use App\Models\Modules\Purchase\Domain\GoodsReceivingNote;
 use App\Models\Modules\Purchase\Domain\GoodsReceivingNoteItem;
 use App\Models\Modules\Purchase\Domain\PurchaseOrder;
 use App\Models\Modules\Purchase\Domain\PurchaseOrderItem;
+use App\Modules\Inventory\Services\IngredientOutletStockLedger;
 use App\Modules\Purchase\Http\Requests\StoreGoodsReceiptRequest;
 use App\Modules\Purchase\Http\Resources\GoodsReceiptResource;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +16,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class GoodsReceiptController extends Controller
 {
+    public function __construct(
+        private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
+    ) {}
+
     public function index(): JsonResponse
     {
         $rows = GoodsReceivingNote::query()
@@ -38,13 +41,22 @@ class GoodsReceiptController extends Controller
             $purchaseOrder = PurchaseOrder::query()->with('items')->lockForUpdate()->find((int) $data['purchaseOrderId']);
             abort_if($purchaseOrder === null, Response::HTTP_NOT_FOUND, 'Purchase order not found.');
             abort_if(! in_array($purchaseOrder->status, ['sent', 'partial'], true), Response::HTTP_UNPROCESSABLE_ENTITY, 'Only sent/partial PO can be received.');
+            abort_if(
+                $purchaseOrder->outlet_id === null || (int) $purchaseOrder->outlet_id < 1,
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'Purchase order outlet_id is required to receive stock.'
+            );
 
             $gr = GoodsReceivingNote::query()->create([
+                'tenant_id' => $purchaseOrder->tenant_id,
+                'outlet_id' => $purchaseOrder->outlet_id,
                 'purchase_order_id' => $purchaseOrder->id,
                 'number' => $this->nextNumber(),
                 'received_date' => $data['date'],
                 'notes' => $data['notes'] ?? null,
             ]);
+
+            $numericOutlet = (int) $purchaseOrder->outlet_id;
 
             foreach ($data['items'] as $line) {
                 $ingredientId = (int) $line['inventoryItemId'];
@@ -68,19 +80,14 @@ class GoodsReceiptController extends Controller
                     'received_qty' => (float) $poItem->received_qty + $receivedQty,
                 ]);
 
-                $ingredient = Ingredient::query()->lockForUpdate()->find($ingredientId);
-                abort_if($ingredient === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Ingredient not found.');
-                $ingredient->update([
-                    'stock' => (float) $ingredient->stock + $receivedQty,
-                ]);
-
-                StockMovement::query()->create([
-                    'inventory_item_id' => $ingredientId,
-                    'type' => 'purchase',
-                    'quantity' => $receivedQty,
-                    'source_type' => 'GR',
-                    'source_id' => $gr->number,
-                ]);
+                $this->ingredientOutletStockLedger->apply(
+                    $numericOutlet,
+                    $ingredientId,
+                    'purchase',
+                    $receivedQty,
+                    'GR',
+                    $gr->number,
+                );
             }
 
             $purchaseOrder->refresh()->load('items');

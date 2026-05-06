@@ -21,7 +21,13 @@ class StockMovementController extends Controller
         $tenantId = (int) request()->query('tenant_id', 0);
         abort_if($tenantId < 1, Response::HTTP_UNPROCESSABLE_ENTITY, 'tenant_id is required');
 
-        $movements = $this->inventoryService->listStockMovements($tenantId, (int) request()->query('per_page', 20));
+        $outletFilter = (int) request()->query('outlet_id', 0);
+
+        $movements = $this->inventoryService->listStockMovements(
+            $tenantId,
+            (int) request()->query('per_page', 20),
+            $outletFilter > 0 ? $outletFilter : null,
+        );
 
         return response()->json([
             'data' => StockMovementResource::collection($movements->getCollection()),

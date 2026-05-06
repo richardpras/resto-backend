@@ -2,8 +2,6 @@
 
 namespace App\Modules\Purchase\Services;
 
-use App\Models\Modules\Inventory\Domain\Ingredient;
-use App\Models\Modules\Inventory\Domain\StockMovement;
 use App\Models\Modules\Purchase\Domain\GoodsReceivingNote;
 use App\Models\Modules\Purchase\Domain\GoodsReceivingNoteItem;
 use App\Models\Modules\Purchase\Domain\PurchaseInvoice;
@@ -11,11 +9,16 @@ use App\Models\Modules\Purchase\Domain\PurchaseOrder;
 use App\Models\Modules\Purchase\Domain\PurchaseOrderItem;
 use App\Models\Modules\Purchase\Domain\PurchaseRequest;
 use App\Models\Modules\Purchase\Domain\PurchaseRequestItem;
+use App\Modules\Inventory\Services\IngredientOutletStockLedger;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class PurchaseFlowService
 {
+    public function __construct(
+        private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
+    ) {}
+
     public function createPurchaseRequest(array $header, array $items): PurchaseRequest
     {
         return DB::transaction(function () use ($header, $items) {
@@ -80,6 +83,12 @@ class PurchaseFlowService
             abort_if($po === null, Response::HTTP_NOT_FOUND, 'Purchase order not found.');
             abort_if(! in_array($po->status, ['open', 'partially_received'], true), Response::HTTP_UNPROCESSABLE_ENTITY, 'PO cannot be received in its current status.');
 
+            abort_if(
+                $po->outlet_id === null || (int) $po->outlet_id < 1,
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'Purchase order outlet_id is required to receive stock.'
+            );
+
             $grn = GoodsReceivingNote::query()->create([
                 'tenant_id' => $po->tenant_id,
                 'outlet_id' => $po->outlet_id,
@@ -88,6 +97,8 @@ class PurchaseFlowService
                 'received_date' => $header['received_date'],
                 'notes' => $header['notes'] ?? null,
             ]);
+
+            $numericOutlet = (int) $po->outlet_id;
 
             foreach ($items as $line) {
                 /** @var PurchaseOrderItem|null $poItem */
@@ -110,19 +121,14 @@ class PurchaseFlowService
                     'received_qty' => (float) $poItem->received_qty + $receiveQty,
                 ]);
 
-                $ingredient = Ingredient::query()->lockForUpdate()->find($poItem->ingredient_id);
-                abort_if($ingredient === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Ingredient not found for GRN line.');
-
-                $nextStock = (float) $ingredient->stock + $receiveQty;
-                $ingredient->update(['stock' => $nextStock]);
-
-                StockMovement::query()->create([
-                    'inventory_item_id' => $ingredient->id,
-                    'type' => 'purchase',
-                    'quantity' => $receiveQty,
-                    'source_type' => 'purchase_grn',
-                    'source_id' => $grn->number,
-                ]);
+                $this->ingredientOutletStockLedger->apply(
+                    $numericOutlet,
+                    (int) $poItem->ingredient_id,
+                    'purchase',
+                    $receiveQty,
+                    'purchase_grn',
+                    $grn->number,
+                );
             }
 
             $po->refresh()->load('items');

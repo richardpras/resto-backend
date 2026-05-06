@@ -5,23 +5,22 @@ namespace App\Models\Modules\Inventory\Domain;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class StockMovement extends Model
+class InventoryStock extends Model
 {
+    protected $table = 'inventory_stocks';
+
     protected $fillable = [
-        'inventory_item_id',
+        'ingredient_id',
         'outlet_id',
-        'type',
-        'quantity',
-        'source_type',
-        'source_id',
+        'stock',
     ];
 
     protected $casts = [
-        'outlet_id' => 'integer',
+        'stock' => 'float',
     ];
 
     public function ingredient(): BelongsTo
     {
-        return $this->belongsTo(Ingredient::class, 'inventory_item_id');
+        return $this->belongsTo(Ingredient::class, 'ingredient_id');
     }
 }

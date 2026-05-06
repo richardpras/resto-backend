@@ -7,12 +7,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Outlet extends Model
 {
-    public $incrementing = false;
-
-    protected $keyType = 'string';
-
     protected $fillable = [
-        'id',
+        'code',
         'name',
         'address',
         'phone',

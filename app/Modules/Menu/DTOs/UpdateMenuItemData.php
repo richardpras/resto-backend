@@ -11,6 +11,7 @@ readonly class UpdateMenuItemData
         public ?float $price = null,
         public ?bool $available = null,
         public ?array $recipes = null,
+        public ?array $menuItemOutlets = null,
     ) {}
 
     public static function fromArray(array $payload): self
@@ -22,6 +23,7 @@ readonly class UpdateMenuItemData
             price: isset($payload['price']) ? (float) $payload['price'] : null,
             available: isset($payload['available']) ? (bool) $payload['available'] : null,
             recipes: $payload['recipes'] ?? null,
+            menuItemOutlets: $payload['menuItemOutlets'] ?? null,
         );
     }
 }

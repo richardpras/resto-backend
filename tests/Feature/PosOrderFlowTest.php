@@ -14,6 +14,8 @@ class PosOrderFlowTest extends TestCase
     public function test_confirm_order_creates_unpaid_order_and_kitchen_print_job(): void
     {
         $response = $this->postJson('/api/v1/orders', [
+            'tenantId' => 1,
+            'outletId' => 1,
             'code' => 'POS-CONFIRM-1',
             'source' => 'pos',
             'orderType' => 'Dine-in',
@@ -26,7 +28,6 @@ class PosOrderFlowTest extends TestCase
             'tax' => 3000,
             'total' => 33000,
             'payments' => [],
-            'tableNumber' => 'table-1',
             'confirmedAt' => now()->toISOString(),
         ]);
 
@@ -48,6 +49,7 @@ class PosOrderFlowTest extends TestCase
     {
         $matchedOrder = $this->postJson('/api/v1/orders', [
             'tenantId' => 1,
+            'outletId' => 1,
             'code' => 'POS-UNPAID-1',
             'source' => 'pos',
             'orderType' => 'Dine-in',
@@ -65,6 +67,7 @@ class PosOrderFlowTest extends TestCase
 
         $notMatchedOrder = $this->postJson('/api/v1/orders', [
             'tenantId' => 1,
+            'outletId' => 1,
             'code' => 'POS-PAID-1',
             'source' => 'pos',
             'orderType' => 'Takeaway',
@@ -138,6 +141,14 @@ class PosOrderFlowTest extends TestCase
             'updated_at' => now(),
         ]);
 
+        DB::table('inventory_stocks')->insert([
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'stock' => 50,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $create = $this->postJson('/api/v1/orders', [
             'tenantId' => 1,
             'outletId' => 1,
@@ -168,8 +179,9 @@ class PosOrderFlowTest extends TestCase
         $partialPay->assertJsonPath('data.paymentStatus', 'partial');
         $partialPay->assertJsonPath('data.status', 'confirmed');
 
-        $this->assertDatabaseHas('ingredients', [
-            'id' => $ingredient->id,
+        $this->assertDatabaseHas('inventory_stocks', [
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
             'stock' => 50.00,
         ]);
         $this->assertDatabaseMissing('journals', [
@@ -194,9 +206,17 @@ class PosOrderFlowTest extends TestCase
             collect($unpaidFilter->json('data'))->where('id', (int) $orderId)
         );
 
-        $this->assertDatabaseHas('ingredients', [
-            'id' => $ingredient->id,
+        $this->assertDatabaseHas('inventory_stocks', [
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
             'stock' => 46.00,
+        ]);
+        $this->assertDatabaseHas('stock_movements', [
+            'inventory_item_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'type' => 'sale',
+            'quantity' => 4,
+            'source_type' => 'order_payment',
         ]);
 
         $this->assertDatabaseMissing('journals', [
@@ -241,6 +261,14 @@ class PosOrderFlowTest extends TestCase
             'menu_item_id' => $menuId,
             'inventory_item_id' => $ingredient->id,
             'quantity' => 2,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('inventory_stocks')->insert([
+            'ingredient_id' => $ingredient->id,
+            'outlet_id' => 1,
+            'stock' => 100,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

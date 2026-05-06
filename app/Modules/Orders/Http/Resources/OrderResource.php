@@ -11,6 +11,7 @@ class OrderResource extends JsonResource
     {
         return [
             'id' => (string) $this->id,
+            'outletId' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
             'code' => $this->code,
             'source' => $this->source,
             'orderType' => $this->order_type,
@@ -23,7 +24,10 @@ class OrderResource extends JsonResource
             'isPosted' => (bool) $this->is_posted,
             'customerName' => $this->customer_name,
             'customerPhone' => $this->customer_phone,
-            'tableNumber' => $this->table_number,
+            'tableId' => $this->table_id !== null ? (int) $this->table_id : null,
+            'tableName' => $this->table_name,
+            /** @deprecated Prefer `tableName` / master `tableId`; legacy column `table_number` read-only. */
+            'tableNumber' => $this->table_name ?: $this->table_number,
             'splitBill' => $this->split_bill,
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($item) => [
                 'orderItemId' => (string) $item->id,

@@ -21,7 +21,7 @@ class OutletReceiptSettingsController extends Controller
         ]);
     }
 
-    public function update(PatchOutletReceiptSettingRequest $request, string $outletId): JsonResponse
+    public function update(PatchOutletReceiptSettingRequest $request, int $outletId): JsonResponse
     {
         $validated = $request->validated();
 

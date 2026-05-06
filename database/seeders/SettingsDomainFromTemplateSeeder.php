@@ -67,15 +67,22 @@ class SettingsDomainFromTemplateSeeder extends Seeder
             if (! is_array($row)) {
                 continue;
             }
-            $id = $row['id'] ?? null;
+            $rawId = $row['id'] ?? null;
+            $id = is_int($rawId)
+                ? $rawId
+                : (is_string($rawId) && ctype_digit($rawId) ? (int) $rawId : null);
             $name = $row['name'] ?? null;
-            if (! is_string($id) || $id === '' || ! is_string($name) || $name === '') {
+            if ($id === null || $id < 1 || ! is_string($name) || $name === '') {
                 continue;
             }
+
+            $codeRaw = $row['code'] ?? null;
+            $code = is_string($codeRaw) && trim($codeRaw) !== '' ? trim($codeRaw) : 'OUT-'.$id;
 
             Outlet::query()->updateOrCreate(
                 ['id' => $id],
                 [
+                    'code' => $code,
                     'name' => $name,
                     'address' => isset($row['address']) ? (string) $row['address'] : null,
                     'phone' => isset($row['phone']) ? (string) $row['phone'] : null,
@@ -138,8 +145,11 @@ class SettingsDomainFromTemplateSeeder extends Seeder
             if (! is_string($id) || $id === '') {
                 continue;
             }
-            $outletId = $row['outletId'] ?? null;
-            if (! is_string($outletId) || $outletId === '') {
+            $rawOutletId = $row['outletId'] ?? null;
+            $outletIdInt = is_int($rawOutletId)
+                ? $rawOutletId
+                : (is_string($rawOutletId) && ctype_digit($rawOutletId) ? (int) $rawOutletId : null);
+            if ($outletIdInt === null || $outletIdInt < 1) {
                 continue;
             }
             SettingPrinter::query()->updateOrCreate(
@@ -150,7 +160,7 @@ class SettingsDomainFromTemplateSeeder extends Seeder
                     'connection' => (string) ($row['connection'] ?? 'lan'),
                     'ip' => isset($row['ip']) ? (string) $row['ip'] : null,
                     'bluetooth_device' => isset($row['bluetoothDevice']) ? (string) $row['bluetoothDevice'] : null,
-                    'outlet_id' => $outletId,
+                    'outlet_id' => $outletIdInt,
                     'assigned_categories' => isset($row['assignedCategories']) && is_array($row['assignedCategories'])
                         ? $row['assignedCategories']
                         : null,

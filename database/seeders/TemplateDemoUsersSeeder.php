@@ -6,7 +6,6 @@ use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\User;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
 
 /**
  * Seeds the four template demo users (web/src + template) with distinct roles
@@ -30,6 +29,7 @@ class TemplateDemoUsersSeeder extends Seeder
             'suppliers.manage',
             'members.manage',
             'tables.view',
+            'tables.manage',
             'qr_orders.view',
             'reports.view',
         ];
@@ -67,11 +67,12 @@ class TemplateDemoUsersSeeder extends Seeder
         ];
 
         foreach ($users as $row) {
+            // Password and PIN are hashed via User model casts (`password`, `pin_hash` => `hashed`).
             $user = User::query()->updateOrCreate(
                 ['email' => $row['email']],
                 [
                     'name' => $row['name'],
-                    'password' => Hash::make($row['password']),
+                    'password' => $row['password'],
                     'pin_hash' => $row['pin'],
                 ],
             );

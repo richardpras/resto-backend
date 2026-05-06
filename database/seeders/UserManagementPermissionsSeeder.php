@@ -43,6 +43,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'suppliers.manage', 'name' => 'Manage suppliers'],
             ['code' => 'members.manage', 'name' => 'Manage members'],
             ['code' => 'tables.view', 'name' => 'View tables'],
+            ['code' => 'tables.manage', 'name' => 'Manage tables (floor master)'],
             ['code' => 'qr_orders.view', 'name' => 'View QR orders'],
         ];
 

@@ -21,4 +21,9 @@ class MenuItem extends Model
     {
         return $this->hasMany(MenuRecipe::class);
     }
+
+    public function outletMappings(): HasMany
+    {
+        return $this->hasMany(MenuItemOutlet::class);
+    }
 }

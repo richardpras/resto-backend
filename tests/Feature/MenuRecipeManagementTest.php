@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Modules\Inventory\Domain\Ingredient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class MenuRecipeManagementTest extends TestCase
@@ -16,28 +17,28 @@ class MenuRecipeManagementTest extends TestCase
             'tenant_id' => 1,
             'outlet_id' => 1,
             'name' => 'Chicken',
+            'type' => 'ingredient',
             'unit' => 'gram',
-            'current_stock' => 100,
-            'minimum_stock' => 10,
+            'stock' => 100,
+            'min' => 10,
         ]);
         $ingredientB = Ingredient::query()->create([
             'tenant_id' => 1,
             'outlet_id' => 1,
             'name' => 'Flour',
+            'type' => 'ingredient',
             'unit' => 'gram',
-            'current_stock' => 200,
-            'minimum_stock' => 20,
+            'stock' => 200,
+            'min' => 20,
         ]);
 
         $response = $this->postJson('/api/v1/menu-items', [
-            'tenant_id' => 1,
-            'outlet_id' => 1,
+            'tenantId' => 1,
             'name' => 'Crispy Chicken',
             'price' => 25000,
-            'is_active' => true,
             'recipes' => [
-                ['ingredient_id' => $ingredientA->id, 'quantity' => 120],
-                ['ingredient_id' => $ingredientB->id, 'quantity' => 40],
+                ['inventoryItemId' => $ingredientA->id, 'quantity' => 120],
+                ['inventoryItemId' => $ingredientB->id, 'quantity' => 40],
             ],
         ]);
 
@@ -50,7 +51,7 @@ class MenuRecipeManagementTest extends TestCase
             'name' => 'Crispy Chicken',
         ]);
         $this->assertDatabaseHas('menu_recipes', [
-            'ingredient_id' => $ingredientA->id,
+            'inventory_item_id' => $ingredientA->id,
             'quantity' => 120.00,
         ]);
     }
@@ -61,36 +62,38 @@ class MenuRecipeManagementTest extends TestCase
             'tenant_id' => 1,
             'outlet_id' => 1,
             'name' => 'Rice',
+            'type' => 'ingredient',
             'unit' => 'gram',
-            'current_stock' => 1000,
-            'minimum_stock' => 100,
+            'stock' => 1000,
+            'min' => 100,
         ]);
         $ingredientB = Ingredient::query()->create([
             'tenant_id' => 1,
             'outlet_id' => 1,
             'name' => 'Chicken',
+            'type' => 'ingredient',
             'unit' => 'gram',
-            'current_stock' => 1000,
-            'minimum_stock' => 100,
+            'stock' => 1000,
+            'min' => 100,
         ]);
 
         $menuResponse = $this->postJson('/api/v1/menu-items', [
-            'tenant_id' => 1,
-            'outlet_id' => 1,
+            'tenantId' => 1,
             'name' => 'Chicken Bowl',
             'price' => 30000,
             'recipes' => [
-                ['ingredient_id' => $ingredientA->id, 'quantity' => 150],
+                ['inventoryItemId' => $ingredientA->id, 'quantity' => 150],
             ],
         ]);
+        $menuResponse->assertCreated();
         $menuId = $menuResponse->json('data.id');
 
-        $updateResponse = $this->putJson("/api/v1/menu-items/{$menuId}", [
+        $updateResponse = $this->patchJson("/api/v1/menu-items/{$menuId}", [
             'name' => 'Chicken Rice Bowl',
             'price' => 32000,
             'recipes' => [
-                ['ingredient_id' => $ingredientA->id, 'quantity' => 130],
-                ['ingredient_id' => $ingredientB->id, 'quantity' => 80],
+                ['inventoryItemId' => $ingredientA->id, 'quantity' => 130],
+                ['inventoryItemId' => $ingredientB->id, 'quantity' => 80],
             ],
         ]);
 
@@ -99,8 +102,9 @@ class MenuRecipeManagementTest extends TestCase
         $updateResponse->assertJsonCount(2, 'data.recipes');
         $this->assertDatabaseHas('menu_recipes', [
             'menu_item_id' => $menuId,
-            'ingredient_id' => $ingredientB->id,
+            'inventory_item_id' => $ingredientB->id,
             'quantity' => 80.00,
         ]);
+        $this->assertSame(2, DB::table('menu_recipes')->where('menu_item_id', $menuId)->count());
     }
 }

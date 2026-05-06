@@ -15,6 +15,7 @@ class StoreStockMovementRequest extends FormRequest
     {
         return [
             'inventory_item_id' => ['required', 'integer', 'min:1'],
+            'outlet_id' => ['required', 'integer', 'min:1'],
             'type' => ['required', 'in:purchase,sale,adjustment,waste'],
             'quantity' => ['required', 'numeric', 'gt:0'],
             'source_type' => ['required', 'string', 'max:100'],

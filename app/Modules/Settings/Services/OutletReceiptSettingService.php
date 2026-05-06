@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 class OutletReceiptSettingService
 {
     /**
-     * @return list<array{outletId: string, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}>
+     * @return list<array{outletId: int, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}>
      */
     public function listForResponse(): array
     {
@@ -23,13 +23,13 @@ class OutletReceiptSettingService
 
     /**
      * @param  array{receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}  $data
-     * @return array{outletId: string, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}
+     * @return array{outletId: int, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}
      */
-    public function updateForOutlet(string $outletId, array $data): array
+    public function updateForOutlet(int $outletId, array $data): array
     {
         $outlet = Outlet::query()->whereKey($outletId)->first();
         if ($outlet === null) {
-            throw (new ModelNotFoundException)->setModel(Outlet::class, [$outletId]);
+            throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $outletId]);
         }
 
         OutletReceiptSetting::query()->updateOrCreate(
@@ -48,14 +48,14 @@ class OutletReceiptSettingService
     }
 
     /**
-     * @return array{outletId: string, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}
+     * @return array{outletId: int, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool}
      */
     private function serializeOutlet(Outlet $outlet): array
     {
         $row = $outlet->receiptSetting;
 
         return [
-            'outletId' => $outlet->id,
+            'outletId' => (int) $outlet->id,
             'outletName' => $outlet->name,
             'receiptHeader' => $row?->receipt_header ?? '',
             'receiptFooter' => $row?->receipt_footer ?? '',

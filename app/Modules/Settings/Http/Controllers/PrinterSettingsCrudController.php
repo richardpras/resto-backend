@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Settings\Services\SettingsDomainService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class PrinterSettingsCrudController extends Controller
@@ -28,7 +29,7 @@ class PrinterSettingsCrudController extends Controller
             'connection' => ['required', 'string', 'in:bluetooth,lan'],
             'ip' => ['nullable', 'string', 'max:64'],
             'bluetoothDevice' => ['nullable', 'string', 'max:255'],
-            'outletId' => ['required', 'string', 'max:64'],
+            'outletId' => ['required', 'integer', 'min:1', Rule::exists('outlets', 'id')],
             'assignedCategories' => ['nullable', 'array'],
             'assignedCategories.*' => ['string', 'max:255'],
         ]);
@@ -47,7 +48,7 @@ class PrinterSettingsCrudController extends Controller
             'connection' => ['required', 'string', 'in:bluetooth,lan'],
             'ip' => ['nullable', 'string', 'max:64'],
             'bluetoothDevice' => ['nullable', 'string', 'max:255'],
-            'outletId' => ['required', 'string', 'max:64'],
+            'outletId' => ['required', 'integer', 'min:1', Rule::exists('outlets', 'id')],
             'assignedCategories' => ['nullable', 'array'],
             'assignedCategories.*' => ['string', 'max:255'],
         ]);

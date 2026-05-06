@@ -6,6 +6,7 @@ readonly class CreateStockMovementData
 {
     public function __construct(
         public int $inventoryItemId,
+        public int $outletId,
         public string $type,
         public float $quantity,
         public string $sourceType,
@@ -16,6 +17,7 @@ readonly class CreateStockMovementData
     {
         return new self(
             inventoryItemId: (int) $payload['inventory_item_id'],
+            outletId: (int) $payload['outlet_id'],
             type: (string) $payload['type'],
             quantity: (float) $payload['quantity'],
             sourceType: (string) $payload['source_type'],

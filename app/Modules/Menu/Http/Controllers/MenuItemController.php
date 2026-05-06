@@ -21,8 +21,10 @@ class MenuItemController extends Controller
     public function index(): JsonResponse
     {
         $tenantId = (int) request()->query('tenantId', 0);
+        $rawOutletId = request()->query('outletId');
+        $filterOutletId = is_numeric($rawOutletId) && (int) $rawOutletId >= 1 ? (int) $rawOutletId : null;
 
-        $menuItems = $this->menuService->listByTenant($tenantId, (int) request()->query('perPage', 20));
+        $menuItems = $this->menuService->listByTenant($tenantId, (int) request()->query('perPage', 20), $filterOutletId);
 
         return response()->json([
             'data' => MenuItemResource::collection($menuItems->getCollection()),

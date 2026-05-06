@@ -27,6 +27,7 @@ class OrderController extends Controller
             $tenantId,
             (int) $request->validated('perPage', 20),
             [
+                'outlet_id' => $request->validated('outletId'),
                 'payment_status' => $request->validated('paymentStatus'),
                 'order_type' => $request->validated('orderType'),
                 'status' => $request->validated('status'),

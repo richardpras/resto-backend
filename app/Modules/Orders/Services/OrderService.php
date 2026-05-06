@@ -6,6 +6,7 @@ use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\Modules\Orders\Domain\Order;
+use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\Payment;
@@ -37,6 +38,8 @@ class OrderService
             $paymentStatus = $paidTotal >= $data->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
             $status = $paymentStatus === 'paid' && $data->status !== 'cancelled' ? 'completed' : $data->status;
 
+            [$floorTableId, $floorTableName] = $this->resolveFloorTableForOrder($data);
+
             $order = $this->orderRepository->create([
                 'tenant_id' => $data->tenantId,
                 'outlet_id' => $data->outletId,
@@ -53,7 +56,8 @@ class OrderService
                 'balance_due' => max(0, $data->total - $paidTotal),
                 'customer_name' => $data->customerName,
                 'customer_phone' => $data->customerPhone,
-                'table_number' => $data->tableNumber,
+                'table_id' => $floorTableId,
+                'table_name' => $floorTableName,
                 'split_bill' => $data->splitBill,
                 'created_at' => $data->createdAt,
                 'confirmed_at' => $data->confirmedAt,
@@ -345,13 +349,57 @@ class OrderService
         }
     }
 
+    /**
+     * Resolve snapshot fields for POS master table (`table_id` + `table_name`).
+     * `table_number` is legacy/read-only — new orders never write it via this flow.
+     *
+     * @return array{0: int|null, 1: string|null}
+     */
+    private function resolveFloorTableForOrder(CreateOrderData $data): array
+    {
+        if ($data->tableId !== null) {
+            if ($data->outletId === null || $data->outletId < 1) {
+                throw ValidationException::withMessages([
+                    'tableId' => ['outletId is required when selecting a floor table.'],
+                ]);
+            }
+            $row = RestaurantTable::query()
+                ->whereKey($data->tableId)
+                ->where('outlet_id', $data->outletId)
+                ->where('status', 'active')
+                ->first();
+            if ($row === null) {
+                throw ValidationException::withMessages([
+                    'tableId' => ['Table not found for this outlet or table is inactive.'],
+                ]);
+            }
+
+            return [(int) $row->id, (string) $row->name];
+        }
+
+        if ($data->tableNumber !== null && trim($data->tableNumber) !== '') {
+            return [null, trim($data->tableNumber)];
+        }
+
+        return [null, null];
+    }
+
     private function createPrintJob(int $orderId, string $type): void
     {
+        $tableLabel = Order::query()->whereKey($orderId)->value('table_name');
+        $payload = [
+            'orderId' => $orderId,
+            'type' => $type,
+        ];
+        if (is_string($tableLabel) && $tableLabel !== '') {
+            $payload['tableName'] = $tableLabel;
+        }
+
         PrintJob::query()->create([
             'source_type' => 'order',
             'source_id' => $orderId,
             'type' => $type,
-            'content' => ['orderId' => $orderId, 'type' => $type],
+            'content' => $payload,
             'status' => 'pending',
         ]);
     }

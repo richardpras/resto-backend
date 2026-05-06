@@ -24,6 +24,8 @@ class Order extends Model
         'customer_name',
         'customer_phone',
         'table_number',
+        'table_id',
+        'table_name',
         'split_bill',
         'confirmed_at',
         'stock_deducted_at',

@@ -15,6 +15,7 @@ use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Members\Http\Controllers\MemberController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Purchase\Http\Controllers\GoodsReceiptController;
 use App\Modules\Purchase\Http\Controllers\PurchaseInvoiceController;
 use App\Modules\Purchase\Http\Controllers\PurchaseOrderController;
@@ -167,6 +168,11 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('members/{member}', [MemberController::class, 'update'])->middleware('permission:members.manage');
         Route::patch('members/{member}/status', [MemberController::class, 'updateStatus'])->middleware('permission:members.manage');
         Route::delete('members/{member}', [MemberController::class, 'destroy'])->middleware('permission:members.manage');
+
+        Route::get('tables', [TableMasterController::class, 'index'])->middleware('permission:tables.view');
+        Route::post('tables', [TableMasterController::class, 'store'])->middleware('permission:tables.manage');
+        Route::patch('tables/{table}', [TableMasterController::class, 'update'])->middleware('permission:tables.manage');
+        Route::delete('tables/{table}', [TableMasterController::class, 'destroy'])->middleware('permission:tables.manage');
 
         Route::get('suppliers', [SupplierController::class, 'index'])->middleware('permission:suppliers.manage');
         Route::post('suppliers', [SupplierController::class, 'store'])->middleware('permission:suppliers.manage');

@@ -15,6 +15,7 @@ class ListOrdersRequest extends FormRequest
     {
         return [
             'tenantId' => ['nullable', 'integer', 'min:1'],
+            'outletId' => ['nullable', 'integer', 'min:1'],
             'perPage' => ['nullable', 'integer', 'min:1'],
             'paymentStatus' => ['nullable', 'string', 'max:50'],
             'orderType' => ['nullable', 'string', 'max:50'],

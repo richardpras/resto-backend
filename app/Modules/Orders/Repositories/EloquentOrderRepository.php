@@ -12,9 +12,11 @@ class EloquentOrderRepository implements OrderRepositoryInterface
         $orderType = $filters['order_type'] ?? null;
         $status = $filters['status'] ?? null;
         $source = $filters['source'] ?? null;
+        $outletId = isset($filters['outlet_id']) ? (int) $filters['outlet_id'] : null;
 
         return Order::query()
             ->when($tenantId > 0, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->when($outletId !== null && $outletId > 0, fn ($query) => $query->where('outlet_id', $outletId))
             ->when(is_string($paymentStatus) && $paymentStatus !== '', fn ($query) => $query->where('payment_status', $paymentStatus))
             ->when(is_string($orderType) && $orderType !== '', fn ($query) => $query->where('order_type', $orderType))
             ->when(is_string($status) && $status !== '', fn ($query) => $query->where('status', $status))

@@ -70,9 +70,9 @@ class TemplateInventoryMenuSeeder extends Seeder
                 MenuRecipe::query()->firstOrCreate(
                     [
                         'menu_item_id' => $menuId,
-                        'ingredient_id' => $ingId,
+                        'inventory_item_id' => $ingId,
                     ],
-                    ['qty' => $line['qty']],
+                    ['quantity' => $line['qty']],
                 );
             }
         }

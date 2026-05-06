@@ -61,8 +61,13 @@ class SettingsDomainService
     /** @param  array<string, mixed>  $data */
     public function createOutlet(array $data): array
     {
+        $codeInput = isset($data['code']) ? trim((string) $data['code']) : '';
+
+        $placeholder = 'tmp-'.bin2hex(random_bytes(8));
+
+        /** @var Outlet $o */
         $o = Outlet::query()->create([
-            'id' => $data['id'],
+            'code' => $placeholder,
             'name' => $data['name'],
             'address' => $data['address'] ?? null,
             'phone' => $data['phone'] ?? null,
@@ -73,17 +78,21 @@ class SettingsDomainService
             'order_prefix' => $data['orderPrefix'] ?? null,
         ]);
 
-        return $this->outletToCamel($o);
+        $finalCode = $codeInput !== '' ? $codeInput : 'OUT-'.$o->id;
+        $o->update(['code' => $finalCode]);
+
+        return $this->outletToCamel($o->fresh());
     }
 
     /** @param  array<string, mixed>  $data */
-    public function updateOutlet(string $id, array $data): array
+    public function updateOutlet(int $id, array $data): array
     {
         $o = Outlet::query()->whereKey($id)->first();
         if ($o === null) {
-            throw (new ModelNotFoundException)->setModel(Outlet::class, [$id]);
+            throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $id]);
         }
-        $o->fill([
+
+        $payload = [
             'name' => $data['name'],
             'address' => $data['address'] ?? null,
             'phone' => $data['phone'] ?? null,
@@ -92,17 +101,26 @@ class SettingsDomainService
             'logo' => $data['logo'] ?? null,
             'invoice_prefix' => $data['invoicePrefix'] ?? null,
             'order_prefix' => $data['orderPrefix'] ?? null,
-        ]);
+        ];
+
+        if (array_key_exists('code', $data) && $data['code'] !== null) {
+            $c = trim((string) $data['code']);
+            if ($c !== '') {
+                $payload['code'] = $c;
+            }
+        }
+
+        $o->fill($payload);
         $o->save();
 
         return $this->outletToCamel($o->fresh());
     }
 
-    public function deleteOutlet(string $id): void
+    public function deleteOutlet(int $id): void
     {
         $o = Outlet::query()->whereKey($id)->first();
         if ($o === null) {
-            throw (new ModelNotFoundException)->setModel(Outlet::class, [$id]);
+            throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $id]);
         }
         $o->delete();
     }
@@ -176,7 +194,7 @@ class SettingsDomainService
             'connection' => $data['connection'],
             'ip' => $data['ip'] ?? null,
             'bluetooth_device' => $data['bluetoothDevice'] ?? null,
-            'outlet_id' => $data['outletId'],
+            'outlet_id' => (int) $data['outletId'],
             'assigned_categories' => $data['assignedCategories'] ?? null,
         ]);
 
@@ -196,7 +214,7 @@ class SettingsDomainService
             'connection' => $data['connection'],
             'ip' => $data['ip'] ?? null,
             'bluetooth_device' => $data['bluetoothDevice'] ?? null,
-            'outlet_id' => $data['outletId'],
+            'outlet_id' => (int) $data['outletId'],
             'assigned_categories' => $data['assignedCategories'] ?? null,
         ]);
         $p->save();
@@ -477,7 +495,8 @@ class SettingsDomainService
     private function outletToCamel(Outlet $o): array
     {
         $base = [
-            'id' => $o->id,
+            'id' => (int) $o->id,
+            'code' => (string) ($o->code ?? ''),
             'name' => $o->name,
             'address' => (string) ($o->address ?? ''),
             'phone' => (string) ($o->phone ?? ''),
@@ -516,7 +535,7 @@ class SettingsDomainService
             'name' => $p->name,
             'printerType' => $p->printer_type,
             'connection' => $p->connection,
-            'outletId' => $p->outlet_id,
+            'outletId' => (int) $p->outlet_id,
         ];
         if ($p->ip !== null && $p->ip !== '') {
             $base['ip'] = $p->ip;

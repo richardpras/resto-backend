@@ -1,0 +1,114 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Modules\Orders\Domain\RestaurantTable;
+use App\Models\Modules\Settings\Domain\Outlet;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\UserManagementApiFixture;
+use Tests\TestCase;
+
+class TableMasterApiTest extends TestCase
+{
+    use RefreshDatabase;
+    use UserManagementApiFixture;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+        Artisan::call('passport:keys', ['--force' => true]);
+    }
+
+    public function test_master_table_crud_respects_outlet_scope_and_unique_name(): void
+    {
+        $this->actingAsUserManagementApiAdministrator();
+
+        $outlet = Outlet::query()->create([
+            'name' => 'Test Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 't-out-'.uniqid(),
+        ]);
+
+        $list = $this->getJson('/api/v1/tables?outletId='.$outlet->id)->assertOk();
+        $list->assertJsonPath('data', []);
+
+        $this->postJson('/api/v1/tables', [
+            'outletId' => $outlet->id,
+            'name' => 'VIP-1',
+            'capacity' => 6,
+            'status' => 'active',
+        ])->assertCreated()->assertJsonPath('data.name', 'VIP-1');
+
+        $this->postJson('/api/v1/tables', [
+            'outletId' => $outlet->id,
+            'name' => 'VIP-1',
+            'status' => 'active',
+        ])->assertUnprocessable();
+
+        $tid = RestaurantTable::query()->where('outlet_id', $outlet->id)->value('id');
+        self::assertIsInt((int) $tid);
+
+        $this->patchJson('/api/v1/tables/'.$tid, [
+            'capacity' => 8,
+            'status' => 'inactive',
+        ])->assertOk()->assertJsonPath('data.capacity', 8)->assertJsonPath('data.status', 'inactive');
+
+        $this->deleteJson('/api/v1/tables/'.$tid)->assertOk();
+        $this->assertDatabaseMissing('tables', ['id' => $tid]);
+    }
+
+    public function test_create_order_sets_table_snapshot_when_table_id_matches_outlet(): void
+    {
+        $outlet = Outlet::query()->create([
+            'name' => 'O2',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 't-out2-'.uniqid(),
+        ]);
+
+        $t = RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'T5',
+            'capacity' => 4,
+            'status' => 'active',
+        ]);
+
+        $response = $this->postJson('/api/v1/orders', [
+            'tenantId' => 1,
+            'outletId' => $outlet->id,
+            'code' => 'POS-TBL-1',
+            'source' => 'pos',
+            'orderType' => 'Dine-in',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
+            'items' => [
+                ['id' => '201', 'name' => 'Item', 'qty' => 1, 'price' => 10000],
+            ],
+            'subtotal' => 10000,
+            'tax' => 1000,
+            'total' => 11000,
+            'payments' => [],
+            'tableId' => $t->id,
+            'confirmedAt' => now()->toISOString(),
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.tableId', (int) $t->id);
+        $response->assertJsonPath('data.tableName', 'T5');
+        $response->assertJsonPath('data.tableNumber', 'T5');
+
+        $this->assertDatabaseHas('orders', [
+            'code' => 'POS-TBL-1',
+            'table_id' => $t->id,
+            'table_name' => 'T5',
+        ]);
+    }
+}

@@ -6,7 +6,7 @@ use App\Models\Modules\Menu\Domain\MenuItem;
 
 interface MenuRepositoryInterface
 {
-    public function paginateByTenant(int $tenantId, int $perPage = 20);
+    public function paginateByTenant(int $tenantId, int $perPage = 20, ?int $outletId = null);
 
     public function findById(int $id): ?MenuItem;
 

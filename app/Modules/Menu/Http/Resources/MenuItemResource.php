@@ -9,17 +9,45 @@ class MenuItemResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $rawOutletId = $request->query('outletId');
+        $outletFilterId = is_numeric($rawOutletId) && (int) $rawOutletId >= 1 ? (int) $rawOutletId : null;
+
+        $displayName = $this->name;
+        $displayPrice = (float) $this->price;
+        if ($outletFilterId !== null && $this->relationLoaded('outletMappings')) {
+            foreach ($this->outletMappings as $mapping) {
+                if ((int) $mapping->outlet_id !== $outletFilterId || ! $mapping->is_active) {
+                    continue;
+                }
+                if ($mapping->name_override !== null && trim((string) $mapping->name_override) !== '') {
+                    $displayName = $mapping->name_override;
+                }
+                if ($mapping->price_override !== null) {
+                    $displayPrice = (float) $mapping->price_override;
+                }
+
+                break;
+            }
+        }
+
         return [
             'id' => (string) $this->id,
-            'name' => $this->name,
+            'name' => $displayName,
             'category' => $this->category,
             'emoji' => $this->emoji,
-            'price' => (float) $this->price,
+            'price' => $displayPrice,
             'available' => (bool) $this->available,
             'recipes' => $this->whenLoaded('recipes', fn () => $this->recipes->map(fn ($recipe) => [
                 'id' => $recipe->id,
                 'inventoryItemId' => (string) $recipe->inventory_item_id,
                 'quantity' => (float) $recipe->quantity,
+            ])),
+            'menuItemOutlets' => $this->whenLoaded('outletMappings', fn () => $this->outletMappings->map(fn ($mapping) => [
+                'outletId' => (int) $mapping->outlet_id,
+                'isActive' => (bool) $mapping->is_active,
+                'priceOverride' => $mapping->price_override !== null ? (float) $mapping->price_override : null,
+                'nameOverride' => $mapping->name_override,
+                'receiptName' => $mapping->receipt_name,
             ])),
             'createdAt' => $this->created_at?->toISOString(),
         ];

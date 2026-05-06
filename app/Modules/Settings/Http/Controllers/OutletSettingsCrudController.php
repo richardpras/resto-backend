@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Settings\Services\SettingsDomainService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class OutletSettingsCrudController extends Controller
@@ -22,7 +23,7 @@ class OutletSettingsCrudController extends Controller
     public function store(Request $request): JsonResponse
     {
         $v = $request->validate([
-            'id' => ['required', 'string', 'max:64'],
+            'code' => ['nullable', 'string', 'max:64', Rule::unique('outlets', 'code')],
             'name' => ['required', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:2000'],
             'phone' => ['nullable', 'string', 'max:64'],
@@ -39,9 +40,10 @@ class OutletSettingsCrudController extends Controller
         ], Response::HTTP_CREATED);
     }
 
-    public function update(Request $request, string $outletId): JsonResponse
+    public function update(Request $request, int $outletId): JsonResponse
     {
         $v = $request->validate([
+            'code' => ['nullable', 'string', 'max:64', Rule::unique('outlets', 'code')->ignore($outletId, 'id')],
             'name' => ['required', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:2000'],
             'phone' => ['nullable', 'string', 'max:64'],
@@ -58,7 +60,7 @@ class OutletSettingsCrudController extends Controller
         ]);
     }
 
-    public function destroy(string $outletId): JsonResponse
+    public function destroy(int $outletId): JsonResponse
     {
         $this->domain->deleteOutlet($outletId);
 

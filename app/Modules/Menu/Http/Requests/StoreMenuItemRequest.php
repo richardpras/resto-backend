@@ -29,6 +29,12 @@ class StoreMenuItemRequest extends FormRequest
                 Rule::exists('ingredients', 'id')->where(static fn ($query) => $query->where('type', 'ingredient')),
             ],
             'recipes.*.quantity' => ['required_with:recipes', 'numeric', 'gt:0'],
+            'menuItemOutlets' => ['sometimes', 'array'],
+            'menuItemOutlets.*.outletId' => ['required_with:menuItemOutlets', 'integer', 'min:1', Rule::exists('outlets', 'id')],
+            'menuItemOutlets.*.isActive' => ['sometimes', 'boolean'],
+            'menuItemOutlets.*.priceOverride' => ['nullable', 'numeric', 'min:0'],
+            'menuItemOutlets.*.nameOverride' => ['nullable', 'string', 'max:255'],
+            'menuItemOutlets.*.receiptName' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

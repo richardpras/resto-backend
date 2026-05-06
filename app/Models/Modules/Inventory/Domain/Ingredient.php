@@ -21,6 +21,12 @@ class Ingredient extends Model
 
     public function stockMovements(): HasMany
     {
-        return $this->hasMany(StockMovement::class);
+        return $this->hasMany(StockMovement::class, 'inventory_item_id');
+    }
+
+    /** Per-outlet ledger stock (authoritative for transactions). */
+    public function inventoryStocks(): HasMany
+    {
+        return $this->hasMany(InventoryStock::class, 'ingredient_id');
     }
 }

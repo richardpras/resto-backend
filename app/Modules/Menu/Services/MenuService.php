@@ -3,6 +3,7 @@
 namespace App\Modules\Menu\Services;
 
 use App\Models\Modules\Menu\Domain\MenuRecipe;
+use App\Models\Modules\Menu\Domain\MenuItemOutlet;
 use App\Models\Modules\Inventory\Domain\Ingredient;
 use App\Modules\Menu\DTOs\CreateMenuItemData;
 use App\Modules\Menu\DTOs\UpdateMenuItemData;
@@ -16,9 +17,9 @@ class MenuService
         private readonly MenuRepositoryInterface $menuRepository,
     ) {}
 
-    public function listByTenant(int $tenantId, int $perPage = 20)
+    public function listByTenant(int $tenantId, int $perPage = 20, ?int $outletId = null)
     {
-        return $this->menuRepository->paginateByTenant($tenantId, $perPage);
+        return $this->menuRepository->paginateByTenant($tenantId, $perPage, $outletId);
     }
 
     public function find(int $id)
@@ -40,6 +41,7 @@ class MenuService
             ]);
 
             $this->syncRecipes($menuItem->id, $data->recipes);
+            $this->syncOutletMappings($menuItem->id, $data->menuItemOutlets);
 
             return $this->menuRepository->findWithRecipes($menuItem->id);
         });
@@ -67,6 +69,10 @@ class MenuService
 
             if ($data->recipes !== null) {
                 $this->syncRecipes($menuItem->id, $data->recipes);
+            }
+
+            if ($data->menuItemOutlets !== null) {
+                $this->syncOutletMappings($menuItem->id, $data->menuItemOutlets);
             }
 
             return $this->menuRepository->findWithRecipes($menuItem->id);
@@ -97,6 +103,24 @@ class MenuService
                 'menu_item_id' => $menuItemId,
                 'inventory_item_id' => (int) $recipe['inventoryItemId'],
                 'quantity' => (float) $recipe['quantity'],
+            ]);
+        }
+    }
+
+    private function syncOutletMappings(int $menuItemId, array $menuItemOutlets): void
+    {
+        MenuItemOutlet::query()->where('menu_item_id', $menuItemId)->delete();
+
+        foreach ($menuItemOutlets as $row) {
+            $nameOverride = isset($row['nameOverride']) ? trim((string) $row['nameOverride']) : null;
+            $receiptName = isset($row['receiptName']) ? trim((string) $row['receiptName']) : null;
+            MenuItemOutlet::query()->create([
+                'menu_item_id' => $menuItemId,
+                'outlet_id' => (int) $row['outletId'],
+                'is_active' => (bool) ($row['isActive'] ?? true),
+                'price_override' => isset($row['priceOverride']) ? (float) $row['priceOverride'] : null,
+                'name_override' => $nameOverride !== '' ? $nameOverride : null,
+                'receipt_name' => $receiptName !== '' ? $receiptName : null,
             ]);
         }
     }

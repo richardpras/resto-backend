@@ -11,7 +11,8 @@
   },
   "outlets": [
     {
-      "id": "o-main",
+      "id": 1,
+      "code": "o-main",
       "name": "Main Outlet",
       "address": "Jl. Sudirman No. 123",
       "phone": "+62 812 3456 7890",
@@ -25,7 +26,8 @@
       "orderPrefix": "ORD-MAIN"
     },
     {
-      "id": "o-branch",
+      "id": 2,
+      "code": "o-branch",
       "name": "Branch - Downtown",
       "address": "Jl. Thamrin No. 45",
       "phone": "+62 812 0000 1111",
@@ -58,7 +60,7 @@
       "printerType": "kitchen",
       "connection": "lan",
       "ip": "192.168.1.50",
-      "outletId": "o-main",
+      "outletId": 1,
       "assignedCategories": ["Main Course"]
     },
     {
@@ -67,7 +69,7 @@
       "printerType": "cashier",
       "connection": "lan",
       "ip": "192.168.1.51",
-      "outletId": "o-main"
+      "outletId": 1
     }
   ],
   "paymentMethods": [

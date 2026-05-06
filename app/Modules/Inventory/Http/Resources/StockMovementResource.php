@@ -12,6 +12,7 @@ class StockMovementResource extends JsonResource
         return [
             'id' => $this->id,
             'inventory_item_id' => $this->inventory_item_id,
+            'outlet_id' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
             'inventory_item_name' => $this->ingredient?->name,
             'type' => $this->type,
             'quantity' => (float) $this->quantity,
