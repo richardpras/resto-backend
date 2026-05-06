@@ -12,11 +12,13 @@ class PurchaseRequestItem extends Model
         'purchase_request_id',
         'ingredient_id',
         'requested_qty',
+        'fulfilled_qty',
         'unit',
     ];
 
     protected $casts = [
         'requested_qty' => 'decimal:2',
+        'fulfilled_qty' => 'decimal:2',
     ];
 
     public function purchaseRequest(): BelongsTo

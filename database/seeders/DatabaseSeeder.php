@@ -30,5 +30,6 @@ class DatabaseSeeder extends Seeder
         $this->call(TemplateDemoUsersSeeder::class);
 
         $this->call(TemplateMembersSuppliersSeeder::class);
+        $this->call(PurchaseFlowSeeder::class);
     }
 }

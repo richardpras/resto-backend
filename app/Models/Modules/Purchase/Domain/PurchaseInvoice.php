@@ -4,6 +4,7 @@ namespace App\Models\Modules\Purchase\Domain;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseInvoice extends Model
 {
@@ -15,11 +16,14 @@ class PurchaseInvoice extends Model
         'number',
         'invoice_date',
         'total',
+        'tax',
+        'status',
     ];
 
     protected $casts = [
         'invoice_date' => 'date',
         'total' => 'decimal:2',
+        'tax' => 'decimal:2',
     ];
 
     public function purchaseOrder(): BelongsTo
@@ -30,5 +34,10 @@ class PurchaseInvoice extends Model
     public function goodsReceivingNote(): BelongsTo
     {
         return $this->belongsTo(GoodsReceivingNote::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(PurchaseInvoicePayment::class);
     }
 }

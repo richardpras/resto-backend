@@ -15,6 +15,10 @@ use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Members\Http\Controllers\MemberController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Purchase\Http\Controllers\GoodsReceiptController;
+use App\Modules\Purchase\Http\Controllers\PurchaseInvoiceController;
+use App\Modules\Purchase\Http\Controllers\PurchaseOrderController;
+use App\Modules\Purchase\Http\Controllers\PurchaseRequestController;
 use App\Modules\Suppliers\Http\Controllers\SupplierController;
 use App\Modules\Settings\Http\Controllers\BankAccountSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\IntegrationSettingsController;
@@ -169,5 +173,11 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('suppliers/{supplier}', [SupplierController::class, 'update'])->middleware('permission:suppliers.manage');
         Route::patch('suppliers/{supplier}/status', [SupplierController::class, 'updateStatus'])->middleware('permission:suppliers.manage');
         Route::delete('suppliers/{supplier}', [SupplierController::class, 'destroy'])->middleware('permission:suppliers.manage');
+
+        Route::apiResource('purchase-requests', PurchaseRequestController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
+        Route::apiResource('purchase-orders', PurchaseOrderController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
+        Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store']);
+        Route::apiResource('purchase-invoices', PurchaseInvoiceController::class)->only(['index', 'store', 'update']);
+        Route::post('purchase-invoices/{purchaseInvoice}/payments', [PurchaseInvoiceController::class, 'addPayment']);
     });
 });

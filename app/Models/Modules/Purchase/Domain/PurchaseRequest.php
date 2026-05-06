@@ -11,6 +11,8 @@ class PurchaseRequest extends Model
     protected $fillable = [
         'tenant_id',
         'outlet_id',
+        'outlet',
+        'requested_by',
         'number',
         'status',
         'request_date',

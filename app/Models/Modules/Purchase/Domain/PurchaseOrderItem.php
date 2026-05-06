@@ -10,14 +10,19 @@ class PurchaseOrderItem extends Model
 {
     protected $fillable = [
         'purchase_order_id',
+        'pr_item_id',
         'ingredient_id',
         'ordered_qty',
+        'requested_qty',
+        'is_from_pr',
         'received_qty',
         'unit_price',
     ];
 
     protected $casts = [
         'ordered_qty' => 'decimal:2',
+        'requested_qty' => 'decimal:2',
+        'is_from_pr' => 'boolean',
         'received_qty' => 'decimal:2',
         'unit_price' => 'decimal:2',
     ];
@@ -30,5 +35,10 @@ class PurchaseOrderItem extends Model
     public function ingredient(): BelongsTo
     {
         return $this->belongsTo(Ingredient::class);
+    }
+
+    public function purchaseRequestItem(): BelongsTo
+    {
+        return $this->belongsTo(PurchaseRequestItem::class, 'pr_item_id');
     }
 }
