@@ -20,6 +20,7 @@ use App\Modules\Orders\Http\Controllers\OrderController;
 use App\Modules\Orders\Http\Controllers\PosSessionController;
 use App\Modules\Orders\Http\Controllers\QrOrderController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
+use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
 use App\Modules\Purchase\Http\Controllers\GoodsReceiptController;
 use App\Modules\Purchase\Http\Controllers\PurchaseInvoiceController;
 use App\Modules\Purchase\Http\Controllers\PurchaseOrderController;
@@ -52,6 +53,7 @@ Route::prefix('v1')->group(function (): void {
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments']);
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments']);
+    Route::post('payment-webhooks/{provider}', [PaymentTransactionController::class, 'webhook']);
     Route::post('orders/shift-close', [OrderController::class, 'closeShift']);
     Route::apiResource('menu-items', MenuItemController::class)->only(['index', 'store', 'show', 'update']);
 
@@ -193,6 +195,9 @@ Route::prefix('v1')->group(function (): void {
         Route::post('pos-sessions/open', [PosSessionController::class, 'open'])->middleware('permission:pos.use');
         Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
         Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
+        Route::post('payment-transactions', [PaymentTransactionController::class, 'store'])->middleware('permission:pos.use');
+        Route::post('payment-transactions/reconcile', [PaymentTransactionController::class, 'reconcile'])->middleware('permission:pos.use');
+        Route::get('payment-transactions/{transaction}', [PaymentTransactionController::class, 'show'])->middleware('permission:pos.use');
         Route::get('kitchen/tickets', [KitchenTicketController::class, 'index'])->middleware('permission:pos.use');
         Route::patch('kitchen/tickets/{ticket}/status', [KitchenTicketController::class, 'updateStatus'])->middleware('permission:pos.use');
         Route::get('qr-orders', [QrOrderController::class, 'index'])->middleware('permission:pos.use');

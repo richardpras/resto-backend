@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\ExpirePendingPaymentsCommand;
+use App\Console\Commands\ReconcileStalePaymentsCommand;
 use App\Modules\Inventory\Repositories\EloquentIngredientRepository;
 use App\Modules\Inventory\Repositories\EloquentStockMovementRepository;
 use App\Modules\Inventory\Repositories\IngredientRepositoryInterface;
@@ -14,6 +16,8 @@ use App\Modules\Orders\Repositories\EloquentOrderRepository;
 use App\Modules\Orders\Repositories\EloquentQrOrderRequestRepository;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Orders\Repositories\QrOrderRequestRepositoryInterface;
+use App\Modules\Payments\Repositories\EloquentPaymentTransactionRepository;
+use App\Modules\Payments\Repositories\PaymentTransactionRepositoryInterface;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -29,6 +33,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(StockMovementRepositoryInterface::class, EloquentStockMovementRepository::class);
         $this->app->bind(MenuRepositoryInterface::class, EloquentMenuRepository::class);
         $this->app->bind(KitchenTicketRepositoryInterface::class, EloquentKitchenTicketRepository::class);
+        $this->app->bind(PaymentTransactionRepositoryInterface::class, EloquentPaymentTransactionRepository::class);
+        $this->commands([
+            ReconcileStalePaymentsCommand::class,
+            ExpirePendingPaymentsCommand::class,
+        ]);
     }
 
     /**
