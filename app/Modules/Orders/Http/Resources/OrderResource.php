@@ -12,8 +12,11 @@ class OrderResource extends JsonResource
         return [
             'id' => (string) $this->id,
             'outletId' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
+            'posSessionId' => $this->pos_session_id !== null ? (int) $this->pos_session_id : null,
             'code' => $this->code,
             'source' => $this->source,
+            'orderChannel' => $this->order_channel,
+            'serviceMode' => $this->service_mode,
             'orderType' => $this->order_type,
             'status' => $this->status,
             'subtotal' => (float) $this->subtotal,
@@ -21,6 +24,7 @@ class OrderResource extends JsonResource
             'total' => (float) $this->total,
             'discountAmount' => (float) ($this->discount_amount ?? 0),
             'paymentStatus' => $this->payment_status,
+            'kitchenStatus' => $this->kitchen_status ?? 'queued',
             'isPosted' => (bool) $this->is_posted,
             'customerName' => $this->customer_name,
             'customerPhone' => $this->customer_phone,
@@ -40,8 +44,10 @@ class OrderResource extends JsonResource
             ])),
             'payments' => $this->whenLoaded('payments', fn () => $this->payments->map(fn ($payment) => [
                 'id' => $payment->id,
+                'orderSplitId' => $payment->order_split_id !== null ? (int) $payment->order_split_id : null,
                 'method' => $payment->method,
                 'amount' => (float) $payment->amount,
+                'status' => (string) ($payment->status ?? 'paid'),
                 'paidAt' => $payment->paid_at?->toISOString(),
                 'allocations' => $payment->relationLoaded('allocations')
                     ? $payment->allocations->map(fn ($allocation) => [
@@ -51,6 +57,19 @@ class OrderResource extends JsonResource
                     ])->values()
                     : [],
             ])),
+            'splits' => $this->whenLoaded('splits', fn () => $this->splits->map(fn ($split) => [
+                'id' => (int) $split->id,
+                'splitType' => (string) $split->split_type,
+                'label' => (string) $split->label,
+                'status' => (string) $split->status,
+                'items' => $split->relationLoaded('items')
+                    ? $split->items->map(fn ($item) => [
+                        'orderItemId' => (int) $item->order_item_id,
+                        'qty' => (float) $item->qty,
+                        'amount' => (float) $item->amount,
+                    ])->values()
+                    : [],
+            ])->values()),
             'createdAt' => $this->created_at?->toISOString(),
             'confirmedAt' => $this->confirmed_at?->toISOString(),
         ];

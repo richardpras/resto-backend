@@ -24,7 +24,7 @@ class TableMasterApiTest extends TestCase
 
     public function test_master_table_crud_respects_outlet_scope_and_unique_name(): void
     {
-        $this->actingAsUserManagementApiAdministrator();
+        $user = $this->actingAsUserManagementApiAdministrator();
 
         $outlet = Outlet::query()->create([
             'name' => 'Test Outlet',
@@ -34,6 +34,7 @@ class TableMasterApiTest extends TestCase
             'status' => 'active',
             'code' => 't-out-'.uniqid(),
         ]);
+        $this->assignUserToOutlets($user, [$outlet->id]);
 
         $list = $this->getJson('/api/v1/tables?outletId='.$outlet->id)->assertOk();
         $list->assertJsonPath('data', []);
@@ -110,5 +111,60 @@ class TableMasterApiTest extends TestCase
             'table_id' => $t->id,
             'table_name' => 'T5',
         ]);
+    }
+
+    public function test_table_master_list_and_mutation_are_outlet_scoped_for_user(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $allowedOutlet = Outlet::query()->create([
+            'name' => 'Allowed',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'allow-'.uniqid(),
+        ]);
+        $forbiddenOutlet = Outlet::query()->create([
+            'name' => 'Forbidden',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'forbid-'.uniqid(),
+        ]);
+
+        $this->assignUserToOutlets($user, [$allowedOutlet->id]);
+
+        $allowedTable = RestaurantTable::query()->create([
+            'outlet_id' => $allowedOutlet->id,
+            'name' => 'A1',
+            'capacity' => 2,
+            'status' => 'active',
+        ]);
+        $forbiddenTable = RestaurantTable::query()->create([
+            'outlet_id' => $forbiddenOutlet->id,
+            'name' => 'B1',
+            'capacity' => 4,
+            'status' => 'active',
+        ]);
+
+        $this->getJson('/api/v1/tables?outletId='.$allowedOutlet->id)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (int) $allowedTable->id);
+
+        $this->getJson('/api/v1/tables?outletId='.$forbiddenOutlet->id)->assertUnprocessable();
+
+        $this->postJson('/api/v1/tables', [
+            'outletId' => $forbiddenOutlet->id,
+            'name' => 'B2',
+            'status' => 'active',
+        ])->assertUnprocessable();
+
+        $this->patchJson('/api/v1/tables/'.$forbiddenTable->id, [
+            'capacity' => 6,
+        ])->assertNotFound();
+
+        $this->deleteJson('/api/v1/tables/'.$forbiddenTable->id)->assertNotFound();
     }
 }

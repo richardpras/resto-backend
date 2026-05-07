@@ -12,6 +12,13 @@ interface OrderRepositoryInterface
 
     public function findById(int $id): ?Order;
 
+    /**
+     * Find an order by id only when its outlet is in the supplied allow-list.
+     *
+     * @param  list<int>  $allowedOutletIds
+     */
+    public function findScoped(int $id, array $allowedOutletIds): ?Order;
+
     public function create(array $attributes): Order;
 
     public function update(Order $order, array $attributes): bool;

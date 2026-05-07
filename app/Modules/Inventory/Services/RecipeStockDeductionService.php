@@ -64,7 +64,13 @@ class RecipeStockDeductionService
                     'sale',
                     $requiredQty,
                     'order_payment',
-                    $locked->code
+                    $locked->code,
+                    [
+                        'cost_method' => 'moving_average_ready',
+                        'event' => 'cogs_recognition_pending',
+                        'order_id' => (int) $locked->id,
+                        'order_code' => (string) $locked->code,
+                    ]
                 );
             }
 

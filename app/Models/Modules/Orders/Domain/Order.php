@@ -10,11 +10,15 @@ class Order extends Model
     protected $fillable = [
         'tenant_id',
         'outlet_id',
+        'pos_session_id',
         'code',
         'source',
+        'order_channel',
+        'service_mode',
         'order_type',
         'status',
         'payment_status',
+        'kitchen_status',
         'subtotal',
         'tax',
         'total',
@@ -47,5 +51,10 @@ class Order extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    public function splits(): HasMany
+    {
+        return $this->hasMany(OrderSplit::class);
     }
 }

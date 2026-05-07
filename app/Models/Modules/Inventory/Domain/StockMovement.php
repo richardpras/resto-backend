@@ -14,10 +14,16 @@ class StockMovement extends Model
         'quantity',
         'source_type',
         'source_id',
+        'unit_cost',
+        'total_cost',
+        'ledger_payload',
     ];
 
     protected $casts = [
         'outlet_id' => 'integer',
+        'unit_cost' => 'float',
+        'total_cost' => 'float',
+        'ledger_payload' => 'array',
     ];
 
     public function ingredient(): BelongsTo

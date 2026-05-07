@@ -6,14 +6,19 @@ use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\Modules\Orders\Domain\Order;
+use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Print\Domain\PrintJob;
+use App\Models\User;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
+use App\Modules\Kitchen\Services\KitchenTicketService;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
+use App\Modules\Settings\Support\OutletAccessResolver;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -23,18 +28,77 @@ class OrderService
     public function __construct(
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly RecipeStockDeductionService $recipeStockDeductionService,
+        private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly PaymentAllocationService $paymentAllocationService,
+        private readonly KitchenTicketService $kitchenTicketService,
+        private readonly OptimisticConcurrencyService $optimisticConcurrencyService,
+        private readonly PosAuditLogService $auditLogService,
     ) {}
 
+    /**
+     * @param array<string,mixed> $filters
+     */
+    public function listOrders(?User $user, int $tenantId, int $perPage, array $filters)
+    {
+        $allowed = $user !== null ? $this->outletAccessResolver->allowedOutletIds($user) : null;
+
+        $requestedOutletId = isset($filters['outlet_id']) ? (int) $filters['outlet_id'] : null;
+        if ($requestedOutletId !== null && $requestedOutletId > 0 && $allowed !== null) {
+            if (! in_array($requestedOutletId, $allowed, true)) {
+                throw ValidationException::withMessages([
+                    'outletId' => ['The selected outletId is invalid.'],
+                ]);
+            }
+        }
+
+        if ($allowed !== null) {
+            $filters['allowed_outlet_ids'] = $allowed;
+        }
+
+        return $this->orderRepository->paginateByTenant($tenantId, $perPage, $filters);
+    }
+
+    /** @deprecated Prefer {@see self::listOrders()} which is outlet-scoped. */
     public function listByTenant(int $tenantId, int $perPage = 20, array $filters = [])
     {
         return $this->orderRepository->paginateByTenant($tenantId, $perPage, $filters);
     }
 
-    public function create(CreateOrderData $data)
+    public function findScoped(?User $user, int $orderId): ?Order
     {
-        return DB::transaction(function () use ($data) {
+        if ($user === null) {
+            return $this->orderRepository->findWithRelations($orderId);
+        }
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+
+        return $this->orderRepository->findScoped($orderId, $allowed);
+    }
+
+    public function create(CreateOrderData $data, ?User $user = null)
+    {
+        if ($user !== null && $data->outletId !== null) {
+            $this->assertOutletAllowed($user, (int) $data->outletId);
+        }
+
+        $explicitServiceMode = $data->serviceMode !== null;
+        $serviceMode = $this->resolveServiceMode($data);
+        $orderChannel = $this->resolveOrderChannel($data, $serviceMode);
+        $posSessionId = $this->resolvePosSessionId($data, $serviceMode, $explicitServiceMode);
+
+        if ($explicitServiceMode && $serviceMode === 'dine_in' && $data->tableId === null) {
+            throw ValidationException::withMessages([
+                'tableId' => ['Dine-in orders require a table.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($data, $serviceMode, $orderChannel, $posSessionId, $user) {
             $normalizedPayments = $this->normalizePayments($data->payments);
             $paidTotal = collect($normalizedPayments)->sum(fn (array $payment): float => (float) $payment['amount']);
+            if ($paidTotal > ((float) $data->total + 0.00001)) {
+                throw ValidationException::withMessages([
+                    'payments' => ['Total allocated payment cannot exceed order total.'],
+                ]);
+            }
             $paymentStatus = $paidTotal >= $data->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
             $status = $paymentStatus === 'paid' && $data->status !== 'cancelled' ? 'completed' : $data->status;
 
@@ -43,11 +107,15 @@ class OrderService
             $order = $this->orderRepository->create([
                 'tenant_id' => $data->tenantId,
                 'outlet_id' => $data->outletId,
+                'pos_session_id' => $posSessionId,
                 'code' => $data->code,
                 'source' => $data->source,
+                'order_channel' => $orderChannel,
+                'service_mode' => $serviceMode,
                 'order_type' => $data->orderType,
                 'status' => $status,
                 'payment_status' => $paymentStatus,
+                'kitchen_status' => 'queued',
                 'subtotal' => $data->subtotal,
                 'tax' => $data->tax,
                 'total' => $data->total,
@@ -81,6 +149,7 @@ class OrderService
 
             if ($status === 'confirmed' || $status === 'completed') {
                 $this->createPrintJob($order->id, 'kitchen');
+                $this->kitchenTicketService->createFromOrder($order->fresh(['items']));
             }
 
             if ($paymentStatus === 'paid') {
@@ -88,8 +157,157 @@ class OrderService
                 $this->createPrintJob($order->id, 'receipt');
             }
 
+            $this->auditLogService->log(
+                'order.created',
+                'order',
+                (int) $order->id,
+                (int) ($order->outlet_id ?? 0),
+                $user,
+                ['status' => (string) $order->status, 'paymentStatus' => (string) $order->payment_status]
+            );
+
             return $this->orderRepository->findWithRelations($order->id);
         });
+    }
+
+    /**
+     * Phase 2 lifecycle alias — explicit outlet-scoped order creation.
+     */
+    public function createOrder(User $user, CreateOrderData $data): ?Order
+    {
+        return $this->create($data, $user);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    public function updateOrder(User $user, int $orderId, array $payload): Order
+    {
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+
+        return DB::transaction(function () use ($orderId, $payload, $allowed, $user): Order {
+            $order = $this->orderRepository->findScoped($orderId, $allowed);
+            if ($order === null) {
+                throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+            }
+
+            $this->validateEditableOrder($order);
+            $this->optimisticConcurrencyService->assertNotStale(
+                $order,
+                isset($payload['expectedUpdatedAt']) ? (string) $payload['expectedUpdatedAt'] : null
+            );
+
+            if (array_key_exists('items', $payload) && is_array($payload['items'])) {
+                OrderItem::query()->where('order_id', $order->id)->delete();
+                foreach ($payload['items'] as $item) {
+                    OrderItem::query()->create([
+                        'order_id' => $order->id,
+                        'item_id' => $item['id'],
+                        'name' => $item['name'],
+                        'emoji' => $item['emoji'] ?? null,
+                        'qty' => $item['qty'],
+                        'price' => $item['price'],
+                        'line_total' => (float) $item['qty'] * (float) $item['price'],
+                        'notes' => $item['notes'] ?? null,
+                    ]);
+                }
+            }
+
+            $attributes = [];
+            foreach (['subtotal', 'tax', 'total'] as $field) {
+                if (array_key_exists($field, $payload)) {
+                    $attributes[$field] = (float) $payload[$field];
+                }
+            }
+            if (array_key_exists('discountAmount', $payload)) {
+                $attributes['discount_amount'] = (float) $payload['discountAmount'];
+            }
+            if (array_key_exists('customerName', $payload)) {
+                $attributes['customer_name'] = $payload['customerName'];
+            }
+            if (array_key_exists('customerPhone', $payload)) {
+                $attributes['customer_phone'] = $payload['customerPhone'];
+            }
+            if (array_key_exists('total', $payload)) {
+                $attributes['balance_due'] = max(0, (float) $payload['total'] - (float) $order->paid_total);
+            }
+
+            if ($attributes !== []) {
+                $this->orderRepository->update($order, $attributes);
+            }
+
+            $fresh = $this->orderRepository->findWithRelations($order->id);
+            if ($fresh === null) {
+                throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+            }
+
+            $this->auditLogService->log(
+                'order.updated',
+                'order',
+                (int) $fresh->id,
+                (int) ($fresh->outlet_id ?? 0),
+                $user,
+                ['fields' => array_keys($attributes)]
+            );
+
+            return $fresh;
+        });
+    }
+
+    /**
+     * Attach a master floor table to an existing editable order.
+     */
+    public function attachTable(User $user, int $orderId, int $tableId): Order
+    {
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+        $order = $this->orderRepository->findScoped($orderId, $allowed);
+        if ($order === null) {
+            throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+        }
+
+        $this->validateEditableOrder($order);
+
+        $table = RestaurantTable::query()
+            ->whereKey($tableId)
+            ->where('outlet_id', $order->outlet_id)
+            ->where('status', 'active')
+            ->first();
+        if ($table === null) {
+            throw ValidationException::withMessages([
+                'tableId' => ['Table not found for this outlet or table is inactive.'],
+            ]);
+        }
+
+        $this->orderRepository->update($order, [
+            'table_id' => $table->id,
+            'table_name' => $table->name,
+            'service_mode' => 'dine_in',
+        ]);
+
+        $fresh = $this->orderRepository->findWithRelations($order->id);
+        if ($fresh === null) {
+            throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+        }
+
+        return $fresh;
+    }
+
+    /**
+     * Throws when an order is no longer editable (paid, void, cancelled).
+     */
+    public function validateEditableOrder(Order $order): void
+    {
+        $paymentStatus = (string) $order->payment_status;
+        if (! in_array($paymentStatus, ['unpaid', 'partial'], true)) {
+            throw ValidationException::withMessages([
+                'paymentStatus' => ['Order is no longer editable (payment status is '.$paymentStatus.').'],
+            ]);
+        }
+        if ((string) $order->status === 'cancelled') {
+            throw ValidationException::withMessages([
+                'status' => ['Cancelled orders cannot be edited.'],
+            ]);
+        }
     }
 
     public function find(int $id)
@@ -97,51 +315,84 @@ class OrderService
         return $this->orderRepository->findWithRelations($id);
     }
 
-    public function updateStatus(int $id, string $status)
+    public function updateStatus(?User $user, int $id, string $status)
     {
-        $order = $this->orderRepository->findById($id);
-        if ($order === null) {
-            return null;
+        if ($user !== null) {
+            $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+            $order = $this->orderRepository->findScoped($id, $allowed);
+            if ($order === null) {
+                return null;
+            }
+        } else {
+            $order = $this->orderRepository->findById($id);
+            if ($order === null) {
+                return null;
+            }
         }
 
         $this->orderRepository->update($order, ['status' => $status]);
+        if (in_array($status, ['confirmed', 'completed'], true)) {
+            $this->kitchenTicketService->createFromOrder($order->fresh(['items']));
+        }
 
         return $this->orderRepository->findWithRelations($id);
     }
 
     public function addPayments(
+        ?User $user,
         int $id,
         array $payments,
         ?string $cashAccountCode = null,
-        ?string $revenueAccountCode = null
+        ?string $revenueAccountCode = null,
+        ?string $idempotencyKey = null,
+        ?string $expectedUpdatedAt = null
     ) {
-        return DB::transaction(function () use ($id, $payments) {
-            $order = $this->orderRepository->findById($id);
-            if ($order === null) {
-                return null;
-            }
+        if ($user === null) {
+            return DB::transaction(function () use ($id, $payments) {
+                $order = $this->orderRepository->findById($id);
+                if ($order === null) {
+                    return null;
+                }
 
-            $normalizedPayments = $this->normalizePayments($payments);
-            $this->storePayments($order->id, $normalizedPayments);
+                $normalizedPayments = $this->normalizePayments($payments);
+                $incoming = collect($normalizedPayments)->sum(fn (array $payment): float => (float) $payment['amount']);
+                $existing = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
+                if (($existing + $incoming) > ((float) $order->total + 0.00001)) {
+                    throw ValidationException::withMessages([
+                        'payments' => ['Total allocated payment cannot exceed order total.'],
+                    ]);
+                }
 
-            $paidTotal = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
-            $paymentStatus = $paidTotal >= (float) $order->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
-            $status = $paymentStatus === 'paid' && $order->status !== 'cancelled' ? 'completed' : $order->status;
+                $this->storePayments($order->id, $normalizedPayments);
+                $paidTotal = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
+                $paymentStatus = $paidTotal >= (float) $order->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
+                $status = $paymentStatus === 'paid' && $order->status !== 'cancelled' ? 'completed' : $order->status;
+                (new PosTransitionValidator())->assertPaymentStatusTransition((string) $order->payment_status, $paymentStatus);
 
-            $this->orderRepository->update($order, [
-                'status' => $status,
-                'payment_status' => $paymentStatus,
-                'paid_total' => $paidTotal,
-                'balance_due' => max(0, (float) $order->total - $paidTotal),
-            ]);
+                $this->orderRepository->update($order, [
+                    'status' => $status,
+                    'payment_status' => $paymentStatus,
+                    'paid_total' => $paidTotal,
+                    'balance_due' => max(0, (float) $order->total - $paidTotal),
+                ]);
 
-            if ($paymentStatus === 'paid') {
-                $this->recipeStockDeductionService->deductForPaidOrder($order->fresh(['items']));
-                $this->createPrintJob($order->id, 'receipt');
-            }
+                if ($paymentStatus === 'paid') {
+                    $this->recipeStockDeductionService->deductForPaidOrder($order->fresh(['items']));
+                    $this->createPrintJob($order->id, 'receipt');
+                }
 
-            return $this->orderRepository->findWithRelations($order->id);
-        });
+                return $this->orderRepository->findWithRelations($order->id);
+            });
+        }
+
+        $before = $this->orderRepository->findScoped($id, $this->outletAccessResolver->allowedOutletIds($user));
+        $updated = $this->paymentAllocationService->addPayments($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt);
+        if ($updated !== null && $before !== null && (string) $before->payment_status !== 'paid' && (string) $updated->payment_status === 'paid') {
+            $this->recipeStockDeductionService->deductForPaidOrder($updated->fresh(['items']));
+            $this->createPrintJob($updated->id, 'receipt');
+        }
+
+        return $updated;
     }
 
     public function closeShiftAndPostJournal(
@@ -240,6 +491,88 @@ class OrderService
                 'journalId' => (string) $journal->id,
             ];
         });
+    }
+
+    private function assertOutletAllowed(User $user, int $outletId): void
+    {
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+        if (! in_array($outletId, $allowed, true)) {
+            throw ValidationException::withMessages([
+                'outletId' => ['The selected outletId is invalid.'],
+            ]);
+        }
+    }
+
+    private function resolveServiceMode(CreateOrderData $data): ?string
+    {
+        if ($data->serviceMode !== null) {
+            return $data->serviceMode;
+        }
+
+        return match (strtolower(trim($data->orderType))) {
+            'dine-in', 'dine_in', 'dinein' => 'dine_in',
+            'takeaway', 'take-away', 'take_away' => 'takeaway',
+            default => null,
+        };
+    }
+
+    private function resolveOrderChannel(CreateOrderData $data, ?string $serviceMode): ?string
+    {
+        if ($data->orderChannel !== null) {
+            return $data->orderChannel;
+        }
+        if ($data->source === 'qr') {
+            return 'qr';
+        }
+        if ($serviceMode === 'dine_in') {
+            return 'dine_in';
+        }
+        if ($serviceMode === 'takeaway') {
+            return 'takeaway';
+        }
+
+        return null;
+    }
+
+    private function resolvePosSessionId(CreateOrderData $data, ?string $serviceMode, bool $strict): ?int
+    {
+        if ($data->posSessionId !== null && $data->posSessionId > 0) {
+            $session = PosSession::query()->whereKey($data->posSessionId)->first();
+            if ($session === null || (string) $session->status !== 'open') {
+                throw ValidationException::withMessages([
+                    'posSessionId' => ['POS session is not open.'],
+                ]);
+            }
+            if ($data->outletId !== null && (int) $session->outlet_id !== (int) $data->outletId) {
+                throw ValidationException::withMessages([
+                    'posSessionId' => ['POS session does not belong to the selected outlet.'],
+                ]);
+            }
+
+            return (int) $session->id;
+        }
+
+        if ($serviceMode === 'dine_in' && $data->outletId !== null) {
+            $session = PosSession::query()
+                ->where('outlet_id', $data->outletId)
+                ->where('status', 'open')
+                ->latest('id')
+                ->first();
+
+            if ($session === null) {
+                if ($strict) {
+                    throw ValidationException::withMessages([
+                        'posSessionId' => ['Dine-in orders require an open POS session for the outlet.'],
+                    ]);
+                }
+
+                return null;
+            }
+
+            return (int) $session->id;
+        }
+
+        return null;
     }
 
     private function normalizePayments(array $payments): array

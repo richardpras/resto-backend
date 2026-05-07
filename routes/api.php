@@ -12,9 +12,12 @@ use App\Modules\HR\Http\Controllers\PayrollController;
 use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
+use App\Modules\Kitchen\Http\Controllers\KitchenTicketController;
 use App\Modules\Members\Http\Controllers\MemberController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Orders\Http\Controllers\PosSessionController;
+use App\Modules\Orders\Http\Controllers\QrOrderController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Purchase\Http\Controllers\GoodsReceiptController;
 use App\Modules\Purchase\Http\Controllers\PurchaseInvoiceController;
@@ -39,10 +42,15 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::post('auth/login', [AuthController::class, 'login']);
+    Route::post('qr-orders', [QrOrderController::class, 'store']);
 
     Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
     Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus']);
+    Route::patch('orders/{order}', [OrderController::class, 'update']);
+    Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit']);
+    Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments']);
+    Route::get('orders/{order}/payments', [OrderController::class, 'listPayments']);
     Route::post('orders/shift-close', [OrderController::class, 'closeShift']);
     Route::apiResource('menu-items', MenuItemController::class)->only(['index', 'store', 'show', 'update']);
 
@@ -173,6 +181,14 @@ Route::prefix('v1')->group(function (): void {
         Route::post('tables', [TableMasterController::class, 'store'])->middleware('permission:tables.manage');
         Route::patch('tables/{table}', [TableMasterController::class, 'update'])->middleware('permission:tables.manage');
         Route::delete('tables/{table}', [TableMasterController::class, 'destroy'])->middleware('permission:tables.manage');
+        Route::post('pos-sessions/open', [PosSessionController::class, 'open'])->middleware('permission:pos.use');
+        Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
+        Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
+        Route::get('kitchen/tickets', [KitchenTicketController::class, 'index'])->middleware('permission:pos.use');
+        Route::patch('kitchen/tickets/{ticket}/status', [KitchenTicketController::class, 'updateStatus'])->middleware('permission:pos.use');
+        Route::get('qr-orders', [QrOrderController::class, 'index'])->middleware('permission:pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/confirm', [QrOrderController::class, 'confirm'])->middleware('permission:pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission:pos.use');
 
         Route::get('suppliers', [SupplierController::class, 'index'])->middleware('permission:suppliers.manage');
         Route::post('suppliers', [SupplierController::class, 'store'])->middleware('permission:suppliers.manage');

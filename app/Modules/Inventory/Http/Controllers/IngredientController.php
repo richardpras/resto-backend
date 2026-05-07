@@ -20,7 +20,13 @@ class IngredientController extends Controller
     public function index(): JsonResponse
     {
         $tenantId = (int) request()->query('tenantId', 0);
-        $ingredients = $this->inventoryService->listIngredients($tenantId, (int) request()->query('perPage', 20));
+        $outletId = request()->query('outletId');
+        $ingredients = $this->inventoryService->listIngredients(
+            $tenantId,
+            (int) request()->query('perPage', 20),
+            is_numeric($outletId) ? (int) $outletId : null,
+            request()->user('api')
+        );
 
         return response()->json([
             'data' => IngredientResource::collection($ingredients->getCollection()),
@@ -36,7 +42,8 @@ class IngredientController extends Controller
     public function store(StoreIngredientRequest $request): JsonResponse
     {
         $ingredient = $this->inventoryService->createIngredient(
-            CreateIngredientData::fromArray($request->validated())
+            CreateIngredientData::fromArray($request->validated()),
+            $request->user('api')
         );
 
         return response()->json([
@@ -47,7 +54,7 @@ class IngredientController extends Controller
 
     public function update(UpdateIngredientRequest $request, int $ingredient): JsonResponse
     {
-        $updated = $this->inventoryService->updateIngredient($ingredient, $request->validated());
+        $updated = $this->inventoryService->updateIngredient($ingredient, $request->validated(), $request->user('api'));
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'Ingredient not found');
 
         return response()->json([
@@ -58,7 +65,7 @@ class IngredientController extends Controller
 
     public function destroy(int $ingredient): JsonResponse
     {
-        $deleted = $this->inventoryService->deleteIngredient($ingredient);
+        $deleted = $this->inventoryService->deleteIngredient($ingredient, request()->user('api'));
         abort_if(! $deleted, Response::HTTP_NOT_FOUND, 'Ingredient not found');
 
         return response()->json([

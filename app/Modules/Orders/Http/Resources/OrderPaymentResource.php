@@ -1,0 +1,27 @@
+<?php
+
+namespace App\Modules\Orders\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class OrderPaymentResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => (int) $this->id,
+            'orderId' => (int) $this->order_id,
+            'orderSplitId' => $this->order_split_id !== null ? (int) $this->order_split_id : null,
+            'method' => (string) $this->method,
+            'amount' => (float) $this->amount,
+            'status' => (string) $this->status,
+            'paidAt' => $this->paid_at?->toISOString(),
+            'allocations' => $this->whenLoaded('allocations', fn () => $this->allocations->map(fn ($allocation) => [
+                'orderItemId' => (int) $allocation->order_item_id,
+                'qty' => (float) $allocation->qty,
+                'amount' => (float) $allocation->amount,
+            ])->values()),
+        ];
+    }
+}

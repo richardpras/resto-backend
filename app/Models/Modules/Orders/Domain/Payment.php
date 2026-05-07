@@ -10,8 +10,10 @@ class Payment extends Model
 {
     protected $fillable = [
         'order_id',
+        'order_split_id',
         'method',
         'amount',
+        'status',
         'split_bill_label',
         'split_bill_group',
         'paid_at',
@@ -29,5 +31,10 @@ class Payment extends Model
     public function allocations(): HasMany
     {
         return $this->hasMany(OrderPaymentAllocation::class);
+    }
+
+    public function split(): BelongsTo
+    {
+        return $this->belongsTo(OrderSplit::class, 'order_split_id');
     }
 }

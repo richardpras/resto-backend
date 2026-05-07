@@ -6,7 +6,7 @@ use App\Models\Modules\Inventory\Domain\Ingredient;
 
 interface IngredientRepositoryInterface
 {
-    public function paginateByTenant(int $tenantId, int $perPage = 20);
+    public function paginateByTenant(int $tenantId, int $perPage = 20, ?int $outletId = null, ?array $allowedOutletIds = null);
 
     public function findById(int $id): ?Ingredient;
 

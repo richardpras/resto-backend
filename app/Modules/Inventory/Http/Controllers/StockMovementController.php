@@ -27,6 +27,7 @@ class StockMovementController extends Controller
             $tenantId,
             (int) request()->query('per_page', 20),
             $outletFilter > 0 ? $outletFilter : null,
+            request()->user('api')
         );
 
         return response()->json([
@@ -43,7 +44,8 @@ class StockMovementController extends Controller
     public function store(StoreStockMovementRequest $request): JsonResponse
     {
         $movement = $this->inventoryService->addStockMovement(
-            CreateStockMovementData::fromArray($request->validated())
+            CreateStockMovementData::fromArray($request->validated()),
+            $request->user('api')
         );
 
         return response()->json([

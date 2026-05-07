@@ -6,10 +6,12 @@ use App\Models\Modules\Inventory\Domain\Ingredient;
 
 class EloquentIngredientRepository implements IngredientRepositoryInterface
 {
-    public function paginateByTenant(int $tenantId, int $perPage = 20)
+    public function paginateByTenant(int $tenantId, int $perPage = 20, ?int $outletId = null, ?array $allowedOutletIds = null)
     {
         return Ingredient::query()
             ->when($tenantId > 0, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->when($outletId !== null && $outletId > 0, fn ($query) => $query->where('outlet_id', $outletId))
+            ->when($allowedOutletIds !== null, fn ($query) => $query->whereIn('outlet_id', $allowedOutletIds))
             ->latest('id')
             ->paginate($perPage);
     }

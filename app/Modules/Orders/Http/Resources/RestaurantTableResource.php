@@ -13,9 +13,12 @@ class RestaurantTableResource extends JsonResource
         return [
             'id' => (int) $this->id,
             'outletId' => (int) $this->outlet_id,
+            'code' => $this->code,
             'name' => $this->name,
             'capacity' => $this->capacity,
+            'zone' => $this->zone,
             'status' => $this->status,
+            'active' => (bool) ($this->active ?? true),
         ];
     }
 }

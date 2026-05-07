@@ -25,6 +25,9 @@ readonly class CreateOrderData
         public ?string $createdAt = null,
         public ?string $confirmedAt = null,
         public ?array $splitBill = null,
+        public ?string $serviceMode = null,
+        public ?string $orderChannel = null,
+        public ?int $posSessionId = null,
     ) {}
 
     public static function fromArray(array $payload): self
@@ -50,6 +53,13 @@ readonly class CreateOrderData
             createdAt: $payload['createdAt'] ?? null,
             confirmedAt: $payload['confirmedAt'] ?? null,
             splitBill: $payload['splitBill'] ?? null,
+            serviceMode: isset($payload['serviceMode']) && $payload['serviceMode'] !== ''
+                ? (string) $payload['serviceMode']
+                : null,
+            orderChannel: isset($payload['orderChannel']) && $payload['orderChannel'] !== ''
+                ? (string) $payload['orderChannel']
+                : null,
+            posSessionId: isset($payload['posSessionId']) ? (int) $payload['posSessionId'] : null,
         );
     }
 }

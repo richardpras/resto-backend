@@ -12,13 +12,17 @@ class RestaurantTable extends Model
 
     protected $fillable = [
         'outlet_id',
+        'code',
         'name',
         'capacity',
+        'zone',
         'status',
+        'active',
     ];
 
     protected $casts = [
         'capacity' => 'integer',
+        'active' => 'boolean',
     ];
 
     public function outlet(): BelongsTo
