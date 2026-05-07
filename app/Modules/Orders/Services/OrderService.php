@@ -13,6 +13,7 @@ use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\User;
+use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
 use App\Modules\Kitchen\Services\KitchenTicketService;
 use App\Modules\Orders\DTOs\CreateOrderData;
@@ -33,6 +34,7 @@ class OrderService
         private readonly KitchenTicketService $kitchenTicketService,
         private readonly OptimisticConcurrencyService $optimisticConcurrencyService,
         private readonly PosAuditLogService $auditLogService,
+        private readonly JournalPostingService $journalPostingService,
     ) {}
 
     /**
@@ -154,6 +156,7 @@ class OrderService
 
             if ($paymentStatus === 'paid') {
                 $this->recipeStockDeductionService->deductForPaidOrder($order);
+                $this->postOrderPaymentJournal($order->fresh(['payments']));
                 $this->createPrintJob($order->id, 'receipt');
             }
 
@@ -378,6 +381,7 @@ class OrderService
 
                 if ($paymentStatus === 'paid') {
                     $this->recipeStockDeductionService->deductForPaidOrder($order->fresh(['items']));
+                    $this->postOrderPaymentJournal($order->fresh(['payments']));
                     $this->createPrintJob($order->id, 'receipt');
                 }
 
@@ -389,6 +393,7 @@ class OrderService
         $updated = $this->paymentAllocationService->addPayments($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt);
         if ($updated !== null && $before !== null && (string) $before->payment_status !== 'paid' && (string) $updated->payment_status === 'paid') {
             $this->recipeStockDeductionService->deductForPaidOrder($updated->fresh(['items']));
+            $this->postOrderPaymentJournal($updated->fresh(['payments']));
             $this->createPrintJob($updated->id, 'receipt');
         }
 
@@ -811,5 +816,22 @@ class OrderService
         }
 
         return $query->orderBy('id')->first();
+    }
+
+    private function postOrderPaymentJournal(Order $order): void
+    {
+        $sales = (float) $order->paid_total;
+        $cogs = (float) DB::table('stock_movements')
+            ->where('source_type', 'order_payment')
+            ->where('source_id', (string) $order->code)
+            ->sum('total_cost');
+
+        $this->journalPostingService->postForOrderPayment(
+            (int) $order->id,
+            (int) ($order->tenant_id ?? 0),
+            $order->outlet_id !== null ? (int) $order->outlet_id : null,
+            $sales,
+            $cogs
+        );
     }
 }

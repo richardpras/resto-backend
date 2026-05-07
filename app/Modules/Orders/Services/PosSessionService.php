@@ -2,6 +2,7 @@
 
 namespace App\Modules\Orders\Services;
 
+use App\Modules\Accounting\Services\JournalPostingService;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\User;
 use App\Modules\Settings\Support\OutletAccessResolver;
@@ -16,6 +17,7 @@ class PosSessionService
         private readonly PosTransitionValidator $transitionValidator,
         private readonly PosIdempotencyService $idempotencyService,
         private readonly PosAuditLogService $auditLogService,
+        private readonly JournalPostingService $journalPostingService,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -97,6 +99,14 @@ class PosSessionService
                         'notes' => $data['notes'] ?? $session->notes,
                     ]);
                     $session->save();
+
+                    $this->journalPostingService->postForCashVariance(
+                        (int) $session->id,
+                        1,
+                        (int) $session->outlet_id,
+                        (float) $session->cash_variance
+                    );
+
                     $this->auditLogService->log('session.closed', 'pos_session', (int) $session->id, (int) $session->outlet_id, $user, [
                         'closingCash' => $closingCash,
                     ]);

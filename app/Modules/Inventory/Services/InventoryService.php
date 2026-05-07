@@ -4,6 +4,7 @@ namespace App\Modules\Inventory\Services;
 
 use App\Models\Modules\Inventory\Domain\InventoryStock;
 use App\Models\User;
+use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Inventory\DTOs\CreateIngredientData;
 use App\Modules\Inventory\DTOs\CreateStockMovementData;
 use App\Modules\Inventory\Repositories\IngredientRepositoryInterface;
@@ -22,6 +23,7 @@ class InventoryService
         private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly PosAuditLogService $auditLogService,
+        private readonly JournalPostingService $journalPostingService,
     ) {}
 
     public function listIngredients(int $tenantId, int $perPage = 20, ?int $outletId = null, ?User $actor = null)
@@ -167,6 +169,16 @@ class InventoryService
             $actor,
             ['type' => $data->type, 'sourceType' => $data->sourceType]
         );
+
+        if (in_array($data->type, ['adjustment', 'waste'], true)) {
+            $this->journalPostingService->postForInventoryMovement(
+                $data->type,
+                (int) $movement->id,
+                (int) ($ingredient->tenant_id ?? 0),
+                $data->outletId,
+                (float) ($movement->total_cost ?? 0)
+            );
+        }
 
         return $movement;
     }

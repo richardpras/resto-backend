@@ -4,10 +4,12 @@ namespace App\Modules\Accounting\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Modules\Accounting\Domain\Journal;
+use App\Modules\Accounting\Http\Requests\ReverseJournalRequest;
 use App\Modules\Accounting\Http\Requests\StoreJournalRequest;
 use App\Modules\Accounting\Http\Requests\UpdateJournalRequest;
 use App\Modules\Accounting\Http\Resources\JournalResource;
 use App\Modules\Accounting\Services\AccountingService;
+use App\Modules\Accounting\Services\JournalPostingService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -15,12 +17,19 @@ class JournalController extends Controller
 {
     public function __construct(
         private readonly AccountingService $accountingService,
+        private readonly JournalPostingService $journalPostingService,
     ) {}
 
     public function index(): JsonResponse
     {
         $tenantId = (int) request()->query('tenantId', 0);
-        $journals = $this->accountingService->listJournals($tenantId > 0 ? $tenantId : null);
+        $outletId = request()->query('outletId');
+        $user = request()->user('api');
+        $journals = $this->accountingService->listJournals(
+            $tenantId > 0 ? $tenantId : null,
+            $user instanceof \App\Models\User ? $user : null,
+            is_numeric($outletId) ? (int) $outletId : null
+        );
 
         return response()->json([
             'data' => JournalResource::collection($journals),
@@ -30,16 +39,37 @@ class JournalController extends Controller
     public function store(StoreJournalRequest $request): JsonResponse
     {
         $v = $request->validated();
+        $user = $request->user('api');
+        if ($user instanceof \App\Models\User && isset($v['outletId'])) {
+            $this->accountingService->assertOutletAllowedForActor($user, (int) $v['outletId']);
+        }
 
-        $journal = $this->accountingService->createJournal([
-            'tenant_id' => $v['tenantId'] ?? null,
-            'journal_no' => $v['journalNo'] ?? null,
-            'journal_date' => $v['journalDate'],
-            'description' => $v['description'] ?? null,
-            'outlet' => $v['outlet'] ?? null,
-            'status' => $v['status'] ?? 'draft',
-            'lines' => $this->mapLines($v['lines']),
-        ]);
+        $status = $v['status'] ?? 'draft';
+        if ($status === 'posted') {
+            $journal = $this->journalPostingService->post([
+                'tenant_id' => $v['tenantId'] ?? null,
+                'journal_no' => $v['journalNo'] ?? null,
+                'journal_date' => $v['journalDate'],
+                'description' => $v['description'] ?? null,
+                'outlet' => $v['outlet'] ?? null,
+                'outlet_id' => $v['outletId'] ?? null,
+                'posting_key' => $v['postingKey'] ?? null,
+                'source_type' => 'manual',
+                'source_id' => null,
+                'lines' => $this->mapLines($v['lines']),
+            ]);
+        } else {
+            $journal = $this->accountingService->createJournal([
+                'tenant_id' => $v['tenantId'] ?? null,
+                'journal_no' => $v['journalNo'] ?? null,
+                'journal_date' => $v['journalDate'],
+                'description' => $v['description'] ?? null,
+                'outlet' => $v['outlet'] ?? null,
+                'outlet_id' => $v['outletId'] ?? null,
+                'status' => 'draft',
+                'lines' => $this->mapLines($v['lines']),
+            ]);
+        }
 
         return response()->json([
             'message' => 'Journal created successfully.',
@@ -49,6 +79,10 @@ class JournalController extends Controller
 
     public function update(UpdateJournalRequest $request, Journal $journal): JsonResponse
     {
+        $user = $request->user('api');
+        if ($user instanceof \App\Models\User) {
+            $journal = $this->accountingService->findJournalOrFailForActor((int) $journal->id, $user);
+        }
         $v = $request->validated();
 
         $payload = [];
@@ -75,6 +109,10 @@ class JournalController extends Controller
 
     public function destroy(Journal $journal): JsonResponse
     {
+        $user = request()->user('api');
+        if ($user instanceof \App\Models\User) {
+            $journal = $this->accountingService->findJournalOrFailForActor((int) $journal->id, $user);
+        }
         $this->accountingService->deleteJournal($journal);
 
         return response()->json([
@@ -84,11 +122,37 @@ class JournalController extends Controller
 
     public function post(Journal $journal): JsonResponse
     {
+        $user = request()->user('api');
+        if ($user instanceof \App\Models\User) {
+            $journal = $this->accountingService->findJournalOrFailForActor((int) $journal->id, $user);
+        }
         $posted = $this->accountingService->postJournal($journal);
 
         return response()->json([
             'message' => 'Journal posted successfully.',
             'data' => new JournalResource($posted),
+        ]);
+    }
+
+    public function reverse(ReverseJournalRequest $request, Journal $journal): JsonResponse
+    {
+        $user = $request->user('api');
+        $actor = $user instanceof \App\Models\User ? $user : null;
+        if ($actor !== null) {
+            $journal = $this->accountingService->findJournalOrFailForActor((int) $journal->id, $actor);
+        }
+        $reversal = $this->journalPostingService->reverse(
+            $journal,
+            $actor,
+            $request->validated('postingKey') ?? $request->header('Idempotency-Key'),
+            $request->validated('reason')
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Journal reversed successfully.',
+            'data' => new JournalResource($reversal),
+            'meta' => null,
         ]);
     }
 

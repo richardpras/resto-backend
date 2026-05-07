@@ -10,17 +10,22 @@ class Account extends Model
 {
     protected $fillable = [
         'tenant_id',
+        'outlet_id',
+        'scope',
         'code',
         'name',
         'type',
+        'category',
         'subtype',
         'parent_id',
         'description',
+        'config',
         'is_active',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'config' => 'array',
     ];
 
     public function parent(): BelongsTo

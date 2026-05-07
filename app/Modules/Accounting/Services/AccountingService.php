@@ -5,6 +5,9 @@ namespace App\Modules\Accounting\Services;
 use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
+use App\Models\User;
+use App\Modules\Orders\Services\PosAuditLogService;
+use App\Modules\Settings\Support\OutletAccessResolver;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -15,12 +18,31 @@ use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 
 class AccountingService
 {
-    public function listAccounts(?int $tenantId = null): Collection
+    public function __construct(
+        private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly PosAuditLogService $auditLogService,
+        private readonly AccountingPeriodService $periodService,
+    ) {}
+
+    public function listAccounts(?int $tenantId = null, ?User $actor = null, ?int $outletId = null): Collection
     {
         $query = Account::query()->orderBy('code');
 
         if ($tenantId !== null && $tenantId > 0) {
             $query->where('tenant_id', $tenantId);
+        }
+        if ($actor !== null) {
+            $allowed = $this->outletAccessResolver->allowedOutletIds($actor);
+            if ($outletId !== null) {
+                $this->assertOutletAllowedForActor($actor, $outletId);
+                $query->where(function ($q) use ($outletId): void {
+                    $q->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                });
+            } else {
+                $query->where(function ($q) use ($allowed): void {
+                    $q->whereNull('outlet_id')->orWhereIn('outlet_id', $allowed === [] ? [-1] : $allowed);
+                });
+            }
         }
 
         return $query->get();
@@ -33,12 +55,16 @@ class AccountingService
     {
         return Account::query()->create([
             'tenant_id' => $data['tenant_id'] ?? null,
+            'outlet_id' => $data['outlet_id'] ?? null,
+            'scope' => $data['scope'] ?? (($data['outlet_id'] ?? null) ? 'outlet' : 'global'),
             'code' => $data['code'],
             'name' => $data['name'],
             'type' => $data['type'],
+            'category' => $data['category'] ?? null,
             'subtype' => $data['subtype'] ?? $this->defaultSubtypeForType($data['type']),
             'parent_id' => $data['parent_id'] ?? null,
             'description' => $data['description'] ?? null,
+            'config' => $data['config'] ?? null,
             'is_active' => $data['is_active'] ?? true,
         ]);
     }
@@ -50,11 +76,15 @@ class AccountingService
     {
         $account->fill([
             'code' => $data['code'] ?? $account->code,
+            'outlet_id' => array_key_exists('outlet_id', $data) ? $data['outlet_id'] : $account->outlet_id,
+            'scope' => $data['scope'] ?? $account->scope ?? (($account->outlet_id ?? null) ? 'outlet' : 'global'),
             'name' => $data['name'] ?? $account->name,
             'type' => $data['type'] ?? $account->type,
+            'category' => array_key_exists('category', $data) ? $data['category'] : $account->category,
             'subtype' => $data['subtype'] ?? $account->subtype ?? $this->defaultSubtypeForType($account->type),
             'parent_id' => array_key_exists('parent_id', $data) ? $data['parent_id'] : $account->parent_id,
             'description' => array_key_exists('description', $data) ? $data['description'] : $account->description,
+            'config' => array_key_exists('config', $data) ? $data['config'] : $account->config,
             'is_active' => $data['is_active'] ?? $account->is_active,
         ]);
         $account->save();
@@ -71,7 +101,7 @@ class AccountingService
         $account->delete();
     }
 
-    public function listJournals(?int $tenantId = null): Collection
+    public function listJournals(?int $tenantId = null, ?User $actor = null, ?int $outletId = null): Collection
     {
         $query = Journal::query()
             ->with(['entries' => fn ($q) => $q->orderBy('line_no')])
@@ -81,8 +111,52 @@ class AccountingService
         if ($tenantId !== null && $tenantId > 0) {
             $query->where('tenant_id', $tenantId);
         }
+        if ($actor !== null) {
+            $allowed = $this->outletAccessResolver->allowedOutletIds($actor);
+            if ($outletId !== null) {
+                $this->assertOutletAllowedForActor($actor, $outletId);
+                $query->where(function ($q) use ($outletId): void {
+                    $q->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                });
+            } else {
+                $query->where(function ($q) use ($allowed): void {
+                    $q->whereNull('outlet_id')->orWhereIn('outlet_id', $allowed === [] ? [-1] : $allowed);
+                });
+            }
+        }
 
         return $query->get();
+    }
+
+    public function findJournalOrFailForActor(int $journalId, ?User $actor): Journal
+    {
+        $query = Journal::query()->whereKey($journalId);
+        if ($actor !== null) {
+            $allowed = $this->outletAccessResolver->allowedOutletIds($actor);
+            $query->where(function ($q) use ($allowed): void {
+                $q->whereNull('outlet_id')->orWhereIn('outlet_id', $allowed === [] ? [-1] : $allowed);
+            });
+        }
+        $journal = $query->first();
+        if (! $journal instanceof Journal) {
+            if ($actor !== null) {
+                $this->auditLogService->log('unauthorized_access_attempt', 'journal', $journalId, null, $actor);
+            }
+            abort(404, 'Journal not found');
+        }
+
+        return $journal;
+    }
+
+    public function assertOutletAllowedForActor(User $actor, int $outletId): void
+    {
+        $allowed = $this->outletAccessResolver->allowedOutletIds($actor);
+        if (! in_array($outletId, $allowed, true)) {
+            $this->auditLogService->log('unauthorized_access_attempt', 'accounting_scope', $outletId, $outletId, $actor);
+            throw ValidationException::withMessages([
+                'outletId' => ['The selected outletId is invalid.'],
+            ]);
+        }
     }
 
     /**
@@ -96,6 +170,7 @@ class AccountingService
         return DB::transaction(function () use ($data, $lines): Journal {
             $journal = Journal::query()->create([
                 'tenant_id' => $data['tenant_id'] ?? null,
+                'outlet_id' => $data['outlet_id'] ?? null,
                 'journal_no' => $data['journal_no'] ?? $this->generateJournalNo(),
                 'source_type' => $data['source_type'] ?? 'manual',
                 'source_id' => $data['source_id'] ?? null,
@@ -117,7 +192,7 @@ class AccountingService
      */
     public function updateJournal(Journal $journal, array $data): Journal
     {
-        if ($journal->status !== 'draft') {
+        if ($journal->status !== 'draft' || (bool) ($journal->immutable ?? false)) {
             throw new UnprocessableEntityHttpException('Only draft journals can be updated.');
         }
 
@@ -145,7 +220,7 @@ class AccountingService
 
     public function deleteJournal(Journal $journal): void
     {
-        if ($journal->status !== 'draft') {
+        if ($journal->status !== 'draft' || (bool) ($journal->immutable ?? false)) {
             throw new UnprocessableEntityHttpException('Only draft journals can be deleted.');
         }
 
@@ -160,6 +235,11 @@ class AccountingService
         if ($journal->status !== 'draft') {
             throw new UnprocessableEntityHttpException('Only draft journals can be posted.');
         }
+        $this->periodService->assertDateOpen(
+            $journal->journal_date->format('Y-m-d'),
+            $journal->tenant_id !== null ? (int) $journal->tenant_id : null,
+            $journal->outlet_id !== null ? (int) $journal->outlet_id : null
+        );
 
         $journal->load(['entries']);
         $lines = $journal->entries->map(fn (JournalEntry $e) => [
@@ -171,9 +251,61 @@ class AccountingService
         $this->assertBalancedLines($lines);
 
         $journal->status = 'posted';
+        $journal->immutable = true;
+        $journal->posted_at = now();
         $journal->save();
 
         return $journal->refresh()->load(['entries' => fn ($q) => $q->orderBy('line_no')]);
+    }
+
+    /**
+     * @return array{rows:list<array{account:array{id:string,code:string,name:string,type:string,subtype:string,parentId:?string,description:?string,active:bool},debit:float,credit:float,balance:float}>,totalDebit:float,totalCredit:float,balanced:bool}
+     */
+    public function buildTrialBalanceReport(?string $to = null, ?int $outletId = null, ?int $tenantId = null): array
+    {
+        $accounts = $this->listAccounts($tenantId);
+        if ($outletId !== null && $outletId > 0) {
+            $accounts = $accounts->filter(fn (Account $a): bool => $a->outlet_id === null || (int) $a->outlet_id === $outletId)->values();
+        }
+        $posted = $this->listPostedJournalsForReports($tenantId, null, null, $to);
+        if ($outletId !== null && $outletId > 0) {
+            $posted = $posted->filter(fn (Journal $j): bool => $j->outlet_id === null || (int) $j->outlet_id === $outletId)->values();
+        }
+
+        $rows = [];
+        $totalDebit = 0.0;
+        $totalCredit = 0.0;
+        foreach ($accounts as $account) {
+            $debit = 0.0;
+            $credit = 0.0;
+            foreach ($posted as $journal) {
+                foreach ($journal->entries as $entry) {
+                    if ((string) $entry->account_id !== (string) $account->id) {
+                        continue;
+                    }
+                    $debit += (float) $entry->debit;
+                    $credit += (float) $entry->credit;
+                }
+            }
+            if (round($debit, 2) === 0.0 && round($credit, 2) === 0.0) {
+                continue;
+            }
+            $rows[] = [
+                'account' => $this->mapAccountForReport($account),
+                'debit' => round($debit, 2),
+                'credit' => round($credit, 2),
+                'balance' => round(in_array($account->type, ['asset', 'expense'], true) ? ($debit - $credit) : ($credit - $debit), 2),
+            ];
+            $totalDebit += $debit;
+            $totalCredit += $credit;
+        }
+
+        return [
+            'rows' => $rows,
+            'totalDebit' => round($totalDebit, 2),
+            'totalCredit' => round($totalCredit, 2),
+            'balanced' => round($totalDebit, 2) === round($totalCredit, 2),
+        ];
     }
 
     /**

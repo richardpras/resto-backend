@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Accounting\Http\Controllers\AccountController;
+use App\Modules\Accounting\Http\Controllers\AccountingPeriodController;
 use App\Modules\Accounting\Http\Controllers\JournalController;
 use App\Modules\Accounting\Http\Controllers\ReportController;
 use App\Modules\HR\Http\Controllers\AdjustmentController;
@@ -58,12 +59,20 @@ Route::prefix('v1')->group(function (): void {
     Route::get('stock-movements', [StockMovementController::class, 'index']);
     Route::post('stock-movements', [StockMovementController::class, 'store']);
 
-    Route::apiResource('accounts', AccountController::class)->only(['index', 'store', 'update', 'destroy']);
-    Route::apiResource('journals', JournalController::class)->only(['index', 'store', 'update', 'destroy']);
-    Route::post('journals/{journal}/post', [JournalController::class, 'post']);
-    Route::get('reports/ledger', [ReportController::class, 'ledger']);
-    Route::get('reports/profit-loss', [ReportController::class, 'profitLoss']);
-    Route::get('reports/balance-sheet', [ReportController::class, 'balanceSheet']);
+    Route::apiResource('accounts', AccountController::class)->only(['index', 'store', 'update', 'destroy'])
+        ->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::apiResource('journals', JournalController::class)->only(['index', 'store', 'update', 'destroy'])
+        ->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::post('journals/{journal}/post', [JournalController::class, 'post'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::post('journals/{journal}/reverse', [JournalController::class, 'reverse'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::get('accounting-periods', [AccountingPeriodController::class, 'index'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::post('accounting-periods', [AccountingPeriodController::class, 'store'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::post('accounting-periods/{period}/close', [AccountingPeriodController::class, 'close'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::post('accounting-periods/{period}/open', [AccountingPeriodController::class, 'open'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::get('reports/ledger', [ReportController::class, 'ledger'])->middleware(['auth:api', 'permission:reports.view']);
+    Route::get('reports/profit-loss', [ReportController::class, 'profitLoss'])->middleware(['auth:api', 'permission:reports.view']);
+    Route::get('reports/balance-sheet', [ReportController::class, 'balanceSheet'])->middleware(['auth:api', 'permission:reports.view']);
+    Route::get('reports/trial-balance', [ReportController::class, 'trialBalance'])->middleware(['auth:api', 'permission:reports.view']);
 
     Route::middleware('auth:api')->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);

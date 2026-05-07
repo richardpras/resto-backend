@@ -18,10 +18,14 @@ class AccountResource extends JsonResource
             'id' => (string) $this->id,
             'code' => $this->code,
             'name' => $this->name,
+            'scope' => $this->scope ?? 'global',
+            'outletId' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
             'type' => $this->type,
+            'category' => $this->category,
             'subtype' => $this->subtype ?? $this->defaultSubtype(),
             'parentId' => $this->parent_id !== null ? (string) $this->parent_id : null,
             'description' => $this->description,
+            'config' => $this->config,
             'active' => (bool) $this->is_active,
         ];
     }

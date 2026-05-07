@@ -25,6 +25,7 @@ class JournalResource extends JsonResource
             'reference' => $this->journal_no,
             'description' => $this->description ?? '',
             'outlet' => $this->outlet ?? 'Main Outlet',
+            'outletId' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
             'status' => $this->status === 'posted' ? 'posted' : 'draft',
             'lines' => $entries->map(fn ($e) => [
                 'id' => (string) $e->id,

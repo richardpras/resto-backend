@@ -14,12 +14,14 @@ class JournalEntry extends Model
         'debit',
         'credit',
         'memo',
+        'meta',
         'line_no',
     ];
 
     protected $casts = [
         'debit' => 'decimal:2',
         'credit' => 'decimal:2',
+        'meta' => 'array',
     ];
 
     public function journal(): BelongsTo
