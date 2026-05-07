@@ -11,12 +11,20 @@ use App\Models\Modules\Settings\Domain\PaymentMethod;
 use App\Models\Modules\Settings\Domain\SettingPrinter;
 use App\Models\Modules\Settings\Domain\SystemSetting;
 use App\Models\Modules\Settings\Domain\Tax;
+use App\Models\User;
 use App\Modules\Settings\Support\TemplateSettingsPayload;
+use App\Modules\Settings\Support\OutletAccessResolver;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class SettingsDomainService
 {
     private const SINGLETON_ID = 1;
+
+    public function __construct(
+        private readonly OutletAccessResolver $outletAccessResolver,
+    ) {}
 
     /** @return array<string, mixed> */
     public function getMerchant(): array
@@ -56,6 +64,24 @@ class SettingsDomainService
     public function listOutlets(): array
     {
         return Outlet::query()->orderBy('name')->get()->map(fn (Outlet $o) => $this->outletToCamel($o))->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listOutletsForUser(User $user): array
+    {
+        return $this->scopedOutletsQueryForUser($user)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Outlet $o) => $this->outletToCamel($o))
+            ->all();
+    }
+
+    public function listOutletsForUserPaginated(User $user, int $perPage = 10, int $page = 1): LengthAwarePaginator
+    {
+        return $this->scopedOutletsQueryForUser($user)
+            ->orderBy('name')
+            ->paginate($perPage, ['*'], 'page', $page)
+            ->through(fn (Outlet $o): array => $this->outletToCamel($o));
     }
 
     /** @param  array<string, mixed>  $data */
@@ -116,6 +142,35 @@ class SettingsDomainService
         return $this->outletToCamel($o->fresh());
     }
 
+    /** @param  array<string, mixed>  $data */
+    public function updateOutletForUser(User $user, int $id, array $data): array
+    {
+        $o = $this->findScopedOutletOrFail($user, $id);
+
+        $payload = [
+            'name' => $data['name'],
+            'address' => $data['address'] ?? null,
+            'phone' => $data['phone'] ?? null,
+            'manager' => $data['manager'] ?? null,
+            'status' => $data['status'] ?? $o->status,
+            'logo' => $data['logo'] ?? null,
+            'invoice_prefix' => $data['invoicePrefix'] ?? null,
+            'order_prefix' => $data['orderPrefix'] ?? null,
+        ];
+
+        if (array_key_exists('code', $data) && $data['code'] !== null) {
+            $c = trim((string) $data['code']);
+            if ($c !== '') {
+                $payload['code'] = $c;
+            }
+        }
+
+        $o->fill($payload);
+        $o->save();
+
+        return $this->outletToCamel($o->fresh());
+    }
+
     public function deleteOutlet(int $id): void
     {
         $o = Outlet::query()->whereKey($id)->first();
@@ -123,6 +178,11 @@ class SettingsDomainService
             throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $id]);
         }
         $o->delete();
+    }
+
+    public function deleteOutletForUser(User $user, int $id): void
+    {
+        $this->findScopedOutletOrFail($user, $id)->delete();
     }
 
     /** @return list<array<string, mixed>> */
@@ -469,6 +529,23 @@ class SettingsDomainService
         }
 
         return $out;
+    }
+
+    private function scopedOutletsQueryForUser(User $user): Builder
+    {
+        $allowedOutletIds = $this->outletAccessResolver->allowedOutletIds($user);
+
+        return Outlet::query()->whereIn('id', $allowedOutletIds);
+    }
+
+    private function findScopedOutletOrFail(User $user, int $id): Outlet
+    {
+        $outlet = $this->scopedOutletsQueryForUser($user)->whereKey($id)->first();
+        if ($outlet === null) {
+            throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $id]);
+        }
+
+        return $outlet;
     }
 
     /** @return array{name: string, businessType: string, address: string, phone: string, email: string, currency: string, timezone: string, language: string, logo?: string} */

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -53,5 +54,30 @@ class SettingsApiTest extends TestCase
         $this->getJson('/api/v1/merchant-settings')
             ->assertOk()
             ->assertJsonPath('data.name', 'Updated Merchant Co');
+    }
+
+    public function test_administrator_can_list_outlets_with_data_envelope(): void
+    {
+        $admin = $this->actingAsUserManagementApiAdministrator();
+
+        $outlet = Outlet::query()->create([
+            'code' => 'settings-outlet-'.uniqid(),
+            'name' => 'Settings Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+        ]);
+        $this->assignUserToOutlets($admin, [$outlet->id]);
+
+        $this->getJson('/api/v1/outlets?per_page=1&page=1')
+            ->assertOk()
+            ->assertJsonStructure(['success', 'message', 'data', 'meta' => ['current_page', 'per_page', 'total']])
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('message', 'Success')
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.per_page', 1)
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.id', $outlet->id);
     }
 }

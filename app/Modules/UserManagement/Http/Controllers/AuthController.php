@@ -4,6 +4,7 @@ namespace App\Modules\UserManagement\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Modules\Settings\Support\OutletAccessResolver;
 use App\Modules\UserManagement\Http\Requests\LoginRequest;
 use App\Modules\UserManagement\Http\Requests\UpdateScreenPinRequest;
 use App\Modules\UserManagement\Http\Requests\VerifyScreenPinRequest;
@@ -14,6 +15,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        private readonly OutletAccessResolver $outletAccessResolver,
+    ) {}
+
     public function login(LoginRequest $request): JsonResponse
     {
         $user = User::query()->where('email', $request->validated('email'))->first();
@@ -65,6 +70,7 @@ class AuthController extends Controller
                     'name' => $role->name,
                 ])->values()->all(),
                 'permissionCodes' => $permissionCodes,
+                'outlets' => $this->outletAccessResolver->scopedOutletPayload($user),
             ],
         ]);
     }

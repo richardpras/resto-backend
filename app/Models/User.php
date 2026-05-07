@@ -3,11 +3,13 @@
 namespace App\Models;
 
 use App\Models\Modules\HR\Domain\Employee;
+use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Passport\HasApiTokens;
@@ -77,5 +79,10 @@ class User extends Authenticatable
     public function employee()
     {
         return $this->hasOne(Employee::class);
+    }
+
+    public function outlets(): BelongsToMany
+    {
+        return $this->belongsToMany(Outlet::class, 'user_outlets');
     }
 }

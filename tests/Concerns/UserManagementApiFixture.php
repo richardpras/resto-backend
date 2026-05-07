@@ -4,6 +4,7 @@ namespace Tests\Concerns;
 
 use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
+use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\User;
 use Database\Seeders\UserManagementPermissionsSeeder;
 use Laravel\Passport\Passport;
@@ -38,5 +39,19 @@ trait UserManagementApiFixture
         Passport::actingAs($user);
 
         return $user;
+    }
+
+    /**
+     * @param  list<int>  $outletIds
+     */
+    protected function assignUserToOutlets(User $user, array $outletIds): void
+    {
+        $validOutletIds = Outlet::query()
+            ->whereIn('id', $outletIds)
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+
+        $user->outlets()->sync($validOutletIds);
     }
 }

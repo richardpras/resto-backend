@@ -3,10 +3,10 @@
 namespace App\Modules\Settings\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Settings\Http\Requests\StoreOutletRequest;
+use App\Modules\Settings\Http\Requests\UpdateOutletRequest;
 use App\Modules\Settings\Services\SettingsDomainService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class OutletSettingsCrudController extends Controller
@@ -17,55 +17,56 @@ class OutletSettingsCrudController extends Controller
 
     public function index(): JsonResponse
     {
-        return response()->json(['data' => $this->domain->listOutlets()]);
-    }
+        $perPage = max(1, (int) request()->integer('per_page', 10));
+        $page = max(1, (int) request()->integer('page', 1));
 
-    public function store(Request $request): JsonResponse
-    {
-        $v = $request->validate([
-            'code' => ['nullable', 'string', 'max:64', Rule::unique('outlets', 'code')],
-            'name' => ['required', 'string', 'max:255'],
-            'address' => ['nullable', 'string', 'max:2000'],
-            'phone' => ['nullable', 'string', 'max:64'],
-            'manager' => ['nullable', 'string', 'max:255'],
-            'status' => ['required', 'string', 'in:active,inactive'],
-            'logo' => ['nullable', 'string', 'max:2048'],
-            'invoicePrefix' => ['nullable', 'string', 'max:64'],
-            'orderPrefix' => ['nullable', 'string', 'max:64'],
-        ]);
+        $result = $this->domain->listOutletsForUserPaginated(request()->user(), $perPage, $page);
 
         return response()->json([
+            'success' => true,
+            'message' => 'Success',
+            'data' => $result->items(),
+            'meta' => [
+                'current_page' => $result->currentPage(),
+                'per_page' => $result->perPage(),
+                'total' => $result->total(),
+            ],
+        ]);
+    }
+
+    public function store(StoreOutletRequest $request): JsonResponse
+    {
+        $v = $request->validated();
+
+        return response()->json([
+            'success' => true,
             'message' => 'Outlet created successfully.',
             'data' => $this->domain->createOutlet($v),
+            'meta' => new \stdClass(),
         ], Response::HTTP_CREATED);
     }
 
-    public function update(Request $request, int $outletId): JsonResponse
+    public function update(UpdateOutletRequest $request, int $outletId): JsonResponse
     {
-        $v = $request->validate([
-            'code' => ['nullable', 'string', 'max:64', Rule::unique('outlets', 'code')->ignore($outletId, 'id')],
-            'name' => ['required', 'string', 'max:255'],
-            'address' => ['nullable', 'string', 'max:2000'],
-            'phone' => ['nullable', 'string', 'max:64'],
-            'manager' => ['nullable', 'string', 'max:255'],
-            'status' => ['required', 'string', 'in:active,inactive'],
-            'logo' => ['nullable', 'string', 'max:2048'],
-            'invoicePrefix' => ['nullable', 'string', 'max:64'],
-            'orderPrefix' => ['nullable', 'string', 'max:64'],
-        ]);
+        $v = $request->validated();
 
         return response()->json([
+            'success' => true,
             'message' => 'Outlet updated successfully.',
-            'data' => $this->domain->updateOutlet($outletId, $v),
+            'data' => $this->domain->updateOutletForUser($request->user(), $outletId, $v),
+            'meta' => new \stdClass(),
         ]);
     }
 
     public function destroy(int $outletId): JsonResponse
     {
-        $this->domain->deleteOutlet($outletId);
+        $this->domain->deleteOutletForUser(request()->user(), $outletId);
 
         return response()->json([
+            'success' => true,
             'message' => 'Outlet deleted successfully.',
+            'data' => new \stdClass(),
+            'meta' => new \stdClass(),
         ]);
     }
 }
