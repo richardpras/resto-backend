@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Inventory\DTOs\CreateIngredientData;
 use App\Modules\Inventory\DTOs\CreateStockMovementData;
+use App\Modules\Inventory\Events\InventoryCriticalAlertRaised;
 use App\Modules\Inventory\Repositories\IngredientRepositoryInterface;
 use App\Modules\Inventory\Repositories\StockMovementRepositoryInterface;
 use App\Modules\Orders\Services\PosAuditLogService;
@@ -178,6 +179,23 @@ class InventoryService
                 $data->outletId,
                 (float) ($movement->total_cost ?? 0)
             );
+        }
+        $currentStock = (float) InventoryStock::query()
+            ->where('outlet_id', $data->outletId)
+            ->where('ingredient_id', $data->inventoryItemId)
+            ->value('stock');
+        $minimumStock = (float) ($ingredient->min ?? 0);
+        if ($minimumStock > 0 && $currentStock <= $minimumStock) {
+            event(new InventoryCriticalAlertRaised(
+                outletId: (int) $data->outletId,
+                ingredientId: (int) $ingredient->id,
+                ingredientName: (string) $ingredient->name,
+                currentStock: $currentStock,
+                minimumStock: $minimumStock,
+                movementId: (int) $movement->id,
+                sequence: (int) $movement->id,
+                aggregateUpdatedAtIso: $movement->updated_at?->toIso8601String()
+            ));
         }
 
         return $movement;

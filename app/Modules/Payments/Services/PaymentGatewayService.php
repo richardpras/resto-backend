@@ -2,20 +2,30 @@
 
 namespace App\Modules\Payments\Services;
 
+use App\Jobs\Payments\ProcessPaymentWebhookReceiptJob;
+use App\Jobs\Payments\ReconcilePaymentTransactionJob;
 use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderSplit;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\Modules\Payments\Domain\PaymentTransactionEvent;
+use App\Models\Modules\Payments\Domain\PaymentWebhookReceipt;
 use App\Models\User;
 use App\Modules\Accounting\Services\JournalPostingService;
+use App\Modules\GiftCards\Services\GiftCardSettlementHookService;
+use App\Modules\Payments\Events\PaymentStatusChanged;
 use App\Modules\Payments\Repositories\PaymentTransactionRepositoryInterface;
 use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
 use App\Modules\Settings\Support\OutletAccessResolver;
+use App\Support\Observability\AsyncOperationContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class PaymentGatewayService
 {
@@ -23,6 +33,7 @@ class PaymentGatewayService
         private readonly PaymentTransactionRepositoryInterface $transactionRepository,
         private readonly JournalPostingService $journalPostingService,
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly GiftCardSettlementHookService $giftCardSettlementHookService,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -49,7 +60,7 @@ class PaymentGatewayService
                 ->where('outlet_id', $outletId)
                 ->first();
             if ($order === null) {
-                throw (new ModelNotFoundException())->setModel(Order::class, [(string) $payload['orderId']]);
+                throw (new ModelNotFoundException)->setModel(Order::class, [(string) $payload['orderId']]);
             }
 
             $splitId = isset($payload['orderSplitId']) ? (int) $payload['orderSplitId'] : null;
@@ -93,6 +104,7 @@ class PaymentGatewayService
                 'to' => 'pending',
                 'source' => 'initiate',
             ]);
+            $this->emitPaymentStatusChanged($transaction);
 
             return $this->transactionRepository->findById((int) $transaction->id) ?? $transaction;
         });
@@ -102,12 +114,12 @@ class PaymentGatewayService
     {
         $transaction = $this->transactionRepository->findById($transactionId);
         if ($transaction === null) {
-            throw (new ModelNotFoundException())->setModel(PaymentTransaction::class, [(string) $transactionId]);
+            throw (new ModelNotFoundException)->setModel(PaymentTransaction::class, [(string) $transactionId]);
         }
 
         $allowedOutletIds = $this->outletAccessResolver->allowedOutletIds($user);
         if (! in_array((int) $transaction->outlet_id, $allowedOutletIds, true)) {
-            throw (new ModelNotFoundException())->setModel(PaymentTransaction::class, [(string) $transactionId]);
+            throw (new ModelNotFoundException)->setModel(PaymentTransaction::class, [(string) $transactionId]);
         }
 
         return $transaction;
@@ -118,6 +130,7 @@ class PaymentGatewayService
     {
         $normalizedProvider = strtolower(trim($provider));
         $providerAdapter = $this->resolveProviderAdapter($normalizedProvider);
+        $receipt = $this->persistWebhookReceipt($normalizedProvider, $payload, $headers);
         $transaction = $this->transactionRepository->findByProviderAndExternalReference($normalizedProvider, (string) $payload['externalReference']);
         if (! $providerAdapter->verifyWebhookSignature($payload, $headers, $rawBody)) {
             if ($transaction !== null) {
@@ -128,86 +141,84 @@ class PaymentGatewayService
             throw ValidationException::withMessages(['signature' => ['Invalid payment webhook signature.']]);
         }
 
-        return DB::transaction(function () use ($normalizedProvider, $payload): PaymentTransaction {
-            $transaction = $this->transactionRepository->findByProviderAndExternalReference($normalizedProvider, (string) $payload['externalReference']);
-            if ($transaction === null) {
-                throw (new ModelNotFoundException())->setModel(PaymentTransaction::class, [(string) $payload['externalReference']]);
-            }
-            $transaction = $this->transactionRepository->findByIdForUpdate((int) $transaction->id) ?? $transaction;
+        if ($receipt->processed_at !== null && $transaction !== null) {
+            return $transaction->loadMissing('events');
+        }
 
-            $eventIdempotencyKey = $this->resolveWebhookEventKey($normalizedProvider, $payload);
-            if ($this->eventExists((int) $transaction->id, $eventIdempotencyKey)) {
-                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
-                    'reason' => 'duplicate_webhook_event',
-                    'eventKey' => $eventIdempotencyKey,
-                ]);
+        try {
+            return $this->processWebhookPayload($normalizedProvider, $payload, (int) $receipt->id);
+        } catch (Throwable $throwable) {
+            $nextDelaySeconds = $this->nextExponentialBackoffSeconds((int) $receipt->process_attempts);
+            PaymentWebhookReceipt::query()->whereKey((int) $receipt->id)->update([
+                'process_attempts' => DB::raw('process_attempts + 1'),
+                'next_retry_at' => now()->addSeconds($nextDelaySeconds),
+                'last_error' => mb_substr($throwable->getMessage(), 0, 1000),
+            ]);
+            ProcessPaymentWebhookReceiptJob::dispatch(
+                (int) $receipt->id,
+                AsyncOperationContext::capture([
+                    'operation' => 'payments.process_webhook_receipt',
+                    'webhook_receipt_id' => (int) $receipt->id,
+                    'provider' => $normalizedProvider,
+                    'external_reference' => (string) ($payload['externalReference'] ?? ''),
+                ])
+            )->delay(now()->addSeconds($nextDelaySeconds));
+            throw $throwable;
+        }
+    }
 
-                return $transaction->refresh()->loadMissing('events');
-            }
+    public function processWebhookReceipt(int $receiptId): ?PaymentTransaction
+    {
+        $receipt = PaymentWebhookReceipt::query()->find($receiptId);
+        if ($receipt === null || $receipt->processed_at !== null) {
+            return null;
+        }
 
-            $this->recordEvent((int) $transaction->id, 'webhook_received', [
-                'provider' => $normalizedProvider,
-                'incomingStatus' => (string) $payload['status'],
-                'occurredAt' => $payload['occurredAt'] ?? null,
-                'raw' => $payload['payload'] ?? null,
-            ], $eventIdempotencyKey);
+        $context = AsyncOperationContext::capture([
+            'operation' => 'payments.process_webhook_receipt',
+            'webhook_receipt_id' => $receiptId,
+            'provider' => (string) $receipt->provider,
+            'external_reference' => (string) $receipt->external_reference,
+        ]);
+        AsyncOperationContext::apply($context);
 
-            if ($this->isStaleEventTimestamp($payload['occurredAt'] ?? null)) {
-                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
-                    'reason' => 'stale_event_timestamp',
-                    'occurredAt' => $payload['occurredAt'] ?? null,
-                ]);
+        /** @var array<string,mixed> $payload */
+        $payload = is_array($receipt->payload) ? $receipt->payload : [];
+        /** @var array<string,mixed> $headers */
+        $headers = is_array($receipt->headers) ? $receipt->headers : [];
 
-                return $transaction->refresh()->loadMissing('events');
-            }
-
-            $nextStatus = (string) $payload['status'];
-            $currentStatus = (string) $transaction->status;
-            if (! $this->canTransition($currentStatus, $nextStatus)) {
-                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
-                    'reason' => 'illegal_transition',
-                    'currentStatus' => $currentStatus,
-                    'incomingStatus' => $nextStatus,
-                ]);
-
-                return $transaction->refresh()->loadMissing('events');
-            }
-
-            if ($currentStatus === $nextStatus) {
-                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
-                    'reason' => 'same_status',
-                    'status' => $nextStatus,
-                ]);
-
-                return $transaction->refresh()->loadMissing('events');
-            }
-
-            $updated = $this->transactionRepository->update($transaction, [
-                'status' => $nextStatus,
-                'payment_method' => $payload['paymentMethod'] ?? $transaction->payment_method,
-                'paid_at' => $nextStatus === 'paid' ? now() : $transaction->paid_at,
-                'expired_at' => $nextStatus === 'expired' ? now() : $transaction->expired_at,
-                'expiry_time' => $nextStatus === 'expired' ? now() : $transaction->expiry_time,
-                'payload_snapshot' => $payload['payload'] ?? $transaction->payload_snapshot,
+        try {
+            Log::info('Processing persisted payment webhook receipt.', $context);
+            $transaction = $this->handleWebhook((string) $receipt->provider, $payload, $headers, '');
+            PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                'processed_at' => now(),
+                'next_retry_at' => null,
+                'last_error' => null,
             ]);
 
-            $this->recordEvent((int) $updated->id, 'status_changed', [
-                'from' => $currentStatus,
-                'to' => $nextStatus,
-                'source' => 'webhook',
+            return $transaction;
+        } catch (Throwable $throwable) {
+            $nextDelaySeconds = $this->nextExponentialBackoffSeconds((int) $receipt->process_attempts);
+            PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                'process_attempts' => DB::raw('process_attempts + 1'),
+                'next_retry_at' => now()->addSeconds($nextDelaySeconds),
+                'last_error' => mb_substr($throwable->getMessage(), 0, 1000),
             ]);
-            if ($nextStatus === 'refunded') {
-                $this->recordEvent((int) $updated->id, 'refunded', [
-                    'source' => 'webhook',
-                ]);
-            }
+            Log::warning('Payment webhook receipt processing deferred for retry.', AsyncOperationContext::capture([
+                'webhook_receipt_id' => $receiptId,
+                'error' => $throwable->getMessage(),
+                'next_retry_seconds' => $nextDelaySeconds,
+            ]));
+            throw $throwable;
+        }
+    }
 
-            if ($currentStatus !== 'paid' && $nextStatus === 'paid') {
-                $this->postPaymentJournal($updated);
-            }
-
-            return $this->transactionRepository->findById((int) $updated->id) ?? $updated;
-        });
+    public function markWebhookReceiptDeadLetter(int $receiptId, string $reason): void
+    {
+        PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+            'next_retry_at' => null,
+            'last_error' => mb_substr('dead-letter prevented: '.$reason, 0, 1000),
+        ]);
     }
 
     public function expireTransaction(int $transactionId): PaymentTransaction
@@ -215,7 +226,7 @@ class PaymentGatewayService
         return DB::transaction(function () use ($transactionId): PaymentTransaction {
             $transaction = $this->transactionRepository->findByIdForUpdate($transactionId);
             if ($transaction === null) {
-                throw (new ModelNotFoundException())->setModel(PaymentTransaction::class, [(string) $transactionId]);
+                throw (new ModelNotFoundException)->setModel(PaymentTransaction::class, [(string) $transactionId]);
             }
 
             if (in_array((string) $transaction->status, ['paid', 'failed', 'cancelled', 'refunded'], true)) {
@@ -236,6 +247,7 @@ class PaymentGatewayService
                 $this->recordEvent((int) $transaction->id, 'expired', [
                     'source' => 'expire',
                 ]);
+                $this->emitPaymentStatusChanged($transaction);
             }
 
             return $this->transactionRepository->findById((int) $transaction->id) ?? $transaction;
@@ -247,7 +259,7 @@ class PaymentGatewayService
         return DB::transaction(function () use ($transactionId, $status, $payload): PaymentTransaction {
             $transaction = $this->transactionRepository->findByIdForUpdate($transactionId);
             if ($transaction === null) {
-                throw (new ModelNotFoundException())->setModel(PaymentTransaction::class, [(string) $transactionId]);
+                throw (new ModelNotFoundException)->setModel(PaymentTransaction::class, [(string) $transactionId]);
             }
 
             if (! in_array($status, ['pending', 'authorized', 'paid', 'failed', 'expired', 'cancelled', 'refunded'], true)) {
@@ -291,6 +303,7 @@ class PaymentGatewayService
                         'source' => 'reconcile',
                     ]);
                 }
+                $this->emitPaymentStatusChanged($transaction);
             }
 
             $this->recordEvent((int) $transaction->id, 'reconciliation_result', [
@@ -304,19 +317,33 @@ class PaymentGatewayService
     }
 
     /**
-     * @param array<int> $transactionIds
+     * @param  array<int>  $transactionIds
      * @return Collection<int,PaymentTransaction>
      */
-    public function reconcilePendingTransactions(array $transactionIds = [], int $limit = 50): Collection
+    public function reconcilePendingTransactions(array $transactionIds = [], int $limit = 50, array $context = []): Collection
     {
+        AsyncOperationContext::apply(AsyncOperationContext::capture(array_merge($context, [
+            'operation' => 'payments.reconcile_pending_batch',
+            'limit' => $limit,
+        ])));
+
         $candidates = count($transactionIds) > 0
             ? collect($transactionIds)->map(fn (int $id): ?PaymentTransaction => $this->transactionRepository->findById($id))->filter()
             : $this->transactionRepository->listPendingForReconciliation($limit);
 
         return $candidates->map(function (PaymentTransaction $transaction): PaymentTransaction {
+            $transactionContext = AsyncOperationContext::capture([
+                'transaction_id' => (int) $transaction->id,
+                'outlet_id' => (int) $transaction->outlet_id,
+                'provider' => (string) $transaction->provider,
+                'external_reference' => (string) $transaction->external_reference,
+            ]);
+            AsyncOperationContext::apply($transactionContext);
+
             $this->recordEvent((int) $transaction->id, 'reconciliation_run', [
                 'currentStatus' => (string) $transaction->status,
             ]);
+            Log::info('Running payment reconciliation against provider.', $transactionContext);
             $providerAdapter = $this->resolveProviderAdapter((string) $transaction->provider);
             $providerResponse = $providerAdapter->reconcileTransaction((string) $transaction->external_reference, [
                 'transactionId' => (int) $transaction->id,
@@ -326,6 +353,118 @@ class PaymentGatewayService
 
             return $this->reconcileTransaction((int) $transaction->id, $status, $providerResponse);
         })->values();
+    }
+
+    public function reconcileTransactionById(int $transactionId): ?PaymentTransaction
+    {
+        $transaction = $this->transactionRepository->findById($transactionId);
+        if ($transaction === null) {
+            return null;
+        }
+
+        try {
+            $reconciled = $this->reconcilePendingTransactions([$transactionId], 1)->first();
+            PaymentTransaction::query()->whereKey($transactionId)->update([
+                'reconciliation_attempts' => DB::raw('reconciliation_attempts + 1'),
+                'last_reconciled_at' => now(),
+                'async_retry_after' => null,
+                'last_async_error' => null,
+            ]);
+
+            return $reconciled instanceof PaymentTransaction ? $reconciled : $transaction->fresh();
+        } catch (Throwable $throwable) {
+            $nextDelaySeconds = $this->nextExponentialBackoffSeconds((int) $transaction->reconciliation_attempts);
+            PaymentTransaction::query()->whereKey($transactionId)->update([
+                'reconciliation_attempts' => DB::raw('reconciliation_attempts + 1'),
+                'last_reconciled_at' => now(),
+                'async_retry_after' => now()->addSeconds($nextDelaySeconds),
+                'last_async_error' => mb_substr($throwable->getMessage(), 0, 1000),
+            ]);
+            throw $throwable;
+        }
+    }
+
+    public function dispatchPendingReconciliation(int $limit = 100, array $context = []): int
+    {
+        AsyncOperationContext::apply(AsyncOperationContext::capture(array_merge($context, [
+            'operation' => 'payments.dispatch_reconciliation',
+            'limit' => $limit,
+        ])));
+
+        return Cache::lock('payments:recover-stale-dispatch', 20)->block(3, function () use ($limit): int {
+            $transactions = $this->transactionRepository->listPendingForReconciliation($limit);
+            foreach ($transactions as $transaction) {
+                ReconcilePaymentTransactionJob::dispatch(
+                    (int) $transaction->id,
+                    AsyncOperationContext::capture([
+                        'operation' => 'payments.reconcile_transaction',
+                        'transaction_id' => (int) $transaction->id,
+                        'outlet_id' => (int) $transaction->outlet_id,
+                        'provider' => (string) $transaction->provider,
+                        'external_reference' => (string) $transaction->external_reference,
+                    ])
+                );
+            }
+
+            return $transactions->count();
+        });
+    }
+
+    public function retryFailedAsyncPostings(int $limit = 50, array $context = []): int
+    {
+        AsyncOperationContext::apply(AsyncOperationContext::capture(array_merge($context, [
+            'operation' => 'payments.retry_failed_async_postings',
+            'limit' => $limit,
+        ])));
+
+        return Cache::lock('payments:retry-failed-async-postings', 20)->block(3, function () use ($limit): int {
+            $candidates = PaymentTransaction::query()
+                ->whereIn('status', ['pending', 'authorized'])
+                ->whereNotNull('async_retry_after')
+                ->where('async_retry_after', '<=', now())
+                ->orderBy('id')
+                ->limit($limit)
+                ->get();
+
+            foreach ($candidates as $candidate) {
+                ReconcilePaymentTransactionJob::dispatch(
+                    (int) $candidate->id,
+                    AsyncOperationContext::capture([
+                        'operation' => 'payments.reconcile_transaction',
+                        'transaction_id' => (int) $candidate->id,
+                        'outlet_id' => (int) $candidate->outlet_id,
+                        'provider' => (string) $candidate->provider,
+                        'external_reference' => (string) $candidate->external_reference,
+                    ])
+                );
+            }
+
+            return $candidates->count();
+        });
+    }
+
+    public function markTransactionAsyncFailure(int $transactionId, string $message): void
+    {
+        $transaction = PaymentTransaction::query()->find($transactionId);
+        if ($transaction === null) {
+            return;
+        }
+
+        $nextDelaySeconds = $this->nextExponentialBackoffSeconds((int) $transaction->reconciliation_attempts);
+        PaymentTransaction::query()->whereKey($transactionId)->update([
+            'async_retry_after' => now()->addSeconds($nextDelaySeconds),
+            'last_async_error' => mb_substr('queue-failed: '.$message, 0, 1000),
+        ]);
+
+        Log::error('Recorded async payment reconciliation failure.', AsyncOperationContext::capture([
+            'operation' => 'payments.mark_transaction_async_failure',
+            'transaction_id' => $transactionId,
+            'outlet_id' => (int) $transaction->outlet_id,
+            'provider' => (string) $transaction->provider,
+            'external_reference' => (string) $transaction->external_reference,
+            'error' => $message,
+            'next_retry_seconds' => $nextDelaySeconds,
+        ]));
     }
 
     /** @return Collection<int,PaymentTransaction> */
@@ -339,6 +478,118 @@ class PaymentGatewayService
 
             return $this->expireTransaction((int) $transaction->id);
         })->values();
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function processWebhookPayload(string $provider, array $payload, int $receiptId): PaymentTransaction
+    {
+        return DB::transaction(function () use ($provider, $payload, $receiptId): PaymentTransaction {
+            $transaction = $this->transactionRepository->findByProviderAndExternalReference($provider, (string) $payload['externalReference']);
+            if ($transaction === null) {
+                throw (new ModelNotFoundException)->setModel(PaymentTransaction::class, [(string) $payload['externalReference']]);
+            }
+            $transaction = $this->transactionRepository->findByIdForUpdate((int) $transaction->id) ?? $transaction;
+
+            $eventIdempotencyKey = $this->resolveWebhookEventKey($provider, $payload);
+            if ($this->eventExists((int) $transaction->id, $eventIdempotencyKey)) {
+                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
+                    'reason' => 'duplicate_webhook_event',
+                    'eventKey' => $eventIdempotencyKey,
+                ]);
+                PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                    'processed_at' => now(),
+                    'next_retry_at' => null,
+                    'last_error' => null,
+                ]);
+
+                return $transaction->refresh()->loadMissing('events');
+            }
+
+            $this->recordEvent((int) $transaction->id, 'webhook_received', [
+                'provider' => $provider,
+                'incomingStatus' => (string) $payload['status'],
+                'occurredAt' => $payload['occurredAt'] ?? null,
+                'raw' => $payload['payload'] ?? null,
+            ], $eventIdempotencyKey);
+
+            if ($this->isStaleEventTimestamp($payload['occurredAt'] ?? null)) {
+                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
+                    'reason' => 'stale_event_timestamp',
+                    'occurredAt' => $payload['occurredAt'] ?? null,
+                ]);
+                PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                    'processed_at' => now(),
+                    'next_retry_at' => null,
+                    'last_error' => null,
+                ]);
+
+                return $transaction->refresh()->loadMissing('events');
+            }
+
+            $nextStatus = (string) $payload['status'];
+            $currentStatus = (string) $transaction->status;
+            if (! $this->canTransition($currentStatus, $nextStatus)) {
+                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
+                    'reason' => 'illegal_transition',
+                    'currentStatus' => $currentStatus,
+                    'incomingStatus' => $nextStatus,
+                ]);
+                PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                    'processed_at' => now(),
+                    'next_retry_at' => null,
+                    'last_error' => null,
+                ]);
+
+                return $transaction->refresh()->loadMissing('events');
+            }
+
+            if ($currentStatus === $nextStatus) {
+                $this->recordEvent((int) $transaction->id, 'duplicate_ignored', [
+                    'reason' => 'same_status',
+                    'status' => $nextStatus,
+                ]);
+                PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                    'processed_at' => now(),
+                    'next_retry_at' => null,
+                    'last_error' => null,
+                ]);
+
+                return $transaction->refresh()->loadMissing('events');
+            }
+
+            $updated = $this->transactionRepository->update($transaction, [
+                'status' => $nextStatus,
+                'payment_method' => $payload['paymentMethod'] ?? $transaction->payment_method,
+                'paid_at' => $nextStatus === 'paid' ? now() : $transaction->paid_at,
+                'expired_at' => $nextStatus === 'expired' ? now() : $transaction->expired_at,
+                'expiry_time' => $nextStatus === 'expired' ? now() : $transaction->expiry_time,
+                'payload_snapshot' => $payload['payload'] ?? $transaction->payload_snapshot,
+            ]);
+
+            $this->recordEvent((int) $updated->id, 'status_changed', [
+                'from' => $currentStatus,
+                'to' => $nextStatus,
+                'source' => 'webhook',
+            ]);
+            if ($nextStatus === 'refunded') {
+                $this->recordEvent((int) $updated->id, 'refunded', [
+                    'source' => 'webhook',
+                ]);
+            }
+
+            if ($currentStatus !== 'paid' && $nextStatus === 'paid') {
+                $this->postPaymentJournal($updated);
+            }
+            $this->emitPaymentStatusChanged($updated);
+
+            PaymentWebhookReceipt::query()->whereKey($receiptId)->update([
+                'processed_at' => now(),
+                'next_retry_at' => null,
+                'last_error' => null,
+            ]);
+
+            return $this->transactionRepository->findById((int) $updated->id) ?? $updated;
+        });
     }
 
     private function canTransition(string $current, string $incoming): bool
@@ -367,8 +618,8 @@ class PaymentGatewayService
         }
 
         try {
-            $occurred = \Illuminate\Support\Carbon::parse($occurredAt);
-        } catch (\Throwable) {
+            $occurred = Carbon::parse($occurredAt);
+        } catch (Throwable) {
             return false;
         }
 
@@ -407,6 +658,40 @@ class PaymentGatewayService
         ]);
     }
 
+    /** @param array<string,mixed> $payload */
+    private function persistWebhookReceipt(string $provider, array $payload, array $headers = []): PaymentWebhookReceipt
+    {
+        $eventKey = $this->resolveWebhookEventKey($provider, $payload);
+        $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+
+        /** @var PaymentWebhookReceipt $receipt */
+        $receipt = PaymentWebhookReceipt::query()->firstOrCreate(
+            [
+                'provider' => $provider,
+                'event_idempotency_key' => $eventKey,
+            ],
+            [
+                'external_reference' => (string) ($payload['externalReference'] ?? ''),
+                'incoming_status' => (string) ($payload['status'] ?? 'pending'),
+                'payload_hash' => hash('sha256', $payloadJson),
+                'payload' => $payload,
+                'headers' => $headers,
+                'process_attempts' => 0,
+            ]
+        );
+
+        return $receipt;
+    }
+
+    private function nextExponentialBackoffSeconds(int $attempts): int
+    {
+        $base = max(1, (int) config('payments.recovery.backoff_base_seconds', 15));
+        $max = max($base, (int) config('payments.recovery.backoff_max_seconds', 600));
+        $value = (int) min($max, $base * (2 ** max(0, $attempts)));
+
+        return $value;
+    }
+
     private function postPaymentJournal(PaymentTransaction $transaction): void
     {
         $order = Order::query()->findOrFail((int) $transaction->order_id);
@@ -443,6 +728,37 @@ class PaymentGatewayService
                 ],
             ],
         ]);
+
+        $this->runGiftCardSettlementHook($transaction);
+    }
+
+    private function runGiftCardSettlementHook(PaymentTransaction $transaction): void
+    {
+        $snapshot = is_array($transaction->payload_snapshot) ? $transaction->payload_snapshot : [];
+        $settlementIds = isset($snapshot['giftCardSettlementIds']) && is_array($snapshot['giftCardSettlementIds'])
+            ? array_values(array_filter(array_map('intval', $snapshot['giftCardSettlementIds']), static fn (int $id): bool => $id > 0))
+            : [];
+        if ($settlementIds === []) {
+            return;
+        }
+
+        try {
+            $this->giftCardSettlementHookService->settle([
+                'outletId' => (int) $transaction->outlet_id,
+                'idempotencyKey' => 'payment-gift-card-settlement-'.$transaction->id,
+                'settlementReference' => 'payment_transaction#'.$transaction->id,
+                'paymentTransactionId' => (int) $transaction->id,
+                'settlementStatus' => 'settled',
+                'redeemSettlementIds' => $settlementIds,
+                'meta' => ['trigger' => 'payment_paid_transition'],
+            ]);
+        } catch (Throwable $throwable) {
+            Log::warning('Gift card settlement hook failed after payment posting.', [
+                'transaction_id' => (int) $transaction->id,
+                'outlet_id' => (int) $transaction->outlet_id,
+                'error' => $throwable->getMessage(),
+            ]);
+        }
     }
 
     private function resolveAccount(string $category, array $fallbackCodes, array $types, int $outletId): ?Account
@@ -485,5 +801,18 @@ class PaymentGatewayService
         }
 
         return $adapter;
+    }
+
+    private function emitPaymentStatusChanged(PaymentTransaction $transaction): void
+    {
+        event(new PaymentStatusChanged(
+            outletId: (int) $transaction->outlet_id,
+            transactionId: (int) $transaction->id,
+            orderId: (int) $transaction->order_id,
+            status: (string) $transaction->status,
+            provider: (string) $transaction->provider,
+            sequence: (int) $transaction->id,
+            aggregateUpdatedAtIso: $transaction->updated_at?->toIso8601String()
+        ));
     }
 }

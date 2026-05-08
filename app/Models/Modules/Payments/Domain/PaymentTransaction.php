@@ -21,6 +21,7 @@ class PaymentTransaction extends Model
         'amount',
         'currency',
         'status',
+        'reconciliation_attempts',
         'payment_method',
         'checkout_url',
         'qr_string',
@@ -31,15 +32,21 @@ class PaymentTransaction extends Model
         'provider_metadata_snapshot',
         'paid_at',
         'expired_at',
+        'last_reconciled_at',
+        'async_retry_after',
+        'last_async_error',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
         'payload_snapshot' => 'array',
         'provider_metadata_snapshot' => 'array',
+        'reconciliation_attempts' => 'integer',
         'expiry_time' => 'datetime',
         'paid_at' => 'datetime',
         'expired_at' => 'datetime',
+        'last_reconciled_at' => 'datetime',
+        'async_retry_after' => 'datetime',
     ];
 
     public function order(): BelongsTo

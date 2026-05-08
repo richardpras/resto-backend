@@ -7,6 +7,7 @@ use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Models\User;
 use App\Modules\Orders\DTOs\CreateOrderData;
+use App\Modules\Orders\Events\QrOrderDecisionChanged;
 use App\Modules\Orders\Repositories\QrOrderRequestRepositoryInterface;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -72,55 +73,55 @@ class QrOrderApprovalService
 
                     $orderItems = [];
                     foreach ($requestItems as $requestItem) {
-                $menuItem = $menuItems->get((int) $requestItem->menu_item_id);
-                if ($menuItem === null) {
-                    throw ValidationException::withMessages([
-                        'items' => ['Menu item not found for one or more request items.'],
-                    ]);
-                }
-                if ($menuItem->outlet_id !== null && (int) $menuItem->outlet_id !== (int) $request->outlet_id) {
-                    throw ValidationException::withMessages([
-                        'items' => ['Menu item does not belong to request outlet.'],
-                    ]);
-                }
+                        $menuItem = $menuItems->get((int) $requestItem->menu_item_id);
+                        if ($menuItem === null) {
+                            throw ValidationException::withMessages([
+                                'items' => ['Menu item not found for one or more request items.'],
+                            ]);
+                        }
+                        if ($menuItem->outlet_id !== null && (int) $menuItem->outlet_id !== (int) $request->outlet_id) {
+                            throw ValidationException::withMessages([
+                                'items' => ['Menu item does not belong to request outlet.'],
+                            ]);
+                        }
 
-                $orderItems[] = [
-                    'id' => (string) $menuItem->id,
-                    'name' => (string) $menuItem->name,
-                    'qty' => (float) $requestItem->qty,
-                    'price' => (float) $menuItem->price,
-                    'notes' => $requestItem->notes,
-                ];
+                        $orderItems[] = [
+                            'id' => (string) $menuItem->id,
+                            'name' => (string) $menuItem->name,
+                            'qty' => (float) $requestItem->qty,
+                            'price' => (float) $menuItem->price,
+                            'notes' => $requestItem->notes,
+                        ];
                     }
 
                     $subtotal = collect($orderItems)->sum(fn (array $item): float => (float) $item['qty'] * (float) $item['price']);
                     $order = $this->orderService->create(
-                new CreateOrderData(
-                    tenantId: null,
-                    outletId: (int) $request->outlet_id,
-                    code: $this->generateOrderCode(),
-                    source: 'qr',
-                    orderType: 'Dine In',
-                    status: 'confirmed',
-                    paymentStatus: 'unpaid',
-                    items: $orderItems,
-                    payments: [],
-                    subtotal: $subtotal,
-                    tax: 0,
-                    total: $subtotal,
-                    discountAmount: 0,
-                    customerName: $request->customer_name,
-                    customerPhone: null,
-                    tableId: (int) $request->table_id,
-                    tableNumber: null,
-                    createdAt: null,
-                    confirmedAt: now()->toISOString(),
-                    splitBill: null,
-                    serviceMode: 'dine_in',
-                    orderChannel: 'qr',
-                    posSessionId: (int) $posSession->id,
-                ),
-                $user,
+                        new CreateOrderData(
+                            tenantId: null,
+                            outletId: (int) $request->outlet_id,
+                            code: $this->generateOrderCode(),
+                            source: 'qr',
+                            orderType: 'Dine In',
+                            status: 'confirmed',
+                            paymentStatus: 'unpaid',
+                            items: $orderItems,
+                            payments: [],
+                            subtotal: $subtotal,
+                            tax: 0,
+                            total: $subtotal,
+                            discountAmount: 0,
+                            customerName: $request->customer_name,
+                            customerPhone: null,
+                            tableId: (int) $request->table_id,
+                            tableNumber: null,
+                            createdAt: null,
+                            confirmedAt: now()->toISOString(),
+                            splitBill: null,
+                            serviceMode: 'dine_in',
+                            orderChannel: 'qr',
+                            posSessionId: (int) $posSession->id,
+                        ),
+                        $user,
                     );
 
                     $this->transitionValidator->assertQrRequestStatusTransition($fromStatus, 'confirmed');
@@ -140,6 +141,14 @@ class QrOrderApprovalService
                         $user,
                         ['orderId' => (int) ($resolved->order_id ?? 0)]
                     );
+                    event(new QrOrderDecisionChanged(
+                        outletId: (int) $resolved->outlet_id,
+                        requestId: (int) $resolved->id,
+                        status: (string) $resolved->status,
+                        orderId: $resolved->order_id !== null ? (int) $resolved->order_id : null,
+                        sequence: (int) $resolved->id,
+                        aggregateUpdatedAtIso: $resolved->updated_at?->toIso8601String()
+                    ));
 
                     return $resolved;
                 }
@@ -190,6 +199,14 @@ class QrOrderApprovalService
                         $user,
                         ['reason' => $reason]
                     );
+                    event(new QrOrderDecisionChanged(
+                        outletId: (int) $resolved->outlet_id,
+                        requestId: (int) $resolved->id,
+                        status: (string) $resolved->status,
+                        reason: $reason,
+                        sequence: (int) $resolved->id,
+                        aggregateUpdatedAtIso: $resolved->updated_at?->toIso8601String()
+                    ));
 
                     return $resolved;
                 }

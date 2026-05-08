@@ -6,18 +6,20 @@ use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\Modules\Orders\Domain\Order;
-use App\Models\Modules\Orders\Domain\PosSession;
-use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\Payment;
-use App\Models\Modules\Print\Domain\PrintJob;
+use App\Models\Modules\Orders\Domain\PosSession;
+use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\User;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
 use App\Modules\Kitchen\Services\KitchenTicketService;
 use App\Modules\Orders\DTOs\CreateOrderData;
+use App\Modules\Orders\Events\OrderLifecycleChanged;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
+use App\Modules\Payments\Events\PaymentStatusChanged;
+use App\Modules\Print\Services\PrinterRoutingService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
@@ -35,10 +37,11 @@ class OrderService
         private readonly OptimisticConcurrencyService $optimisticConcurrencyService,
         private readonly PosAuditLogService $auditLogService,
         private readonly JournalPostingService $journalPostingService,
+        private readonly PrinterRoutingService $printerRoutingService,
     ) {}
 
     /**
-     * @param array<string,mixed> $filters
+     * @param  array<string,mixed>  $filters
      */
     public function listOrders(?User $user, int $tenantId, int $perPage, array $filters)
     {
@@ -150,14 +153,14 @@ class OrderService
             $this->storePayments($order->id, $normalizedPayments);
 
             if ($status === 'confirmed' || $status === 'completed') {
-                $this->createPrintJob($order->id, 'kitchen');
+                $this->printerRoutingService->queueKitchenTicketsForOrder($order->fresh(['items']));
                 $this->kitchenTicketService->createFromOrder($order->fresh(['items']));
             }
 
             if ($paymentStatus === 'paid') {
                 $this->recipeStockDeductionService->deductForPaidOrder($order);
                 $this->postOrderPaymentJournal($order->fresh(['payments']));
-                $this->createPrintJob($order->id, 'receipt');
+                $this->printerRoutingService->queueReceiptForOrder($order->fresh(['items']), 'order-paid');
             }
 
             $this->auditLogService->log(
@@ -168,6 +171,15 @@ class OrderService
                 $user,
                 ['status' => (string) $order->status, 'paymentStatus' => (string) $order->payment_status]
             );
+            event(new OrderLifecycleChanged(
+                outletId: (int) ($order->outlet_id ?? 0),
+                orderId: (int) $order->id,
+                status: (string) $order->status,
+                paymentStatus: (string) $order->payment_status,
+                kitchenStatus: (string) $order->kitchen_status,
+                sequence: (int) $order->id,
+                aggregateUpdatedAtIso: $order->updated_at?->toIso8601String()
+            ));
 
             return $this->orderRepository->findWithRelations($order->id);
         });
@@ -182,7 +194,7 @@ class OrderService
     }
 
     /**
-     * @param array<string,mixed> $payload
+     * @param  array<string,mixed>  $payload
      */
     public function updateOrder(User $user, int $orderId, array $payload): Order
     {
@@ -252,6 +264,15 @@ class OrderService
                 $user,
                 ['fields' => array_keys($attributes)]
             );
+            event(new OrderLifecycleChanged(
+                outletId: (int) ($fresh->outlet_id ?? 0),
+                orderId: (int) $fresh->id,
+                status: (string) $fresh->status,
+                paymentStatus: (string) $fresh->payment_status,
+                kitchenStatus: (string) $fresh->kitchen_status,
+                sequence: (int) $fresh->id,
+                aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
+            ));
 
             return $fresh;
         });
@@ -335,10 +356,23 @@ class OrderService
 
         $this->orderRepository->update($order, ['status' => $status]);
         if (in_array($status, ['confirmed', 'completed'], true)) {
+            $this->printerRoutingService->queueKitchenTicketsForOrder($order->fresh(['items']));
             $this->kitchenTicketService->createFromOrder($order->fresh(['items']));
         }
+        $fresh = $this->orderRepository->findWithRelations($id);
+        if ($fresh !== null) {
+            event(new OrderLifecycleChanged(
+                outletId: (int) ($fresh->outlet_id ?? 0),
+                orderId: (int) $fresh->id,
+                status: (string) $fresh->status,
+                paymentStatus: (string) $fresh->payment_status,
+                kitchenStatus: (string) $fresh->kitchen_status,
+                sequence: (int) $fresh->id,
+                aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
+            ));
+        }
 
-        return $this->orderRepository->findWithRelations($id);
+        return $fresh;
     }
 
     public function addPayments(
@@ -370,7 +404,7 @@ class OrderService
                 $paidTotal = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
                 $paymentStatus = $paidTotal >= (float) $order->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
                 $status = $paymentStatus === 'paid' && $order->status !== 'cancelled' ? 'completed' : $order->status;
-                (new PosTransitionValidator())->assertPaymentStatusTransition((string) $order->payment_status, $paymentStatus);
+                (new PosTransitionValidator)->assertPaymentStatusTransition((string) $order->payment_status, $paymentStatus);
 
                 $this->orderRepository->update($order, [
                     'status' => $status,
@@ -382,10 +416,32 @@ class OrderService
                 if ($paymentStatus === 'paid') {
                     $this->recipeStockDeductionService->deductForPaidOrder($order->fresh(['items']));
                     $this->postOrderPaymentJournal($order->fresh(['payments']));
-                    $this->createPrintJob($order->id, 'receipt');
+                    $this->printerRoutingService->queueReceiptForOrder($order->fresh(['items']), 'order-paid');
                 }
 
-                return $this->orderRepository->findWithRelations($order->id);
+                $fresh = $this->orderRepository->findWithRelations($order->id);
+                if ($fresh !== null) {
+                    event(new OrderLifecycleChanged(
+                        outletId: (int) ($fresh->outlet_id ?? 0),
+                        orderId: (int) $fresh->id,
+                        status: (string) $fresh->status,
+                        paymentStatus: (string) $fresh->payment_status,
+                        kitchenStatus: (string) $fresh->kitchen_status,
+                        sequence: (int) $fresh->id,
+                        aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
+                    ));
+                    event(new PaymentStatusChanged(
+                        outletId: (int) ($fresh->outlet_id ?? 0),
+                        transactionId: (int) $fresh->id,
+                        orderId: (int) $fresh->id,
+                        status: (string) $fresh->payment_status,
+                        provider: 'pos_direct',
+                        sequence: (int) $fresh->id,
+                        aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
+                    ));
+                }
+
+                return $fresh;
             });
         }
 
@@ -394,7 +450,27 @@ class OrderService
         if ($updated !== null && $before !== null && (string) $before->payment_status !== 'paid' && (string) $updated->payment_status === 'paid') {
             $this->recipeStockDeductionService->deductForPaidOrder($updated->fresh(['items']));
             $this->postOrderPaymentJournal($updated->fresh(['payments']));
-            $this->createPrintJob($updated->id, 'receipt');
+            $this->printerRoutingService->queueReceiptForOrder($updated->fresh(['items']), 'order-paid');
+        }
+        if ($updated !== null) {
+            event(new OrderLifecycleChanged(
+                outletId: (int) ($updated->outlet_id ?? 0),
+                orderId: (int) $updated->id,
+                status: (string) $updated->status,
+                paymentStatus: (string) $updated->payment_status,
+                kitchenStatus: (string) $updated->kitchen_status,
+                sequence: (int) $updated->id,
+                aggregateUpdatedAtIso: $updated->updated_at?->toIso8601String()
+            ));
+            event(new PaymentStatusChanged(
+                outletId: (int) ($updated->outlet_id ?? 0),
+                transactionId: (int) $updated->id,
+                orderId: (int) $updated->id,
+                status: (string) $updated->payment_status,
+                provider: 'pos_allocation',
+                sequence: (int) $updated->id,
+                aggregateUpdatedAtIso: $updated->updated_at?->toIso8601String()
+            ));
         }
 
         return $updated;
@@ -720,26 +796,6 @@ class OrderService
         }
 
         return [null, null];
-    }
-
-    private function createPrintJob(int $orderId, string $type): void
-    {
-        $tableLabel = Order::query()->whereKey($orderId)->value('table_name');
-        $payload = [
-            'orderId' => $orderId,
-            'type' => $type,
-        ];
-        if (is_string($tableLabel) && $tableLabel !== '') {
-            $payload['tableName'] = $tableLabel;
-        }
-
-        PrintJob::query()->create([
-            'source_type' => 'order',
-            'source_id' => $orderId,
-            'type' => $type,
-            'content' => $payload,
-            'status' => 'pending',
-        ]);
     }
 
     private function calculateCogsForOrders(Collection $orders): float

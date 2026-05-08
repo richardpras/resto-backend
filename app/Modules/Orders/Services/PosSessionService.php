@@ -2,9 +2,10 @@
 
 namespace App\Modules\Orders\Services;
 
-use App\Modules\Accounting\Services\JournalPostingService;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\User;
+use App\Modules\Accounting\Services\JournalPostingService;
+use App\Modules\Orders\Events\PosSessionLifecycleChanged;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,14 @@ class PosSessionService
                         'notes' => $data['notes'] ?? null,
                     ]);
                     $this->auditLogService->log('session.opened', 'pos_session', (int) $session->id, (int) $outletId, $user);
+                    event(new PosSessionLifecycleChanged(
+                        outletId: (int) $session->outlet_id,
+                        sessionId: (int) $session->id,
+                        status: (string) $session->status,
+                        openingCash: (float) $session->opening_cash,
+                        sequence: (int) $session->id,
+                        aggregateUpdatedAtIso: $session->updated_at?->toIso8601String()
+                    ));
 
                     return $session;
                 }
@@ -110,8 +119,20 @@ class PosSessionService
                     $this->auditLogService->log('session.closed', 'pos_session', (int) $session->id, (int) $session->outlet_id, $user, [
                         'closingCash' => $closingCash,
                     ]);
+                    $fresh = $session->fresh();
+                    if ($fresh !== null) {
+                        event(new PosSessionLifecycleChanged(
+                            outletId: (int) $fresh->outlet_id,
+                            sessionId: (int) $fresh->id,
+                            status: (string) $fresh->status,
+                            openingCash: (float) $fresh->opening_cash,
+                            closingCash: (float) $fresh->closing_cash,
+                            sequence: (int) $fresh->id,
+                            aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
+                        ));
+                    }
 
-                    return $session->fresh();
+                    return $fresh ?? $session;
                 }
             );
         });

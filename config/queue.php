@@ -126,4 +126,20 @@ return [
         'table' => 'failed_jobs',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Async Routing Guards
+    |--------------------------------------------------------------------------
+    |
+    | Logical queue lanes for durable payment processing and recovery.
+    | These names are additive and preserve current endpoint contracts.
+    |
+    */
+    'routing' => [
+        'payment_webhooks_queue' => env('QUEUE_PAYMENTS_WEBHOOKS', 'payments-webhooks'),
+        'payment_reconciliation_queue' => env('QUEUE_PAYMENTS_RECONCILIATION', 'payments-reconciliation'),
+        'payment_recovery_queue' => env('QUEUE_PAYMENTS_RECOVERY', 'payments-recovery'),
+        'print_queue' => env('QUEUE_PRINT_JOBS', 'print-jobs'),
+    ],
+
 ];

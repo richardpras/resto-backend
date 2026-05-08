@@ -6,8 +6,13 @@ use App\Models\Modules\Kitchen\Domain\KitchenTicket;
 use App\Models\Modules\Kitchen\Domain\KitchenTicketItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\User;
+use App\Modules\Kitchen\Events\KitchenTicketTransitioned;
 use App\Modules\Kitchen\Repositories\KitchenTicketRepositoryInterface;
+use App\Modules\Orders\Services\PosAuditLogService;
+use App\Modules\Orders\Services\PosIdempotencyService;
+use App\Modules\Orders\Services\PosTransitionValidator;
 use App\Modules\Settings\Support\OutletAccessResolver;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -17,9 +22,9 @@ class KitchenTicketService
     public function __construct(
         private readonly KitchenTicketRepositoryInterface $ticketRepository,
         private readonly OutletAccessResolver $outletAccessResolver,
-        private readonly \App\Modules\Orders\Services\PosTransitionValidator $transitionValidator,
-        private readonly \App\Modules\Orders\Services\PosIdempotencyService $idempotencyService,
-        private readonly \App\Modules\Orders\Services\PosAuditLogService $auditLogService,
+        private readonly PosTransitionValidator $transitionValidator,
+        private readonly PosIdempotencyService $idempotencyService,
+        private readonly PosAuditLogService $auditLogService,
     ) {}
 
     /** @param array<string,mixed> $filters */
@@ -59,7 +64,7 @@ class KitchenTicketService
                         return null;
                     }
                     if (is_string($expectedUpdatedAt) && trim($expectedUpdatedAt) !== '') {
-                        $expected = \Carbon\CarbonImmutable::parse($expectedUpdatedAt)->utc();
+                        $expected = CarbonImmutable::parse($expectedUpdatedAt)->utc();
                         $actual = $ticket->updated_at?->copy()?->utc();
                         if ($actual === null || ! $actual->equalTo($expected)) {
                             throw ValidationException::withMessages([
@@ -94,8 +99,19 @@ class KitchenTicketService
                         $user,
                         ['status' => $status]
                     );
+                    $fresh = $this->ticketRepository->findScoped((int) $ticket->id, $allowed);
+                    if ($fresh !== null) {
+                        event(new KitchenTicketTransitioned(
+                            outletId: (int) $fresh->outlet_id,
+                            ticketId: (int) $fresh->id,
+                            orderId: (int) $fresh->order_id,
+                            status: (string) $fresh->status,
+                            sequence: (int) $fresh->id,
+                            aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
+                        ));
+                    }
 
-                    return $this->ticketRepository->findScoped((int) $ticket->id, $allowed);
+                    return $fresh;
                 }
             );
         });
@@ -142,6 +158,14 @@ class KitchenTicketService
                 null,
                 ['orderId' => (int) $order->id]
             );
+            event(new KitchenTicketTransitioned(
+                outletId: (int) $ticket->outlet_id,
+                ticketId: (int) $ticket->id,
+                orderId: (int) $ticket->order_id,
+                status: (string) $ticket->status,
+                sequence: (int) $ticket->id,
+                aggregateUpdatedAtIso: $ticket->updated_at?->toIso8601String()
+            ));
 
             return $ticket->load('items');
         });
