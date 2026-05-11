@@ -162,6 +162,54 @@ class OutletSettingsAccessTest extends TestCase
         $this->assertSame($expected, $allowedIds);
     }
 
+    public function test_dashboard_view_all_outlets_permission_receives_all_active_outlet_ids(): void
+    {
+        $this->seedUserManagementGatePermissions();
+
+        $permissionId = Permission::query()
+            ->where('code', 'dashboard.view_all_outlets')
+            ->value('id');
+        self::assertNotNull($permissionId);
+
+        $role = Role::query()->create([
+            'name' => '__test_dashboard_all_outlets__',
+            'description' => 'Test fixture: dashboard all outlets implies API outlet scope',
+        ]);
+        $role->permissions()->sync([(int) $permissionId]);
+
+        $user = User::factory()->create([
+            'email' => 'dashboard-all-outlets-'.uniqid('', true).'@test.local',
+            'password' => 'secret123',
+        ]);
+        $user->roles()->sync([$role->id]);
+
+        $activeA = Outlet::query()->create([
+            'code' => 'out-dash-a-'.uniqid(),
+            'name' => 'Dash Active A',
+            'address' => 'Addr A',
+            'phone' => '0830',
+            'manager' => 'A',
+            'status' => 'active',
+        ]);
+        $activeB = Outlet::query()->create([
+            'code' => 'out-dash-b-'.uniqid(),
+            'name' => 'Dash Active B',
+            'address' => 'Addr B',
+            'phone' => '0831',
+            'manager' => 'B',
+            'status' => 'active',
+        ]);
+
+        $resolver = app(OutletAccessResolver::class);
+        $allowedIds = $resolver->allowedOutletIds($user);
+
+        sort($allowedIds);
+        $expected = [$activeA->id, $activeB->id];
+        sort($expected);
+
+        $this->assertSame($expected, $allowedIds);
+    }
+
     public function test_auth_me_includes_scoped_outlets_payload(): void
     {
         $this->seedUserManagementGatePermissions();

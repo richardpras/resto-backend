@@ -22,6 +22,7 @@ use App\Modules\Loyalty\Http\Controllers\MembershipTierController;
 use App\Modules\Members\Http\Controllers\MemberController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
+use App\Modules\Monitoring\Http\Controllers\DashboardSummaryController;
 use App\Modules\Orders\Http\Controllers\OrderController;
 use App\Modules\Orders\Http\Controllers\PosSessionController;
 use App\Modules\Orders\Http\Controllers\QrOrderController;
@@ -69,11 +70,15 @@ Route::prefix('v1')->group(function (): void {
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments']);
     Route::post('payment-webhooks/{provider}', [PaymentTransactionController::class, 'webhook']);
     Route::post('orders/shift-close', [OrderController::class, 'closeShift']);
-    Route::apiResource('menu-items', MenuItemController::class)->only(['index', 'store', 'show', 'update']);
+    Route::apiResource('menu-items', MenuItemController::class)
+        ->only(['index', 'store', 'show', 'update'])
+        ->middleware(['auth:api', 'permission:pos.use']);
 
-    Route::apiResource('ingredients', IngredientController::class)->only(['index', 'store', 'update', 'destroy']);
-    Route::get('stock-movements', [StockMovementController::class, 'index']);
-    Route::post('stock-movements', [StockMovementController::class, 'store']);
+    Route::apiResource('ingredients', IngredientController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('stock-movements', [StockMovementController::class, 'index'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('stock-movements', [StockMovementController::class, 'store'])->middleware(['auth:api', 'permission:pos.use']);
 
     Route::apiResource('accounts', AccountController::class)->only(['index', 'store', 'update', 'destroy'])
         ->middleware(['auth:api', 'permission:accounting.manage']);
@@ -251,6 +256,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('crm/loyalty/redemptions', [CustomerController::class, 'crmRedeem'])->middleware('permission:members.manage');
         Route::get('crm/dashboard', [CrmMetricsController::class, 'index'])->middleware('permission:members.manage');
         Route::get('monitoring/metrics', [MonitoringMetricsController::class, 'index'])->middleware('permission:pos.use');
+        Route::get('dashboard/summary', [DashboardSummaryController::class, 'index'])->middleware('permission:pos.use');
         Route::get('kitchen/tickets', [KitchenTicketController::class, 'index'])->middleware('permission:pos.use');
         Route::patch('kitchen/tickets/{ticket}/status', [KitchenTicketController::class, 'updateStatus'])->middleware('permission:pos.use');
         Route::get('print/profiles', [PrinterProfileController::class, 'index'])->middleware('permission:settings.view');

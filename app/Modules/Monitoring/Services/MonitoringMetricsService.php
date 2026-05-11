@@ -30,6 +30,16 @@ class MonitoringMetricsService
         }
 
         $scopedOutletIds = $requestedOutletId !== null ? [$requestedOutletId] : $allowedOutletIds;
+        return $this->aggregateForOutletIds($scopedOutletIds, $filters, $requestedOutletId);
+    }
+
+    /**
+     * @param list<int> $scopedOutletIds
+     * @param array<string,mixed> $filters
+     * @return array<string,mixed>
+     */
+    public function aggregateForOutletIds(array $scopedOutletIds, array $filters = [], ?int $requestedOutletId = null): array
+    {
         $dateFrom = $this->parseDate($filters['dateFrom'] ?? null, false);
         $dateTo = $this->parseDate($filters['dateTo'] ?? null, true);
 

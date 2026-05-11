@@ -10,7 +10,9 @@ class OutletAccessResolver
     /** @return list<int> */
     public function allowedOutletIds(User $user): array
     {
-        if ($user->hasPermission('outlets.view_all')) {
+        // `outlets.view_all` is explicit; `dashboard.view_all_outlets` matches template Owner (all perms)
+        // when `outlets.view_all` was missing from early seeds — both imply tenant-wide outlet scope.
+        if ($user->hasPermission('outlets.view_all') || $user->hasPermission('dashboard.view_all_outlets')) {
             return Outlet::query()
                 ->where('status', 'active')
                 ->pluck('id')

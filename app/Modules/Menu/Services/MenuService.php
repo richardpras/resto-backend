@@ -40,7 +40,7 @@ class MenuService
                 'available' => $data->available,
             ]);
 
-            $this->syncRecipes($menuItem->id, $data->recipes);
+            $this->syncRecipes($menuItem->id, (int) $menuItem->tenant_id, $data->recipes);
             $this->syncOutletMappings($menuItem->id, $data->menuItemOutlets);
 
             return $this->menuRepository->findWithRecipes($menuItem->id);
@@ -68,7 +68,7 @@ class MenuService
             }
 
             if ($data->recipes !== null) {
-                $this->syncRecipes($menuItem->id, $data->recipes);
+                $this->syncRecipes($menuItem->id, (int) $menuItem->tenant_id, $data->recipes);
             }
 
             if ($data->menuItemOutlets !== null) {
@@ -79,7 +79,7 @@ class MenuService
         });
     }
 
-    private function syncRecipes(int $menuItemId, array $recipes): void
+    private function syncRecipes(int $menuItemId, int $tenantId, array $recipes): void
     {
         $ingredientIds = collect($recipes)
             ->map(static fn (array $recipe): int => (int) ($recipe['inventoryItemId'] ?? 0))
@@ -89,6 +89,7 @@ class MenuService
         $validIngredientCount = Ingredient::query()
             ->whereIn('id', $ingredientIds)
             ->where('type', 'ingredient')
+            ->where('tenant_id', $tenantId)
             ->count();
         abort_if(
             $ingredientIds->count() !== $validIngredientCount,

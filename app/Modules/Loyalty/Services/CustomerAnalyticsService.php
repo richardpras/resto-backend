@@ -74,10 +74,10 @@ class CustomerAnalyticsService
 
         $accounts = DB::table('loyalty_accounts')->whereIn('outlet_id', $outletIds);
         $totalCustomers = (int) (clone $accounts)->count();
-        $repeatCustomers = (int) (clone $accounts)->where('total_visits', '>', 1)->count();
-        $recentVisit = (int) (clone $accounts)->whereNotNull('last_visit_at')->where('last_visit_at', '>=', now()->subDays(30))->count();
+        $repeatCustomers = (int) (clone $accounts)->where('lifetime_visits', '>', 1)->count();
+        $recentVisit = (int) (clone $accounts)->whereNotNull('last_activity_at')->where('last_activity_at', '>=', now()->subDays(30))->count();
         $inactiveThirtyDays = (int) (clone $accounts)->where(function ($q): void {
-            $q->whereNull('last_visit_at')->orWhere('last_visit_at', '<', now()->subDays(30));
+            $q->whereNull('last_activity_at')->orWhere('last_activity_at', '<', now()->subDays(30));
         })->count();
 
         $pointsIssued = (int) DB::table('loyalty_points_ledgers')
@@ -89,12 +89,12 @@ class CustomerAnalyticsService
             ->where('points_delta', '<', 0)
             ->sum('points_delta'));
 
-        $tierCounts = DB::table('loyalty_accounts')
-            ->whereIn('outlet_id', $outletIds)
-            ->select('membership_tier', DB::raw('COUNT(*) as aggregate'))
-            ->whereNotNull('membership_tier')
-            ->groupBy('membership_tier')
-            ->pluck('aggregate', 'membership_tier')
+        $tierCounts = DB::table('loyalty_accounts as la')
+            ->leftJoin('loyalty_membership_tiers as t', 't.id', '=', 'la.current_tier_id')
+            ->whereIn('la.outlet_id', $outletIds)
+            ->selectRaw("COALESCE(NULLIF(t.code, ''), t.name, 'UNASSIGNED') as tier_key, COUNT(*) as aggregate")
+            ->groupBy('tier_key')
+            ->pluck('aggregate', 'tier_key')
             ->toArray();
 
         return [

@@ -26,6 +26,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'permissions.create', 'name' => 'Create permissions'],
             ['code' => 'settings.view', 'name' => 'View app settings'],
             ['code' => 'settings.update', 'name' => 'Update app settings'],
+            ['code' => 'outlets.view_all', 'name' => 'View all outlets (API scope; tenant-wide settings/POS)'],
             // Web app route guards (mirror template PERMISSIONS in web/src/stores/authStore.ts)
             ['code' => 'dashboard.view_all_outlets', 'name' => 'Dashboard all outlets'],
             ['code' => 'dashboard.view_own_outlet', 'name' => 'Dashboard own outlet'],
