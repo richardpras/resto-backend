@@ -60,3 +60,6 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 
 php artisan migrate:fresh --seed
 php artisan passport:client --personal --name="Resto API Personal Access Client" --provider=users
+npm install -g ngrok
+ngrok http 8000
+ngrok config add-authtoken 3DcCIy2QxfgQtJ56cbmJoz0OSnu_4v7qqQBknsYybeTJVFsxi
