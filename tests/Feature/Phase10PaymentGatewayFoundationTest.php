@@ -9,6 +9,7 @@ use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
 use App\Modules\Payments\Services\PaymentGatewayService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
@@ -52,10 +53,19 @@ class Phase10PaymentGatewayFoundationTest extends TestCase
                 ->where('payload->to', 'paid')
                 ->count()
         );
-        $this->assertDatabaseHas('payment_transaction_events', [
-            'payment_transaction_id' => $transactionId,
-            'event_type' => 'duplicate_ignored',
-        ]);
+        $this->assertSame(
+            1,
+            DB::table('payment_webhook_receipts')
+                ->where('provider', 'manual')
+                ->where('event_idempotency_key', 'manual#evt-dup-1')
+                ->count()
+        );
+        $this->assertNotNull(
+            DB::table('payment_webhook_receipts')
+                ->where('provider', 'manual')
+                ->where('event_idempotency_key', 'manual#evt-dup-1')
+                ->value('processed_at')
+        );
     }
 
     public function test_stale_status_is_rejected(): void
@@ -119,6 +129,28 @@ class Phase10PaymentGatewayFoundationTest extends TestCase
                     'providerMetadataSnapshot',
                 ],
             ]);
+    }
+
+    public function test_initiate_uses_config_default_provider_when_request_omits_provider(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet();
+        $orderId = $this->createConfirmedOrder($outlet->id, (int) $user->id, 'P10-NO-PROV');
+
+        Config::set('payments.default_provider', 'manual');
+
+        $response = $this->postJson('/api/v1/payment-transactions', [
+            'orderId' => $orderId,
+            'outletId' => $outlet->id,
+            'externalReference' => 'ext-p10-no-prov-1',
+            'idempotencyKey' => 'idem-p10-no-prov-1',
+            'amount' => 11000,
+            'currency' => 'IDR',
+            'paymentMethod' => 'qris',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.provider', 'manual');
     }
 
     public function test_accounting_posting_is_idempotent_on_paid_retries(): void

@@ -41,6 +41,11 @@ class OrderResource extends JsonResource
                 'qty' => (float) $item->qty,
                 'price' => (float) $item->price,
                 'notes' => $item->notes,
+                'recoveryStatus' => $item->recovery_status,
+                'recoveryReason' => $item->recovery_reason,
+                'recoveryApprovedAt' => $item->recovery_approved_at?->toISOString(),
+                'recoveryApprovedByUserId' => $item->recovery_approved_by_user_id !== null ? (int) $item->recovery_approved_by_user_id : null,
+                'replacedByOrderItemId' => $item->replaced_by_order_item_id !== null ? (int) $item->replaced_by_order_item_id : null,
             ])),
             'payments' => $this->whenLoaded('payments', fn () => $this->payments->map(fn ($payment) => [
                 'id' => $payment->id,

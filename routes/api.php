@@ -24,10 +24,14 @@ use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
 use App\Modules\Monitoring\Http\Controllers\DashboardSummaryController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Orders\Http\Controllers\OrderItemRecoveryController;
+use App\Modules\Orders\Http\Controllers\OrderItemRecoverySettlementController;
 use App\Modules\Orders\Http\Controllers\PosSessionController;
 use App\Modules\Orders\Http\Controllers\QrOrderController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
+use App\Modules\Payments\Http\Controllers\XenditSandboxSimulationController;
+use App\Modules\Payments\Http\Controllers\XenditInvoiceWebhookController;
 use App\Modules\Print\Http\Controllers\PrinterProfileController;
 use App\Modules\Print\Http\Controllers\PrinterRouteController;
 use App\Modules\Print\Http\Controllers\PrintQueueController;
@@ -67,8 +71,10 @@ Route::prefix('v1')->group(function (): void {
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments']);
-    Route::get('orders/{order}/payments', [OrderController::class, 'listPayments']);
+    Route::get('orders/{order}/payments', [OrderController::class, 'listPayments'])->middleware('auth:api');
+    Route::get('orders/{order}/events', [OrderController::class, 'listEvents'])->middleware('auth:api');
     Route::post('payment-webhooks/{provider}', [PaymentTransactionController::class, 'webhook']);
+    Route::post('payments/webhooks/xendit', [XenditInvoiceWebhookController::class, 'store']);
     Route::post('orders/shift-close', [OrderController::class, 'closeShift']);
     Route::apiResource('menu-items', MenuItemController::class)
         ->only(['index', 'store', 'show', 'update'])
@@ -207,6 +213,12 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('members/{member}/status', [MemberController::class, 'updateStatus'])->middleware('permission:members.manage');
         Route::delete('members/{member}', [MemberController::class, 'destroy'])->middleware('permission:members.manage');
 
+        Route::get('orders/{order}/recovery-events', [OrderItemRecoveryController::class, 'index'])->middleware('permission:orders.recovery.read');
+        Route::post('orders/{order}/items/{orderItem}/recovery/report', [OrderItemRecoveryController::class, 'report'])->middleware('permission:orders.recovery.request');
+        Route::post('orders/{order}/items/{orderItem}/recovery/approve', [OrderItemRecoveryController::class, 'approve'])->middleware('permission:orders.recovery.approve');
+        Route::post('orders/{order}/items/{orderItem}/recovery/settlement/preview', [OrderItemRecoverySettlementController::class, 'preview'])->middleware('permission:orders.recovery.approve');
+        Route::post('orders/{order}/items/{orderItem}/recovery/settlement/record', [OrderItemRecoverySettlementController::class, 'record'])->middleware('permission:orders.recovery.approve');
+
         Route::get('tables', [TableMasterController::class, 'index'])->middleware('permission:tables.view');
         Route::post('tables', [TableMasterController::class, 'store'])->middleware('permission:tables.manage');
         Route::patch('tables/{table}', [TableMasterController::class, 'update'])->middleware('permission:tables.manage');
@@ -215,6 +227,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
         Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
         Route::post('payment-transactions', [PaymentTransactionController::class, 'store'])->middleware('permission:pos.use');
+        Route::post('payments/xendit/simulate-paid/{paymentId}', [XenditSandboxSimulationController::class, 'simulatePaid'])->middleware('permission:pos.use');
+        Route::post('payments/xendit/simulate-provider/{paymentId}', [XenditSandboxSimulationController::class, 'simulateProvider'])->middleware('permission:pos.use');
         Route::post('terminals/register', [TerminalDeviceController::class, 'register'])->middleware('permission:pos.use');
         Route::post('terminals/heartbeat', [TerminalDeviceController::class, 'heartbeat'])->middleware('permission:pos.use');
         Route::get('terminals', [TerminalDeviceController::class, 'index'])->middleware('permission:pos.use');

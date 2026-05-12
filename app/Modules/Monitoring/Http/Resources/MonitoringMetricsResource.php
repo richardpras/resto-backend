@@ -29,6 +29,8 @@ class MonitoringMetricsResource extends JsonResource
             'offlineResilience' => $this['offlineResilience'],
             'hardwareBridge' => $this['hardwareBridge'] ?? null,
             'crmMetrics' => $this['crmMetrics'] ?? null,
+            'recoverySettlement' => $this['recoverySettlement'] ?? null,
+            'paymentGateway' => $this['paymentGateway'] ?? null,
         ];
     }
 }

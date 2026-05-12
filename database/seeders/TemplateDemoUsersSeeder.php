@@ -32,13 +32,16 @@ class TemplateDemoUsersSeeder extends Seeder
             'tables.manage',
             'qr_orders.view',
             'reports.view',
+            'orders.recovery.read',
+            'orders.recovery.request',
+            'orders.recovery.approve',
         ];
 
         /** @see web/src/stores/authStore.ts ROLE_PERMS.Cashier */
-        $cashierCodes = ['pos.use', 'members.manage', 'tables.view'];
+        $cashierCodes = ['pos.use', 'members.manage', 'tables.view', 'orders.recovery.read', 'orders.recovery.request'];
 
         /** @see web/src/stores/authStore.ts ROLE_PERMS.Kitchen */
-        $kitchenCodes = ['kitchen.use'];
+        $kitchenCodes = ['kitchen.use', 'orders.recovery.read', 'orders.recovery.request'];
 
         $rolePermissionSets = [
             'Owner' => $allPermissionIds,

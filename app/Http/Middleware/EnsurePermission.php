@@ -10,7 +10,8 @@ class EnsurePermission
 {
     public function handle(Request $request, Closure $next, string $permission): mixed
     {
-        $user = $request->user();
+        /** Passport uses the `api` guard; default `$request->user()` can miss it on some stacks. */
+        $user = $request->user('api') ?? $request->user();
         if ($user === null) {
             return response()->json(['message' => 'Unauthenticated.'], Response::HTTP_UNAUTHORIZED);
         }

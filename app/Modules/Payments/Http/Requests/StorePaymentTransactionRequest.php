@@ -17,7 +17,7 @@ class StorePaymentTransactionRequest extends FormRequest
             'orderId' => ['required', 'integer', 'exists:orders,id'],
             'orderSplitId' => ['nullable', 'integer', 'exists:order_splits,id'],
             'outletId' => ['required', 'integer', 'exists:outlets,id'],
-            'provider' => ['required', 'string', 'max:64'],
+            'provider' => ['nullable', 'string', 'max:64'],
             'externalReference' => ['required', 'string', 'max:120'],
             'idempotencyKey' => ['required', 'string', 'max:120'],
             'amount' => ['required', 'numeric', 'gt:0'],

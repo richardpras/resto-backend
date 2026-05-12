@@ -17,6 +17,15 @@ class OrderItem extends Model
         'price',
         'line_total',
         'notes',
+        'recovery_status',
+        'recovery_reason',
+        'recovery_approved_by_user_id',
+        'recovery_approved_at',
+        'replaced_by_order_item_id',
+    ];
+
+    protected $casts = [
+        'recovery_approved_at' => 'datetime',
     ];
 
     public function order(): BelongsTo

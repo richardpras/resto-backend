@@ -104,9 +104,9 @@ class DemoDatasetSeederService
 
             $permissionMap = Permission::query()->pluck('id', 'code');
             $roles = [
-                'Demo Outlet Manager' => ['dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage', 'tables.manage', 'reports.view', 'members.manage'],
-                'Demo Cashier' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view'],
-                'Demo Kitchen' => ['kitchen.use'],
+                'Demo Outlet Manager' => ['dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage', 'tables.view', 'tables.manage', 'qr_orders.view', 'reports.view', 'members.manage', 'orders.recovery.read', 'orders.recovery.request', 'orders.recovery.approve'],
+                'Demo Cashier' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'orders.recovery.read', 'orders.recovery.request'],
+                'Demo Kitchen' => ['kitchen.use', 'orders.recovery.read', 'orders.recovery.request'],
                 'Demo Waiter' => ['pos.use', 'tables.view', 'qr_orders.view'],
                 'Demo Inventory Admin' => ['inventory.manage', 'purchase.manage', 'reports.view'],
             ];

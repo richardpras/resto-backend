@@ -15,6 +15,7 @@ use App\Modules\Orders\Http\Requests\UpdateOrderStatusRequest;
 use App\Modules\Orders\Http\Resources\OrderResource;
 use App\Modules\Orders\Http\Resources\OrderPaymentResource;
 use App\Modules\Orders\Http\Resources\OrderSplitResource;
+use App\Modules\Orders\Http\Resources\PosEventLogResource;
 use App\Modules\Orders\Services\PaymentAllocationService;
 use App\Modules\Orders\Services\OrderService;
 use App\Modules\Orders\Services\SplitBillService;
@@ -45,6 +46,10 @@ class OrderController extends Controller
                 'kitchen_status' => $request->validated('kitchenStatus'),
                 'status' => $request->validated('status'),
                 'source' => $request->validated('source'),
+                'search' => $request->validated('search'),
+                'date_from' => $request->validated('dateFrom'),
+                'date_to' => $request->validated('dateTo'),
+                'has_voided_payment' => $request->validated('hasVoidedPayment'),
             ]
         );
 
@@ -150,6 +155,18 @@ class OrderController extends Controller
         ]);
     }
 
+    public function listEvents(Request $request, int $order): JsonResponse
+    {
+        $user = $this->resolveAuthenticatedUser($request);
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        $events = $this->orderService->listPosEventsForOrder($user, $order);
+
+        return response()->json([
+            'data' => PosEventLogResource::collection($events),
+        ]);
+    }
+
     public function storeSplit(StoreOrderSplitRequest $request, int $order): JsonResponse
     {
         $user = $this->resolveAuthenticatedUser($request);
@@ -189,7 +206,7 @@ class OrderController extends Controller
 
     private function resolveAuthenticatedUser(Request $request): ?\App\Models\User
     {
-        $user = $request->user();
+        $user = $request->user('api') ?? $request->user();
 
         return $user instanceof \App\Models\User ? $user : null;
     }

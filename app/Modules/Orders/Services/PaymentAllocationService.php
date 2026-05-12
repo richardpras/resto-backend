@@ -154,11 +154,18 @@ class PaymentAllocationService
         }, $payments);
     }
 
+    /**
+     * Normalize to `payments.method` enum values (see migration).
+     * Kept in sync with {@see OrderService::normalizePaymentMethod()} for the unauthenticated POS bridge path.
+     */
     private function normalizePaymentMethod(string $method): string
     {
         return match (strtolower(trim($method))) {
             'cash' => 'cash',
+            'qris', 'qr', 'qr code' => 'qris',
             'e-wallet', 'ewallet' => 'ewallet',
+            'card', 'credit card', 'debit card' => 'card',
+            'transfer', 'bank transfer' => 'transfer',
             default => 'transfer',
         };
     }

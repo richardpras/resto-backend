@@ -18,14 +18,18 @@ class StockMovementController extends Controller
 
     public function index(): JsonResponse
     {
-        $tenantId = (int) request()->query('tenant_id', 0);
+        /** Align with `IngredientController`: camelCase query keys; snake_case kept for backwards compatibility. */
+        $tenantId = (int) request()->query('tenantId', request()->query('tenant_id', 0));
         abort_if($tenantId < 1, Response::HTTP_UNPROCESSABLE_ENTITY, 'tenant_id is required');
 
-        $outletFilter = (int) request()->query('outlet_id', 0);
+        $rawOutlet = request()->query('outletId', request()->query('outlet_id'));
+        $outletFilter = is_numeric($rawOutlet) ? (int) $rawOutlet : 0;
+
+        $perPage = (int) request()->query('perPage', request()->query('per_page', 20));
 
         $movements = $this->inventoryService->listStockMovements(
             $tenantId,
-            (int) request()->query('per_page', 20),
+            $perPage,
             $outletFilter > 0 ? $outletFilter : null,
             request()->user('api')
         );
@@ -34,9 +38,9 @@ class StockMovementController extends Controller
             'data' => StockMovementResource::collection($movements->getCollection()),
             'meta' => [
                 'current_page' => $movements->currentPage(),
-                'per_page' => $movements->perPage(),
+                'perPage' => $movements->perPage(),
                 'total' => $movements->total(),
-                'last_page' => $movements->lastPage(),
+                'lastPage' => $movements->lastPage(),
             ],
         ]);
     }

@@ -16,6 +16,10 @@ class EloquentOrderRepository implements OrderRepositoryInterface
         $source = $filters['source'] ?? null;
         $outletId = isset($filters['outlet_id']) ? (int) $filters['outlet_id'] : null;
         $allowedOutletIds = $filters['allowed_outlet_ids'] ?? null;
+        $search = $filters['search'] ?? null;
+        $dateFrom = $filters['date_from'] ?? null;
+        $dateTo = $filters['date_to'] ?? null;
+        $hasVoidedPayment = $filters['has_voided_payment'] ?? null;
 
         return Order::query()
             ->when($tenantId > 0, fn ($query) => $query->where('tenant_id', $tenantId))
@@ -30,6 +34,17 @@ class EloquentOrderRepository implements OrderRepositoryInterface
             ->when(is_string($kitchenStatus) && $kitchenStatus !== '', fn ($query) => $query->where('kitchen_status', $kitchenStatus))
             ->when(is_string($status) && $status !== '', fn ($query) => $query->where('status', $status))
             ->when(is_string($source) && $source !== '', fn ($query) => $query->where('source', $source))
+            ->when(is_string($search) && trim($search) !== '', function ($query) use ($search): void {
+                $term = '%'.str_replace(['%', '_'], ['\\%', '\\_'], trim($search)).'%';
+                $query->where('code', 'like', $term);
+            })
+            ->when($dateFrom !== null && $dateFrom !== '', fn ($query) => $query->whereDate('created_at', '>=', $dateFrom))
+            ->when($dateTo !== null && $dateTo !== '', fn ($query) => $query->whereDate('created_at', '<=', $dateTo))
+            ->when($hasVoidedPayment === true || $hasVoidedPayment === 1 || $hasVoidedPayment === '1' || $hasVoidedPayment === 'true',
+                fn ($query) => $query->whereHas(
+                    'payments',
+                    fn ($q) => $q->where('status', 'void')
+                ))
             ->with(['items', 'payments.allocations', 'splits.items'])
             ->latest('id')
             ->paginate($perPage);

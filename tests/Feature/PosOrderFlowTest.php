@@ -307,6 +307,7 @@ class PosOrderFlowTest extends TestCase
 
         $journalId = DB::table('journals')->where('source_type', 'shift_close')->value('id');
         $this->assertNotNull($journalId);
+        $this->assertDatabaseHas('journals', ['id' => $journalId, 'source_type' => 'shift_close', 'outlet_id' => 1]);
 
         $totalDebit = (float) DB::table('journal_entries')->where('journal_id', $journalId)->sum('debit');
         $totalCredit = (float) DB::table('journal_entries')->where('journal_id', $journalId)->sum('credit');
@@ -452,6 +453,63 @@ class PosOrderFlowTest extends TestCase
             ],
         ]);
         $second->assertStatus(422);
+    }
+
+    /**
+     * Split-by-item UX: multiple payments in one request may each carry a partial qty
+     * on the same order line; running allocation must not exceed the line qty.
+     */
+    public function test_single_request_two_payments_split_qty_on_one_line_completes_order(): void
+    {
+        $create = $this->postJson('/api/v1/orders', [
+            'tenantId' => 1,
+            'outletId' => 1,
+            'code' => 'POS-SPLIT-2PAY-1',
+            'source' => 'pos',
+            'orderType' => 'Dine-in',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
+            'items' => [
+                ['id' => '101', 'name' => 'Shareable', 'qty' => 2, 'price' => 10000],
+            ],
+            'subtotal' => 20000,
+            'tax' => 0,
+            'total' => 20000,
+            'payments' => [],
+        ]);
+        $create->assertCreated();
+        $orderId = (int) $create->json('data.id');
+        $orderItemId = (int) DB::table('order_items')->where('order_id', $orderId)->value('id');
+
+        $pay = $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [
+                [
+                    'method' => 'cash',
+                    'amount' => 10000,
+                    'allocations' => [
+                        ['orderItemId' => $orderItemId, 'qty' => 1, 'amount' => 10000],
+                    ],
+                ],
+                [
+                    'method' => 'qris',
+                    'amount' => 10000,
+                    'allocations' => [
+                        ['orderItemId' => $orderItemId, 'qty' => 1, 'amount' => 10000],
+                    ],
+                ],
+            ],
+        ]);
+
+        $pay->assertOk();
+        $pay->assertJsonPath('data.paymentStatus', 'paid');
+        $this->assertSame(2, DB::table('payments')->where('order_id', $orderId)->count());
+        $paymentIds = DB::table('payments')->where('order_id', $orderId)->pluck('id');
+        $allocQtySum = (float) DB::table('order_payment_allocations')->whereIn('payment_id', $paymentIds)->sum('qty');
+        $this->assertEqualsWithDelta(2.0, $allocQtySum, 0.0001);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $orderId,
+            'method' => 'qris',
+        ]);
     }
 
     public function test_status_endpoint_cannot_force_payment_status_paid(): void

@@ -227,7 +227,7 @@ class Phase11EndToEndOperationalFlowTest extends TestCase
             ->assertJsonPath('data.cashVariance', 49000);
 
         $this->assertDatabaseHas('orders', ['id' => $orderId, 'is_posted' => true]);
-        $this->assertDatabaseHas('journals', ['source_type' => 'shift_close', 'outlet_id' => null]);
+        $this->assertDatabaseHas('journals', ['source_type' => 'shift_close', 'outlet_id' => (int) $outlet->id]);
         $this->assertDatabaseHas('journals', ['source_type' => 'pos_cash_variance', 'source_id' => (string) $sessionId]);
     }
 

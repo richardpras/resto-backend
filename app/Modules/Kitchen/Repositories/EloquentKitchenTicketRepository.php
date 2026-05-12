@@ -16,7 +16,7 @@ class EloquentKitchenTicketRepository implements KitchenTicketRepositoryInterfac
             ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
             ->when($outletId !== null && $outletId > 0, fn ($query) => $query->where('outlet_id', $outletId))
             ->when(is_string($status) && $status !== '', fn ($query) => $query->where('status', $status))
-            ->with('items')
+            ->with(['items.orderItem'])
             ->latest('id')
             ->paginate($perPage);
     }
@@ -26,13 +26,13 @@ class EloquentKitchenTicketRepository implements KitchenTicketRepositoryInterfac
         return KitchenTicket::query()
             ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
             ->whereKey($id)
-            ->with('items')
+            ->with(['items.orderItem'])
             ->first();
     }
 
     public function findByOrderId(int $orderId): ?KitchenTicket
     {
-        return KitchenTicket::query()->where('order_id', $orderId)->with('items')->first();
+        return KitchenTicket::query()->where('order_id', $orderId)->with(['items.orderItem'])->first();
     }
 
     public function create(array $attributes): KitchenTicket

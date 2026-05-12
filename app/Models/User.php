@@ -71,9 +71,21 @@ class User extends Authenticatable
             });
     }
 
+    /**
+     * Permission codes that satisfy a gate when the user holds any of the listed codes.
+     * Example: floor managers often have {@code tables.manage} without a separate {@code tables.view} row.
+     *
+     * @var array<string, list<string>>
+     */
+    private const PERMISSION_SATISFIED_BY_ANY_OF = [
+        'tables.view' => ['tables.view', 'tables.manage'],
+    ];
+
     public function hasPermission(string $permissionCode): bool
     {
-        return $this->permissions()->where('code', $permissionCode)->exists();
+        $candidates = self::PERMISSION_SATISFIED_BY_ANY_OF[$permissionCode] ?? [$permissionCode];
+
+        return $this->permissions()->whereIn('code', $candidates)->exists();
     }
 
     public function employee()

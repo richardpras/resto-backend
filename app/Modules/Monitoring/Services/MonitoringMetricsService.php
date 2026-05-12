@@ -63,6 +63,8 @@ class MonitoringMetricsService
             'offlineResilience' => $this->offlineResilienceMetrics($scopedOutletIds, $dateFrom, $dateTo),
             'hardwareBridge' => $this->hardwareBridgeMetrics($scopedOutletIds, $dateFrom, $dateTo),
             'crmMetrics' => $this->customerAnalyticsService->metricsForOutlets($scopedOutletIds),
+            'recoverySettlement' => $this->recoverySettlementRollups($scopedOutletIds, $dateFrom, $dateTo),
+            'paymentGateway' => $this->paymentGatewayTelemetry($scopedOutletIds, $dateFrom, $dateTo),
         ];
     }
 
@@ -336,6 +338,219 @@ class MonitoringMetricsService
         ];
     }
 
+    /**
+     * Additive gateway / webhook observability (no payment mutation).
+     *
+     * @param  list<int>  $outletIds
+     * @return array<string, mixed>
+     */
+    private function paymentGatewayTelemetry(array $outletIds, ?Carbon $dateFrom, ?Carbon $dateTo): array
+    {
+        if ($outletIds === []) {
+            return [
+                'webhookSignatureRejected' => 0,
+                'duplicateWebhookIgnored' => 0,
+                'staleWebhookIgnored' => 0,
+                'paidSettlementLatencyAvgSeconds' => 0.0,
+                'qrisCreationFailures' => 0,
+                'expiredQrisCount' => 0,
+                'qrisPaymentLatencyAvgSeconds' => 0.0,
+                'webhookDelayAvgSeconds' => 0.0,
+                'qrisRegenerationCount' => 0,
+                'xenditSandboxSimulations' => 0,
+                'xenditSandboxSimulationFailures' => 0,
+                'providerCallbackLatencyAvgSeconds' => 0.0,
+                'webhookSettlementLatencyAvgSeconds' => 0.0,
+                'xenditSecretConfigured' => false,
+                'xenditWebhookTokenConfigured' => false,
+                'registeredProviders' => [],
+            ];
+        }
+
+        $sigRejected = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('e.event_type', 'signature_rejected');
+        $this->applyDateRange($sigRejected, 'e.created_at', $dateFrom, $dateTo);
+
+        $dupIgnored = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('e.event_type', 'duplicate_ignored');
+        $this->applyDateRange($dupIgnored, 'e.created_at', $dateFrom, $dateTo);
+
+        $staleIgnored = (clone $dupIgnored)->where('e.payload->reason', 'stale_event_timestamp');
+
+        $paidLatency = DB::table('payment_transactions')
+            ->whereIn('outlet_id', $outletIds)
+            ->where('status', 'paid')
+            ->whereNotNull('paid_at');
+        $this->applyDateRange($paidLatency, 'paid_at', $dateFrom, $dateTo);
+
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'sqlite') {
+            $avgExpr = 'AVG((julianday(paid_at) - julianday(created_at)) * 86400.0)';
+        } else {
+            $avgExpr = 'AVG(TIMESTAMPDIFF(SECOND, created_at, paid_at))';
+        }
+
+        $avgSeconds = (float) ((clone $paidLatency)->selectRaw($avgExpr.' as v')->value('v') ?? 0.0);
+
+        $qrisBase = DB::table('payment_transactions')
+            ->whereIn('outlet_id', $outletIds)
+            ->where('provider', 'xendit')
+            ->where('payment_method', 'qris');
+        $this->applyDateRange($qrisBase, 'created_at', $dateFrom, $dateTo);
+
+        $qrisCreationFailures = (int) (clone $qrisBase)->whereIn('status', ['failed', 'cancelled'])->count();
+        $expiredQrisCount = (int) (clone $qrisBase)->where('status', 'expired')->count();
+
+        $qrisPaidLatency = (clone $qrisBase)->where('status', 'paid')->whereNotNull('paid_at');
+        $qrisLatencyExpr = $driver === 'sqlite'
+            ? 'AVG((julianday(paid_at) - julianday(created_at)) * 86400.0)'
+            : 'AVG(TIMESTAMPDIFF(SECOND, created_at, paid_at))';
+        $qrisPaymentLatencyAvgSeconds = (float) ((clone $qrisPaidLatency)->selectRaw($qrisLatencyExpr.' as v')->value('v') ?? 0.0);
+
+        $regenRows = DB::table('payment_transactions')
+            ->selectRaw('order_id, COUNT(*) as total')
+            ->whereIn('outlet_id', $outletIds)
+            ->where('provider', 'xendit')
+            ->where('payment_method', 'qris')
+            ->groupBy('order_id')
+            ->get();
+        $qrisRegenerationCount = 0;
+        foreach ($regenRows as $row) {
+            $count = max(0, (int) ($row->total ?? 0) - 1);
+            $qrisRegenerationCount += $count;
+        }
+
+        $webhookRows = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('t.provider', 'xendit')
+            ->where('t.payment_method', 'qris')
+            ->where('e.event_type', 'webhook_received')
+            ->get(['e.created_at', 'e.payload']);
+        $delaySamples = 0;
+        $delaySecondsTotal = 0.0;
+        foreach ($webhookRows as $row) {
+            $payload = $row->payload;
+            $occurredAt = null;
+            if (is_array($payload)) {
+                $occurredAt = $payload['occurredAt'] ?? null;
+            } elseif (is_string($payload)) {
+                $decoded = json_decode($payload, true);
+                if (is_array($decoded)) {
+                    $occurredAt = $decoded['occurredAt'] ?? null;
+                }
+            }
+            if (! is_string($occurredAt) || trim($occurredAt) === '') {
+                continue;
+            }
+            try {
+                $createdAt = Carbon::parse((string) $row->created_at);
+                $occurred = Carbon::parse($occurredAt);
+            } catch (\Throwable) {
+                continue;
+            }
+            $delay = max(0.0, (float) $createdAt->diffInSeconds($occurred, true));
+            $delaySecondsTotal += $delay;
+            $delaySamples++;
+        }
+        $webhookDelayAvgSeconds = $delaySamples > 0 ? $delaySecondsTotal / $delaySamples : 0.0;
+
+        $providerSimEvents = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('t.provider', 'xendit')
+            ->whereIn('e.event_type', ['sandbox_provider_simulation_requested', 'sandbox_provider_simulation_dispatched', 'sandbox_provider_simulation_failed']);
+        $this->applyDateRange($providerSimEvents, 'e.created_at', $dateFrom, $dateTo);
+        $xenditSandboxSimulations = (int) (clone $providerSimEvents)->where('e.event_type', 'sandbox_provider_simulation_dispatched')->count();
+        $xenditSandboxSimulationFailures = (int) (clone $providerSimEvents)->where('e.event_type', 'sandbox_provider_simulation_failed')->count();
+
+        $requestedRows = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('t.provider', 'xendit')
+            ->where('e.event_type', 'sandbox_provider_simulation_requested')
+            ->get(['e.payment_transaction_id', 'e.created_at']);
+        $reqByTx = [];
+        foreach ($requestedRows as $row) {
+            $reqByTx[(int) $row->payment_transaction_id] = (string) $row->created_at;
+        }
+        $webhookRowsForLatency = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('t.provider', 'xendit')
+            ->where('e.event_type', 'webhook_received')
+            ->get(['e.payment_transaction_id', 'e.created_at']);
+        $providerCallbackLatencyTotal = 0.0;
+        $providerCallbackLatencySamples = 0;
+        foreach ($webhookRowsForLatency as $row) {
+            $txId = (int) $row->payment_transaction_id;
+            if (! isset($reqByTx[$txId])) continue;
+            try {
+                $reqAt = Carbon::parse((string) $reqByTx[$txId]);
+                $cbAt = Carbon::parse((string) $row->created_at);
+            } catch (\Throwable) {
+                continue;
+            }
+            $providerCallbackLatencyTotal += (float) $cbAt->diffInSeconds($reqAt, true);
+            $providerCallbackLatencySamples++;
+        }
+        $providerCallbackLatencyAvgSeconds = $providerCallbackLatencySamples > 0
+            ? $providerCallbackLatencyTotal / $providerCallbackLatencySamples
+            : 0.0;
+
+        $settleRows = DB::table('payment_transaction_events as e')
+            ->join('payment_transactions as t', 't.id', '=', 'e.payment_transaction_id')
+            ->whereIn('t.outlet_id', $outletIds)
+            ->where('t.provider', 'xendit')
+            ->where('e.event_type', 'status_changed')
+            ->where('e.payload->source', 'webhook')
+            ->where('e.payload->to', 'paid')
+            ->get(['e.payment_transaction_id', 'e.created_at']);
+        $webhookSettleTotal = 0.0;
+        $webhookSettleSamples = 0;
+        foreach ($settleRows as $row) {
+            $txId = (int) $row->payment_transaction_id;
+            if (! isset($reqByTx[$txId])) continue;
+            try {
+                $reqAt = Carbon::parse((string) $reqByTx[$txId]);
+                $settleAt = Carbon::parse((string) $row->created_at);
+            } catch (\Throwable) {
+                continue;
+            }
+            $webhookSettleTotal += (float) $settleAt->diffInSeconds($reqAt, true);
+            $webhookSettleSamples++;
+        }
+        $webhookSettlementLatencyAvgSeconds = $webhookSettleSamples > 0
+            ? $webhookSettleTotal / $webhookSettleSamples
+            : 0.0;
+
+        /** @var array<string, array<string, mixed>> $providers */
+        $providers = config('payments.providers', []);
+
+        return [
+            'webhookSignatureRejected' => (int) $sigRejected->count(),
+            'duplicateWebhookIgnored' => (int) $dupIgnored->count(),
+            'staleWebhookIgnored' => (int) $staleIgnored->count(),
+            'paidSettlementLatencyAvgSeconds' => round($avgSeconds, 3),
+            'qrisCreationFailures' => $qrisCreationFailures,
+            'expiredQrisCount' => $expiredQrisCount,
+            'qrisPaymentLatencyAvgSeconds' => round($qrisPaymentLatencyAvgSeconds, 3),
+            'webhookDelayAvgSeconds' => round($webhookDelayAvgSeconds, 3),
+            'qrisRegenerationCount' => $qrisRegenerationCount,
+            'xenditSandboxSimulations' => $xenditSandboxSimulations,
+            'xenditSandboxSimulationFailures' => $xenditSandboxSimulationFailures,
+            'providerCallbackLatencyAvgSeconds' => round($providerCallbackLatencyAvgSeconds, 3),
+            'webhookSettlementLatencyAvgSeconds' => round($webhookSettlementLatencyAvgSeconds, 3),
+            'xenditSecretConfigured' => isset($providers['xendit']['secret_key']) && trim((string) $providers['xendit']['secret_key']) !== '',
+            'xenditWebhookTokenConfigured' => isset($providers['xendit']['webhook_token']) && trim((string) $providers['xendit']['webhook_token']) !== '',
+            'registeredProviders' => array_values(array_keys($providers)),
+        ];
+    }
+
     private function parseDate(mixed $value, bool $endOfDay): ?Carbon
     {
         if (! is_string($value) || trim($value) === '') {
@@ -356,5 +571,58 @@ class MonitoringMetricsService
         if ($dateTo !== null) {
             $query->where($column, '<=', $dateTo);
         }
+    }
+
+    /**
+     * Aggregates recovery settlement audit rows (additive ORDER-RECOVERY-02); no payment mutation.
+     *
+     * @param  list<int>  $outletIds
+     * @return array<string, mixed>
+     */
+    private function recoverySettlementRollups(array $outletIds, ?Carbon $dateFrom, ?Carbon $dateTo): array
+    {
+        $q = DB::table('order_item_recovery_events')
+            ->whereIn('outlet_id', $outletIds)
+            ->where('event_code', 'recovery_settlement_recorded');
+        $this->applyDateRange($q, 'created_at', $dateFrom, $dateTo);
+        $rows = $q->get(['payload']);
+
+        $settlementCount = $rows->count();
+        $refundTotal = 0.0;
+        $storeCreditTotal = 0.0;
+        $giftCardTotal = 0.0;
+        $replacementLossTotal = 0.0;
+        $loyaltyRollbackTotal = 0;
+        $loyaltyRegrantTotal = 0;
+
+        foreach ($rows as $row) {
+            $raw = $row->payload ?? null;
+            if (! is_string($raw) && ! is_object($raw)) {
+                continue;
+            }
+            $decoded = is_string($raw) ? json_decode($raw, true) : json_decode(json_encode($raw), true);
+            if (! is_array($decoded)) {
+                continue;
+            }
+            $refundTotal += (float) ($decoded['partialRefundCapped'] ?? 0);
+            $storeCreditTotal += (float) ($decoded['storeCreditAmount'] ?? 0);
+            $giftCardTotal += (float) ($decoded['giftCardAmount'] ?? 0);
+            $delta = (float) ($decoded['replacementDelta'] ?? 0);
+            if ($delta < 0) {
+                $replacementLossTotal += abs($delta);
+            }
+            $loyaltyRollbackTotal += (int) ($decoded['loyaltyRollbackPoints'] ?? 0);
+            $loyaltyRegrantTotal += (int) ($decoded['loyaltyRegrantPoints'] ?? 0);
+        }
+
+        return [
+            'settlementCount' => $settlementCount,
+            'partialRefundTotal' => round($refundTotal, 2),
+            'storeCreditTotal' => round($storeCreditTotal, 2),
+            'giftCardCompensationTotal' => round($giftCardTotal, 2),
+            'replacementLossTotal' => round($replacementLossTotal, 2),
+            'loyaltyRollbackPointsTotal' => $loyaltyRollbackTotal,
+            'loyaltyRegrantPointsTotal' => $loyaltyRegrantTotal,
+        ];
     }
 }

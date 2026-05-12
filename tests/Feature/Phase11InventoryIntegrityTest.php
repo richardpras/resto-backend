@@ -342,6 +342,17 @@ class Phase11InventoryIntegrityTest extends TestCase
         $this->assertSame(round($movementsTotal, 2), round($cogsDebit, 2), 'COGS journal line must equal sum of movement total_cost.');
     }
 
+    public function test_list_stock_movements_accepts_query_keys_consistent_with_ingredients(): void
+    {
+        [, $outlet] = $this->actAsAdminWithOutlet('P11II Stock-GET');
+        $camel = $this->getJson('/api/v1/stock-movements?tenantId=1&outletId='.(int) $outlet->id.'&perPage=10');
+        $camel->assertOk();
+        $camel->assertJsonStructure(['data', 'meta']);
+
+        $snake = $this->getJson('/api/v1/stock-movements?tenant_id=1&outlet_id='.(int) $outlet->id.'&per_page=10');
+        $snake->assertOk();
+    }
+
     /** @return array{0: User, 1: Outlet} */
     private function actAsAdminWithOutlet(string $name): array
     {

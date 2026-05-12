@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\Modules\UserManagement\Domain\Permission;
+use App\Models\Modules\UserManagement\Domain\Role;
+use App\Models\User;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Laravel\Passport\Passport;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -115,7 +119,28 @@ class TableMasterApiTest extends TestCase
 
     public function test_table_master_list_and_mutation_are_outlet_scoped_for_user(): void
     {
-        $user = $this->actingAsUserManagementApiAdministrator();
+        $this->seedUserManagementGatePermissions();
+
+        $permIds = Permission::query()
+            ->whereIn('code', ['tables.view', 'tables.manage'])
+            ->pluck('id')
+            ->all();
+        self::assertCount(2, $permIds);
+
+        $role = Role::query()->firstOrCreate(
+            ['name' => '__test_table_outlet_scope__'.uniqid('', true)],
+            ['description' => 'Tables CRUD without outlets.view_all (outlet assignment applies)'],
+        );
+        $role->permissions()->sync($permIds);
+
+        $user = User::factory()->create([
+            'email' => 'table-scope-'.uniqid('', true).'@test.local',
+            'password' => 'secret123',
+        ]);
+        $user->roles()->sync([$role->id]);
+
+        Passport::actingAs($user);
+
         $allowedOutlet = Outlet::query()->create([
             'name' => 'Allowed',
             'address' => '',
@@ -166,5 +191,39 @@ class TableMasterApiTest extends TestCase
         ])->assertNotFound();
 
         $this->deleteJson('/api/v1/tables/'.$forbiddenTable->id)->assertNotFound();
+    }
+
+    public function test_list_tables_allows_tables_manage_without_explicit_tables_view(): void
+    {
+        $this->seedUserManagementGatePermissions();
+
+        $manageId = Permission::query()->where('code', 'tables.manage')->value('id');
+        self::assertNotNull($manageId);
+
+        $role = Role::query()->firstOrCreate(
+            ['name' => '__test_tables_manage_only__'.uniqid('', true)],
+            ['description' => 'Fixture: manage floor without separate tables.view'],
+        );
+        $role->permissions()->sync([(int) $manageId]);
+
+        $user = User::factory()->create([
+            'email' => 'tables-manage-only-'.uniqid('', true).'@test.local',
+            'password' => 'secret123',
+        ]);
+        $user->roles()->sync([$role->id]);
+
+        $outlet = Outlet::query()->create([
+            'name' => 'Outlet For Manage-Only',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'tbl-mgr-'.uniqid(),
+        ]);
+        $this->assignUserToOutlets($user, [$outlet->id]);
+
+        Passport::actingAs($user);
+
+        $this->getJson('/api/v1/tables?outletId='.$outlet->id)->assertOk()->assertJsonPath('data', []);
     }
 }

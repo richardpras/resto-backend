@@ -46,6 +46,9 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'tables.view', 'name' => 'View tables'],
             ['code' => 'tables.manage', 'name' => 'Manage tables (floor master)'],
             ['code' => 'qr_orders.view', 'name' => 'View QR orders'],
+            ['code' => 'orders.recovery.read', 'name' => 'View order item recovery timeline'],
+            ['code' => 'orders.recovery.request', 'name' => 'Report order item recovery issues'],
+            ['code' => 'orders.recovery.approve', 'name' => 'Approve order item recovery resolutions'],
         ];
 
         foreach ($definitions as $row) {

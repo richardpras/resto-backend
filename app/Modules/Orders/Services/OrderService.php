@@ -9,6 +9,7 @@ use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\Payment;
+use App\Models\Modules\Orders\Domain\PosEventLog;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\User;
@@ -77,6 +78,32 @@ class OrderService
         $allowed = $this->outletAccessResolver->allowedOutletIds($user);
 
         return $this->orderRepository->findScoped($orderId, $allowed);
+    }
+
+    /**
+     * Operational audit timeline for an order (POS event log rows scoped to the order and its splits).
+     *
+     * @return Collection<int, PosEventLog>
+     */
+    public function listPosEventsForOrder(?User $user, int $orderId): Collection
+    {
+        $order = $this->findScoped($user, $orderId);
+        if ($order === null) {
+            throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+        }
+
+        return PosEventLog::query()
+            ->where('outlet_id', $order->outlet_id)
+            ->where(function ($query) use ($orderId): void {
+                $query->where(function ($q) use ($orderId): void {
+                    $q->where('entity_type', 'order')->where('entity_id', $orderId);
+                })->orWhere(function ($q) use ($orderId): void {
+                    $q->where('entity_type', 'order_split')->where('payload->orderId', $orderId);
+                });
+            })
+            ->orderByDesc('occurred_at')
+            ->limit(200)
+            ->get();
     }
 
     public function create(CreateOrderData $data, ?User $user = null)
@@ -517,8 +544,11 @@ class OrderService
                 ]);
             }
 
+            $journalOutletId = $this->resolveShiftCloseJournalOutletId($outletId, $orders);
+
             $journal = Journal::query()->create([
                 'tenant_id' => $tenantId,
+                'outlet_id' => $journalOutletId,
                 'journal_no' => 'JRN-SHIFT-'.now()->format('YmdHis'),
                 'source_type' => 'shift_close',
                 'source_id' => now()->format('YmdHis'),
@@ -796,6 +826,25 @@ class OrderService
         }
 
         return [null, null];
+    }
+
+    /**
+     * Align shift-close journal outlet with the batch being posted: explicit filter wins,
+     * otherwise a single distinct outlet among the orders.
+     */
+    private function resolveShiftCloseJournalOutletId(?int $requestedOutletId, Collection $orders): ?int
+    {
+        if ($requestedOutletId !== null && $requestedOutletId > 0) {
+            return $requestedOutletId;
+        }
+
+        $distinct = $orders->pluck('outlet_id')
+            ->map(fn ($v): ?int => $v !== null ? (int) $v : null)
+            ->filter(fn (?int $v): bool => $v !== null && $v > 0)
+            ->unique()
+            ->values();
+
+        return $distinct->count() === 1 ? (int) $distinct->first() : null;
     }
 
     private function calculateCogsForOrders(Collection $orders): float

@@ -2,18 +2,11 @@
 
 namespace App\Modules\Payments\Services\Providers;
 
-interface PaymentProviderInterface
+use App\Modules\Payments\Contracts\PaymentGatewayProviderContract;
+
+/**
+ * Legacy alias for {@see PaymentGatewayProviderContract}; resolved via {@see \App\Modules\Payments\Registry\PaymentGatewayRegistry}.
+ */
+interface PaymentProviderInterface extends PaymentGatewayProviderContract
 {
-    /** @param array<string,mixed> $payload */
-    public function createTransaction(array $payload): array;
-
-    /** @param array<string,mixed> $payload @param array<string,string> $headers */
-    public function verifyWebhookSignature(array $payload, array $headers, string $rawBody): bool;
-
-    public function fetchRemoteStatus(string $externalReference): array;
-
-    public function expireOrCancelPayment(string $externalReference): array;
-
-    /** @param array<string,mixed> $context */
-    public function reconcileTransaction(string $externalReference, array $context = []): array;
 }

@@ -23,6 +23,10 @@ class ListOrdersRequest extends FormRequest
             'source' => ['nullable', 'string', 'max:50'],
             'serviceMode' => ['nullable', 'in:dine_in,takeaway'],
             'kitchenStatus' => ['nullable', 'string', 'max:50'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'dateFrom' => ['nullable', 'date'],
+            'dateTo' => ['nullable', 'date', 'after_or_equal:dateFrom'],
+            'hasVoidedPayment' => ['nullable', 'boolean'],
         ];
     }
 }

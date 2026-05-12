@@ -56,6 +56,7 @@ class PurchaseInvoiceController extends Controller
             $created = PurchaseInvoice::query()->create([
                 'purchase_order_id' => $po->id,
                 'goods_receiving_note_id' => $gr->id,
+                'outlet_id' => $po->outlet_id,
                 'number' => $this->nextNumber(),
                 'invoice_date' => $data['date'],
                 'total' => $total,
@@ -79,6 +80,7 @@ class PurchaseInvoiceController extends Controller
                 'journal_date' => $data['date'],
                 'description' => 'Purchase invoice '.$created->number,
                 'status' => 'posted',
+                'outlet_id' => $created->outlet_id !== null ? (int) $created->outlet_id : null,
                 'lines' => [
                     [
                         'account_id' => $inventoryOrExpense->id,
@@ -120,7 +122,7 @@ class PurchaseInvoiceController extends Controller
 
         $updated = DB::transaction(function () use ($data, $purchaseInvoice): PurchaseInvoice {
             /** @var PurchaseInvoice $invoice */
-            $invoice = PurchaseInvoice::query()->with('payments')->lockForUpdate()->findOrFail($purchaseInvoice->id);
+            $invoice = PurchaseInvoice::query()->with(['payments', 'purchaseOrder'])->lockForUpdate()->findOrFail($purchaseInvoice->id);
             $alreadyPaid = (float) $invoice->payments->sum('amount');
             $amount = (float) $data['amount'];
             $remaining = (float) $invoice->total - $alreadyPaid;
@@ -148,6 +150,11 @@ class PurchaseInvoiceController extends Controller
                 'journal_date' => $data['date'],
                 'description' => 'Supplier payment '.$invoice->number,
                 'status' => 'posted',
+                'outlet_id' => $invoice->outlet_id !== null
+                    ? (int) $invoice->outlet_id
+                    : ($invoice->purchaseOrder !== null && $invoice->purchaseOrder->outlet_id !== null
+                        ? (int) $invoice->purchaseOrder->outlet_id
+                        : null),
                 'lines' => [
                     ['account_id' => $ap->id, 'debit' => $amount, 'credit' => 0],
                     ['account_id' => $cashOrBank->id, 'debit' => 0, 'credit' => $amount],

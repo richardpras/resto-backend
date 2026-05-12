@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\GiftCards\Services\GiftCardSettlementHookService;
 use App\Modules\Payments\Events\PaymentStatusChanged;
+use App\Modules\Payments\Registry\PaymentGatewayRegistry;
 use App\Modules\Payments\Repositories\PaymentTransactionRepositoryInterface;
 use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
 use App\Modules\Settings\Support\OutletAccessResolver;
@@ -34,6 +35,8 @@ class PaymentGatewayService
         private readonly JournalPostingService $journalPostingService,
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly GiftCardSettlementHookService $giftCardSettlementHookService,
+        private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
+        private readonly GatewayProviderResolutionService $gatewayProviderResolutionService,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -45,7 +48,11 @@ class PaymentGatewayService
             throw ValidationException::withMessages(['outletId' => ['The selected outletId is invalid.']]);
         }
 
-        $provider = strtolower(trim((string) ($payload['provider'] ?? config('payments.default_provider', 'midtrans'))));
+        $rawProvider = $payload['provider'] ?? null;
+        $requested = is_string($rawProvider) && trim($rawProvider) !== ''
+            ? strtolower(trim($rawProvider))
+            : null;
+        $provider = $this->gatewayProviderResolutionService->resolve($outletId, $requested);
         $idempotencyKey = trim((string) $payload['idempotencyKey']);
         $providerAdapter = $this->resolveProviderAdapter($provider);
 
@@ -694,9 +701,26 @@ class PaymentGatewayService
 
     private function postPaymentJournal(PaymentTransaction $transaction): void
     {
-        $order = Order::query()->findOrFail((int) $transaction->order_id);
-        $cash = $this->resolveAccount('cash_bank', ['1100'], ['asset'], (int) $transaction->outlet_id);
-        $revenue = $this->resolveAccount('sales_revenue', ['4100'], ['revenue'], (int) $transaction->outlet_id);
+        $order = Order::query()->findOrFail((int) $transaction->order_id)->fresh();
+        $orderOutlet = $order->outlet_id !== null && (int) $order->outlet_id > 0 ? (int) $order->outlet_id : null;
+        $txOutlet = $transaction->outlet_id !== null && (int) $transaction->outlet_id > 0 ? (int) $transaction->outlet_id : null;
+        $outletForJournal = $orderOutlet ?? $txOutlet;
+        if ($outletForJournal === null) {
+            throw ValidationException::withMessages([
+                'outlet' => ['Cannot post payment journal: order and payment transaction both lack a valid outlet_id.'],
+            ]);
+        }
+        if ($orderOutlet !== null && $txOutlet !== null && $orderOutlet !== $txOutlet) {
+            Log::warning('payment journal: order.outlet_id differs from payment_transactions.outlet_id; using order outlet for journal', [
+                'order_id' => (int) $order->id,
+                'payment_transaction_id' => (int) $transaction->id,
+                'order_outlet_id' => $orderOutlet,
+                'transaction_outlet_id' => $txOutlet,
+            ]);
+        }
+
+        $cash = $this->resolveAccount('cash_bank', ['1100'], ['asset'], $outletForJournal);
+        $revenue = $this->resolveAccount('sales_revenue', ['4100'], ['revenue'], $outletForJournal);
         if ($cash === null || $revenue === null) {
             throw ValidationException::withMessages([
                 'accounts' => ['Missing active cash or revenue account mapping for payment posting.'],
@@ -706,7 +730,7 @@ class PaymentGatewayService
         $amount = (float) $transaction->amount;
         $this->journalPostingService->post([
             'tenant_id' => (int) ($order->tenant_id ?? 0),
-            'outlet_id' => (int) $transaction->outlet_id,
+            'outlet_id' => $outletForJournal,
             'source_type' => 'payment_transaction',
             'source_id' => (string) $transaction->id,
             'journal_date' => now()->toDateString(),
@@ -729,10 +753,10 @@ class PaymentGatewayService
             ],
         ]);
 
-        $this->runGiftCardSettlementHook($transaction);
+        $this->runGiftCardSettlementHook($transaction, $outletForJournal);
     }
 
-    private function runGiftCardSettlementHook(PaymentTransaction $transaction): void
+    private function runGiftCardSettlementHook(PaymentTransaction $transaction, int $outletId): void
     {
         $snapshot = is_array($transaction->payload_snapshot) ? $transaction->payload_snapshot : [];
         $settlementIds = isset($snapshot['giftCardSettlementIds']) && is_array($snapshot['giftCardSettlementIds'])
@@ -744,7 +768,7 @@ class PaymentGatewayService
 
         try {
             $this->giftCardSettlementHookService->settle([
-                'outletId' => (int) $transaction->outlet_id,
+                'outletId' => $outletId,
                 'idempotencyKey' => 'payment-gift-card-settlement-'.$transaction->id,
                 'settlementReference' => 'payment_transaction#'.$transaction->id,
                 'paymentTransactionId' => (int) $transaction->id,
@@ -755,7 +779,7 @@ class PaymentGatewayService
         } catch (Throwable $throwable) {
             Log::warning('Gift card settlement hook failed after payment posting.', [
                 'transaction_id' => (int) $transaction->id,
-                'outlet_id' => (int) $transaction->outlet_id,
+                'outlet_id' => $outletId,
                 'error' => $throwable->getMessage(),
             ]);
         }
@@ -785,13 +809,13 @@ class PaymentGatewayService
 
     private function resolveProviderAdapter(string $provider): PaymentProviderInterface
     {
-        $providerConfig = config('payments.providers.'.$provider);
+        $providerConfig = $this->paymentGatewayRegistry->definition($provider);
         if (! is_array($providerConfig)) {
             throw ValidationException::withMessages(['provider' => ['Unsupported payment provider.']]);
         }
 
-        $providerClass = $providerConfig['class'] ?? null;
-        if (! is_string($providerClass) || ! class_exists($providerClass)) {
+        $providerClass = $this->paymentGatewayRegistry->adapterClass($provider);
+        if ($providerClass === null || ! class_exists($providerClass)) {
             throw ValidationException::withMessages(['provider' => ['Provider adapter is not configured.']]);
         }
 

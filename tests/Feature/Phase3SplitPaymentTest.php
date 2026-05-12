@@ -113,6 +113,108 @@ class Phase3SplitPaymentTest extends TestCase
         $pay->assertJsonCount(3, 'data.payments');
     }
 
+    public function test_list_order_payments_returns_operational_metadata(): void
+    {
+        [, $outlet] = $this->actAsAdminWithOutlet();
+        $orderId = $this->createConfirmedOrder($outlet->id, 'P3-LIST-PAY');
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [
+                ['method' => 'cash', 'amount' => 3000, 'status' => 'pending'],
+                ['method' => 'transfer', 'amount' => 8000],
+            ],
+        ])->assertOk();
+
+        $list = $this->getJson("/api/v1/orders/{$orderId}/payments");
+        $list->assertOk();
+        $list->assertJsonCount(2, 'data');
+        $list->assertJsonPath('data.0.status', 'pending');
+        $list->assertJsonPath('data.1.status', 'paid');
+        $list->assertJsonStructure([
+            'data' => [
+                '*' => [
+                    'id',
+                    'orderId',
+                    'orderSplitId',
+                    'method',
+                    'amount',
+                    'status',
+                    'paidAt',
+                    'createdAt',
+                    'splitBillLabel',
+                    'splitBillGroup',
+                    'allocations',
+                ],
+            ],
+        ]);
+    }
+
+    public function test_authenticated_split_two_allocations_same_line_preserves_qris_method(): void
+    {
+        [, $outlet] = $this->actAsAdminWithOutlet();
+        $table = RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'P3-SPLIT-T-'.uniqid(),
+            'capacity' => 4,
+            'status' => 'active',
+        ]);
+        $session = PosSession::query()->create([
+            'outlet_id' => $outlet->id,
+            'opened_by_user_id' => auth()->id(),
+            'status' => 'open',
+            'opening_cash' => 100000,
+            'opened_at' => now(),
+        ]);
+
+        $create = $this->postJson('/api/v1/orders', [
+            'tenantId' => 1,
+            'outletId' => $outlet->id,
+            'code' => 'P3-SPLIT-QTY-1',
+            'source' => 'pos',
+            'orderType' => 'Dine In',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
+            'serviceMode' => 'dine_in',
+            'orderChannel' => 'dine_in',
+            'posSessionId' => (int) $session->id,
+            'tableId' => (int) $table->id,
+            'items' => [
+                ['id' => '201', 'name' => 'Shareable', 'qty' => 2, 'price' => 5000],
+            ],
+            'subtotal' => 10000,
+            'tax' => 0,
+            'total' => 10000,
+            'payments' => [],
+        ]);
+        $create->assertCreated();
+        $orderId = (int) $create->json('data.id');
+        $orderItemId = (int) DB::table('order_items')->where('order_id', $orderId)->value('id');
+
+        $pay = $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [
+                [
+                    'method' => 'cash',
+                    'amount' => 5000,
+                    'allocations' => [
+                        ['orderItemId' => $orderItemId, 'qty' => 1, 'amount' => 5000],
+                    ],
+                ],
+                [
+                    'method' => 'qris',
+                    'amount' => 5000,
+                    'allocations' => [
+                        ['orderItemId' => $orderItemId, 'qty' => 1, 'amount' => 5000],
+                    ],
+                ],
+            ],
+        ]);
+
+        $pay->assertOk();
+        $pay->assertJsonPath('data.paymentStatus', 'paid');
+        $this->assertDatabaseHas('payments', ['order_id' => $orderId, 'method' => 'qris']);
+        $this->assertDatabaseHas('payments', ['order_id' => $orderId, 'method' => 'cash']);
+    }
+
     public function test_non_owner_cannot_access_other_outlet_split_and_payment_data(): void
     {
         $user = $this->actingAsUserManagementApiAdministrator();

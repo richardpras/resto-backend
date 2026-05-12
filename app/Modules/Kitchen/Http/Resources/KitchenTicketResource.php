@@ -19,14 +19,20 @@ class KitchenTicketResource extends JsonResource
             'startedAt' => $this->started_at?->toISOString(),
             'readyAt' => $this->ready_at?->toISOString(),
             'servedAt' => $this->served_at?->toISOString(),
-            'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($item) => [
-                'id' => (int) $item->id,
-                'orderItemId' => (int) $item->order_item_id,
-                'name' => (string) $item->item_name_snapshot,
-                'qty' => (float) $item->qty,
-                'notes' => $item->notes,
-                'status' => (string) $item->status,
-            ])->values()),
+            'items' => $this->whenLoaded('items', fn () => $this->items->map(function ($item) {
+                $oi = $item->relationLoaded('orderItem') ? $item->orderItem : null;
+
+                return [
+                    'id' => (int) $item->id,
+                    'orderItemId' => (int) $item->order_item_id,
+                    'name' => (string) $item->item_name_snapshot,
+                    'qty' => (float) $item->qty,
+                    'notes' => $item->notes,
+                    'status' => (string) $item->status,
+                    'recoveryStatus' => $oi?->recovery_status,
+                    'recoveryReason' => $oi?->recovery_reason,
+                ];
+            })->values()),
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
         ];

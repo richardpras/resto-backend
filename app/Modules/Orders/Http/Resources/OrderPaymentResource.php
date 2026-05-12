@@ -17,6 +17,10 @@ class OrderPaymentResource extends JsonResource
             'amount' => (float) $this->amount,
             'status' => (string) $this->status,
             'paidAt' => $this->paid_at?->toISOString(),
+            'createdAt' => $this->created_at?->toISOString(),
+            'splitBillLabel' => $this->split_bill_label,
+            'splitBillGroup' => $this->split_bill_group,
+            'splitLabel' => $this->whenLoaded('split', fn () => $this->split !== null ? (string) $this->split->label : null),
             'allocations' => $this->whenLoaded('allocations', fn () => $this->allocations->map(fn ($allocation) => [
                 'orderItemId' => (int) $allocation->order_item_id,
                 'qty' => (float) $allocation->qty,
