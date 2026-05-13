@@ -151,7 +151,7 @@ class OrderController extends Controller
         $payments = $this->paymentAllocationService->listPayments($user, $order);
 
         return response()->json([
-            'data' => OrderPaymentResource::collection($payments),
+            'data' => $payments->values()->all(),
         ]);
     }
 

@@ -8,6 +8,7 @@ use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\OrderSplit;
 use App\Models\Modules\Orders\Domain\OrderSplitItem;
 use App\Models\Modules\Orders\Domain\Payment;
+use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\User;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Settings\Support\OutletAccessResolver;
@@ -76,11 +77,79 @@ class PaymentAllocationService
             throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
         }
 
-        return Payment::query()
+        $payments = Payment::query()
             ->where('order_id', $order->id)
             ->with(['allocations', 'split'])
             ->orderBy('id')
-            ->get();
+            ->get()
+            ->map(fn (Payment $payment): array => $this->mapOrderPaymentHistoryRow($payment));
+
+        $gatewayAttempts = PaymentTransaction::query()
+            ->where('order_id', $order->id)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (PaymentTransaction $transaction): array => $this->mapGatewayPaymentHistoryRow($transaction));
+
+        return $payments
+            ->concat($gatewayAttempts)
+            ->sortBy(fn (array $row): int => strtotime((string) ($row['createdAt'] ?? $row['paidAt'] ?? 'now')) ?: 0)
+            ->values();
+    }
+
+    /** @return array<string,mixed> */
+    private function mapOrderPaymentHistoryRow(Payment $payment): array
+    {
+        return [
+            'id' => (int) $payment->id,
+            'orderId' => (int) $payment->order_id,
+            'orderSplitId' => $payment->order_split_id !== null ? (int) $payment->order_split_id : null,
+            'method' => (string) $payment->method,
+            'amount' => (float) $payment->amount,
+            'status' => (string) $payment->status,
+            'paidAt' => $payment->paid_at?->toISOString(),
+            'createdAt' => $payment->created_at?->toISOString(),
+            'splitBillLabel' => $payment->split_bill_label,
+            'splitBillGroup' => $payment->split_bill_group,
+            'splitLabel' => $payment->relationLoaded('split') && $payment->split !== null
+                ? (string) $payment->split->label
+                : null,
+            'allocations' => $payment->relationLoaded('allocations')
+                ? $payment->allocations->map(fn ($allocation) => [
+                    'orderItemId' => (int) $allocation->order_item_id,
+                    'qty' => (float) $allocation->qty,
+                    'amount' => (float) $allocation->amount,
+                ])->values()->all()
+                : [],
+            'source' => 'order_payment',
+            'gatewayTransactionId' => null,
+            'provider' => null,
+            'providerReference' => null,
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function mapGatewayPaymentHistoryRow(PaymentTransaction $transaction): array
+    {
+        $method = (string) ($transaction->payment_method ?? 'qris');
+
+        return [
+            'id' => 'gateway-'.$transaction->id,
+            'orderId' => (int) $transaction->order_id,
+            'orderSplitId' => $transaction->order_split_id !== null ? (int) $transaction->order_split_id : null,
+            'method' => $method,
+            'amount' => (float) $transaction->amount,
+            'status' => (string) $transaction->status,
+            'paidAt' => $transaction->paid_at?->toISOString(),
+            'createdAt' => $transaction->created_at?->toISOString(),
+            'splitBillLabel' => null,
+            'splitBillGroup' => null,
+            'splitLabel' => null,
+            'allocations' => [],
+            'source' => 'gateway_transaction',
+            'gatewayTransactionId' => (int) $transaction->id,
+            'provider' => (string) $transaction->provider,
+            'providerReference' => (string) $transaction->external_reference,
+        ];
     }
 
     public function recomputePaymentStatus(Order $order): void

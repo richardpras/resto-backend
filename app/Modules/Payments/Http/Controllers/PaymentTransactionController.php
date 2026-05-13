@@ -46,6 +46,21 @@ class PaymentTransactionController extends Controller
         ]);
     }
 
+    public function expire(int $transaction): JsonResponse
+    {
+        $user = request()->user('api');
+        abort_if(! $user instanceof \App\Models\User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+        $this->paymentGatewayService->showTransaction($user, $transaction);
+        $entity = $this->paymentGatewayService->expireTransaction($transaction);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Payment transaction expired successfully.',
+            'data' => new PaymentTransactionResource($entity),
+            'meta' => null,
+        ]);
+    }
+
     public function webhook(PaymentWebhookRequest $request, string $provider): JsonResponse
     {
         $headers = collect($request->headers->all())

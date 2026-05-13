@@ -246,6 +246,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('hardware/commands/{command}/nack', [HardwareBridgeController::class, 'nack'])->middleware('permission:pos.use');
         Route::post('sync/operations/batch', [TerminalSyncController::class, 'batch'])->middleware('permission:pos.use');
         Route::post('payment-transactions/reconcile', [PaymentTransactionController::class, 'reconcile'])->middleware('permission:pos.use');
+        Route::post('payment-transactions/{transaction}/expire', [PaymentTransactionController::class, 'expire'])->middleware('permission:pos.use');
         Route::get('payment-transactions/{transaction}', [PaymentTransactionController::class, 'show'])->middleware('permission:pos.use');
         Route::post('gift-cards/issue', [GiftCardController::class, 'issue'])->middleware('permission:pos.use');
         Route::get('gift-cards/{code}', [GiftCardController::class, 'check'])->middleware('permission:pos.use');

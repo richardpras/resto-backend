@@ -66,4 +66,19 @@ class EloquentPaymentTransactionRepository implements PaymentTransactionReposito
             ->limit($limit)
             ->get();
     }
+
+    public function listActivePendingForOrder(int $orderId, int $outletId, ?int $orderSplitId = null): Collection
+    {
+        $query = PaymentTransaction::query()
+            ->where('order_id', $orderId)
+            ->where('outlet_id', $outletId)
+            ->whereIn('status', ['pending', 'authorized'])
+            ->orderBy('id');
+
+        if ($orderSplitId !== null) {
+            $query->where('order_split_id', $orderSplitId);
+        }
+
+        return $query->lockForUpdate()->get();
+    }
 }

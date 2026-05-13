@@ -25,4 +25,7 @@ interface PaymentTransactionRepositoryInterface
 
     /** @return \Illuminate\Support\Collection<int,PaymentTransaction> */
     public function listPendingForExpiry(int $limit = 50): \Illuminate\Support\Collection;
+
+    /** @return \Illuminate\Support\Collection<int,PaymentTransaction> */
+    public function listActivePendingForOrder(int $orderId, int $outletId, ?int $orderSplitId = null): \Illuminate\Support\Collection;
 }

@@ -81,6 +81,8 @@ class PaymentGatewayService
                 }
             }
 
+            $this->supersedePendingTransactionsForOrder((int) $order->id, $outletId, $splitId);
+
             $providerResponse = $providerAdapter->createTransaction($payload);
             $expiryTime = isset($providerResponse['expiry_time']) ? (string) $providerResponse['expiry_time'] : ($providerResponse['expires_at'] ?? ($payload['expiredAt'] ?? null));
             $externalReference = (string) ($providerResponse['externalReference'] ?? $payload['externalReference']);
@@ -236,29 +238,60 @@ class PaymentGatewayService
                 throw (new ModelNotFoundException)->setModel(PaymentTransaction::class, [(string) $transactionId]);
             }
 
-            if (in_array((string) $transaction->status, ['paid', 'failed', 'cancelled', 'refunded'], true)) {
-                return $transaction->loadMissing('events');
-            }
-
-            if ((string) $transaction->status !== 'expired') {
-                $transaction = $this->transactionRepository->update($transaction, [
-                    'status' => 'expired',
-                    'expired_at' => now(),
-                    'expiry_time' => now(),
-                ]);
-                $this->recordEvent((int) $transaction->id, 'status_changed', [
-                    'from' => 'pending',
-                    'to' => 'expired',
-                    'source' => 'expire',
-                ]);
-                $this->recordEvent((int) $transaction->id, 'expired', [
-                    'source' => 'expire',
-                ]);
-                $this->emitPaymentStatusChanged($transaction);
-            }
-
-            return $this->transactionRepository->findById((int) $transaction->id) ?? $transaction;
+            return $this->expireOpenTransaction($transaction, 'expire');
         });
+    }
+
+    private function supersedePendingTransactionsForOrder(int $orderId, int $outletId, ?int $orderSplitId = null): void
+    {
+        $pending = $this->transactionRepository->listActivePendingForOrder($orderId, $outletId, $orderSplitId);
+        foreach ($pending as $transaction) {
+            $this->expireOpenTransaction($transaction, 'superseded_by_retry');
+        }
+    }
+
+    private function expireOpenTransaction(PaymentTransaction $transaction, string $source): PaymentTransaction
+    {
+        if (in_array((string) $transaction->status, ['paid', 'failed', 'cancelled', 'refunded'], true)) {
+            return $transaction->loadMissing('events');
+        }
+
+        if ((string) $transaction->status !== 'expired') {
+            try {
+                $providerAdapter = $this->resolveProviderAdapter((string) $transaction->provider);
+                $providerAdapter->expireOrCancelPayment((string) $transaction->external_reference);
+            } catch (Throwable $throwable) {
+                Log::warning('Provider expire/cancel failed during payment supersede.', [
+                    'transaction_id' => (int) $transaction->id,
+                    'source' => $source,
+                    'error' => $throwable->getMessage(),
+                ]);
+            }
+
+            $fromStatus = (string) $transaction->status;
+            $transaction = $this->transactionRepository->update($transaction, [
+                'status' => 'expired',
+                'expired_at' => now(),
+                'expiry_time' => now(),
+            ]);
+            $this->recordEvent((int) $transaction->id, 'status_changed', [
+                'from' => $fromStatus,
+                'to' => 'expired',
+                'source' => $source,
+            ]);
+            if ($source === 'superseded_by_retry') {
+                $this->recordEvent((int) $transaction->id, 'superseded', [
+                    'source' => $source,
+                ]);
+            } else {
+                $this->recordEvent((int) $transaction->id, 'expired', [
+                    'source' => $source,
+                ]);
+            }
+            $this->emitPaymentStatusChanged($transaction);
+        }
+
+        return $this->transactionRepository->findById((int) $transaction->id) ?? $transaction;
     }
 
     public function reconcileTransaction(int $transactionId, string $status, array $payload = []): PaymentTransaction
