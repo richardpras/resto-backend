@@ -46,6 +46,7 @@ use App\Modules\Settings\Http\Controllers\BankAccountSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\IntegrationSettingsController;
 use App\Modules\Settings\Http\Controllers\MerchantSettingsController;
 use App\Modules\Settings\Http\Controllers\NumberingSettingsController;
+use App\Modules\Settings\Http\Controllers\OutletPaymentMethodConfigController;
 use App\Modules\Settings\Http\Controllers\OutletReceiptSettingsController;
 use App\Modules\Settings\Http\Controllers\OutletSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\PaymentMethodSettingsCrudController;
@@ -206,6 +207,10 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('outlet-receipt-settings', [OutletReceiptSettingsController::class, 'index'])->middleware('permission:settings.view');
         Route::patch('outlet-receipt-settings/{outletId}', [OutletReceiptSettingsController::class, 'update'])->middleware('permission:settings.update');
+        Route::get('outlets/{outlet}/payment-method-configs', [OutletPaymentMethodConfigController::class, 'index'])->middleware('permission:settings.view');
+        Route::put('outlets/{outlet}/payment-method-configs', [OutletPaymentMethodConfigController::class, 'sync'])->middleware('permission:settings.update');
+        Route::post('outlets/{outlet}/payment-method-configs/static-qris-image', [OutletPaymentMethodConfigController::class, 'uploadStaticQrisImage'])->middleware('permission:settings.update');
+        Route::get('outlets/{outlet}/payment-checkout-methods', [OutletPaymentMethodConfigController::class, 'checkoutMethods'])->middleware('permission:pos.use');
 
         Route::get('members', [MemberController::class, 'index'])->middleware('permission:members.manage');
         Route::post('members', [MemberController::class, 'store'])->middleware('permission:members.manage');

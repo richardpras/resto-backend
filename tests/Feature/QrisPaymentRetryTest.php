@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
+use App\Models\Modules\Settings\Domain\OutletPaymentMethodConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -118,6 +119,11 @@ class QrisPaymentRetryTest extends TestCase
             'code' => 'qris-retry-'.uniqid(),
         ]);
         $this->assignUserToOutlets($user, [$outlet->id]);
+        $this->getJson('/api/v1/outlets/'.$outlet->id.'/payment-checkout-methods')->assertOk();
+        OutletPaymentMethodConfig::query()
+            ->where('outlet_id', $outlet->id)
+            ->where('payment_method_code', 'gateway_qris')
+            ->update(['enabled' => true]);
 
         return [$user, $outlet];
     }

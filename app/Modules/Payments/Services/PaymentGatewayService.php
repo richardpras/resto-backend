@@ -17,6 +17,7 @@ use App\Modules\Payments\Events\PaymentStatusChanged;
 use App\Modules\Payments\Registry\PaymentGatewayRegistry;
 use App\Modules\Payments\Repositories\PaymentTransactionRepositoryInterface;
 use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
+use App\Modules\Settings\Services\OutletPaymentMethodConfigService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use App\Support\Observability\AsyncOperationContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -37,6 +38,7 @@ class PaymentGatewayService
         private readonly GiftCardSettlementHookService $giftCardSettlementHookService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly GatewayProviderResolutionService $gatewayProviderResolutionService,
+        private readonly OutletPaymentMethodConfigService $outletPaymentMethodConfigService,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -47,6 +49,11 @@ class PaymentGatewayService
         if (! in_array($outletId, $allowedOutletIds, true)) {
             throw ValidationException::withMessages(['outletId' => ['The selected outletId is invalid.']]);
         }
+
+        $this->outletPaymentMethodConfigService->assertGatewayInitiationAllowed(
+            $outletId,
+            isset($payload['paymentMethod']) ? (string) $payload['paymentMethod'] : null,
+        );
 
         $rawProvider = $payload['provider'] ?? null;
         $requested = is_string($rawProvider) && trim($rawProvider) !== ''
