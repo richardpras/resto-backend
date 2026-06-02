@@ -13,6 +13,7 @@ class TableMasterService
 {
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly TableOperationalProjectionService $tableOperationalProjectionService,
     ) {}
 
     /** @return Collection<int, RestaurantTable> */
@@ -20,10 +21,19 @@ class TableMasterService
     {
         $this->assertOutletIsAllowed($user, $outletId);
 
-        return RestaurantTable::query()
+        $rows = RestaurantTable::query()
             ->where('outlet_id', $outletId)
             ->orderBy('name')
             ->get();
+
+        $projection = $this->tableOperationalProjectionService->projectForTables($rows);
+        foreach ($rows as $row) {
+            $rowProjection = $projection[(int) $row->id] ?? null;
+            $row->setAttribute('table_operational_status', $rowProjection['status'] ?? 'available');
+            $row->setAttribute('table_operational_signals', $rowProjection['signals'] ?? []);
+        }
+
+        return $rows;
     }
 
     /** @param array<string, mixed> $data */

@@ -146,9 +146,12 @@ class PaymentGatewayService
     {
         $normalizedProvider = strtolower(trim($provider));
         $providerAdapter = $this->resolveProviderAdapter($normalizedProvider);
-        $receipt = $this->persistWebhookReceipt($normalizedProvider, $payload, $headers);
+        $receipt = $this->persistWebhookReceipt($normalizedProvider, $payload, $headers, $rawBody);
         $transaction = $this->transactionRepository->findByProviderAndExternalReference($normalizedProvider, (string) $payload['externalReference']);
-        if (! $providerAdapter->verifyWebhookSignature($payload, $headers, $rawBody)) {
+        $canonicalSignedPayload = $rawBody !== ''
+            ? $rawBody
+            : (is_string($receipt->signed_payload) && $receipt->signed_payload !== '' ? $receipt->signed_payload : '');
+        if (! $providerAdapter->verifyWebhookSignature($payload, $headers, $canonicalSignedPayload)) {
             if ($transaction !== null) {
                 $this->recordEvent((int) $transaction->id, 'signature_rejected', [
                     'provider' => $normalizedProvider,
@@ -706,10 +709,11 @@ class PaymentGatewayService
     }
 
     /** @param array<string,mixed> $payload */
-    private function persistWebhookReceipt(string $provider, array $payload, array $headers = []): PaymentWebhookReceipt
+    private function persistWebhookReceipt(string $provider, array $payload, array $headers = [], string $rawBody = ''): PaymentWebhookReceipt
     {
         $eventKey = $this->resolveWebhookEventKey($provider, $payload);
         $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        $signedPayload = $rawBody !== '' ? $rawBody : $payloadJson;
 
         /** @var PaymentWebhookReceipt $receipt */
         $receipt = PaymentWebhookReceipt::query()->firstOrCreate(
@@ -723,6 +727,7 @@ class PaymentGatewayService
                 'payload_hash' => hash('sha256', $payloadJson),
                 'payload' => $payload,
                 'headers' => $headers,
+                'signed_payload' => $signedPayload,
                 'process_attempts' => 0,
             ]
         );

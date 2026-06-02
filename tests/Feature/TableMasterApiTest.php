@@ -6,6 +6,7 @@ use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\User;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
+use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -225,5 +226,102 @@ class TableMasterApiTest extends TestCase
         Passport::actingAs($user);
 
         $this->getJson('/api/v1/tables?outletId='.$outlet->id)->assertOk()->assertJsonPath('data', []);
+    }
+
+    public function test_table_list_returns_operational_projection_from_open_bill_and_qr_pending(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+
+        $outlet = Outlet::query()->create([
+            'name' => 'Projection Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'proj-'.uniqid(),
+        ]);
+        $this->assignUserToOutlets($user, [$outlet->id]);
+
+        $available = RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'A1',
+            'capacity' => 4,
+            'status' => 'active',
+        ]);
+        $occupiedByQr = RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'A2',
+            'capacity' => 4,
+            'status' => 'active',
+        ]);
+        $disabled = RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'A3',
+            'capacity' => 4,
+            'status' => 'inactive',
+        ]);
+
+        QrOrderRequest::query()->create([
+            'outlet_id' => $outlet->id,
+            'table_id' => $occupiedByQr->id,
+            'request_code' => 'QRO-PROJ-'.uniqid(),
+            'customer_name' => 'Guest',
+            'status' => 'pending_cashier_confirmation',
+            'expires_at' => now()->addMinutes(10),
+        ]);
+
+        $response = $this->getJson('/api/v1/tables?outletId='.$outlet->id)->assertOk();
+
+        $rows = collect($response->json('data'));
+        $byId = $rows->keyBy('id');
+        $this->assertSame('available', $byId->get((int) $available->id)['tableOperationalStatus']);
+        $this->assertSame('occupied', $byId->get((int) $occupiedByQr->id)['tableOperationalStatus']);
+        $this->assertSame('disabled', $byId->get((int) $disabled->id)['tableOperationalStatus']);
+    }
+
+    public function test_table_qr_management_and_resolvers_work_without_breaking_legacy_query(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = Outlet::query()->create([
+            'name' => 'QR Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'qr-out-'.uniqid(),
+        ]);
+        $this->assignUserToOutlets($user, [$outlet->id]);
+        $table = RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'A9',
+            'capacity' => 4,
+            'status' => 'active',
+            'active' => true,
+        ]);
+
+        $generated = $this->postJson('/api/v1/tables/'.$table->id.'/qr/generate')->assertOk();
+        $generated->assertJsonPath('data.qrEnabled', true);
+        $publicId = (string) $generated->json('data.qrPublicId');
+        $this->assertNotSame('', $publicId);
+
+        $resolved = $this->getJson('/api/v1/qr/tables/'.$publicId)->assertOk();
+        $resolved->assertJsonPath('data.outletId', (int) $outlet->id);
+        $resolved->assertJsonPath('data.tableId', (int) $table->id);
+        $resolved->assertJsonPath('data.qrPublicId', $publicId);
+
+        $rotated = $this->postJson('/api/v1/tables/'.$table->id.'/qr/rotate')->assertOk();
+        $newPublicId = (string) $rotated->json('data.qrPublicId');
+        $this->assertNotSame($publicId, $newPublicId);
+        $this->assertSame(2, (int) $rotated->json('data.qrVersion'));
+
+        $this->postJson('/api/v1/tables/'.$table->id.'/qr/disable')->assertOk();
+        $this->getJson('/api/v1/qr/tables/'.$newPublicId)->assertNotFound();
+        $this->postJson('/api/v1/tables/'.$table->id.'/qr/enable')->assertOk();
+        $this->getJson('/api/v1/qr/tables/'.$newPublicId)->assertOk();
+
+        $legacy = $this->getJson('/api/v1/qr/legacy-resolve?outletId='.$outlet->id.'&tableId='.$table->id)->assertOk();
+        $legacy->assertJsonPath('data.outletId', (int) $outlet->id);
+        $legacy->assertJsonPath('data.tableId', (int) $table->id);
+        $legacy->assertJsonPath('meta.compatibility', 'legacy-query');
     }
 }

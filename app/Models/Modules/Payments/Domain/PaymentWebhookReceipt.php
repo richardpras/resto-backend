@@ -14,6 +14,7 @@ class PaymentWebhookReceipt extends Model
         'payload_hash',
         'payload',
         'headers',
+        'signed_payload',
         'process_attempts',
         'processed_at',
         'next_retry_at',

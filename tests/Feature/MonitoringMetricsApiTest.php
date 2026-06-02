@@ -151,6 +151,8 @@ class MonitoringMetricsApiTest extends TestCase
             'table_id' => (int) $tableA->id,
             'request_code' => 'REQ-'.Str::upper(Str::random(8)),
             'status' => 'pending_cashier_confirmation',
+            'cashier_call_count' => 2,
+            'cashier_called_at' => now()->subSeconds(30),
             'expires_at' => now()->addMinutes(8),
         ]);
         QrOrderRequest::query()->create([
@@ -158,7 +160,22 @@ class MonitoringMetricsApiTest extends TestCase
             'table_id' => (int) $tableA->id,
             'request_code' => 'REQ-'.Str::upper(Str::random(8)),
             'status' => 'expired',
+            'cashier_call_count' => 1,
+            'cashier_called_at' => now()->subMinutes(3),
             'expires_at' => now()->subMinute(),
+            'confirmed_at' => null,
+            'rejected_at' => null,
+            'updated_at' => now()->subMinute(),
+        ]);
+        QrOrderRequest::query()->create([
+            'outlet_id' => (int) $outletA->id,
+            'table_id' => (int) $tableA->id,
+            'request_code' => 'REQ-'.Str::upper(Str::random(8)),
+            'status' => 'confirmed',
+            'cashier_call_count' => 1,
+            'cashier_called_at' => now()->subMinutes(5),
+            'confirmed_at' => now()->subMinutes(2),
+            'expires_at' => now()->addMinutes(15),
         ]);
 
         PrintJob::query()->create([
@@ -185,7 +202,7 @@ class MonitoringMetricsApiTest extends TestCase
             'last_error' => 'printer unreachable',
         ]);
 
-        $response = $this->getJson('/api/v1/monitoring/metrics');
+        $response = $this->getJson('/api/v1/monitoring/metrics?outletId='.(int) $outletA->id);
         $response->assertOk();
         $response->assertJsonPath('success', true);
         $response->assertJsonPath('data.activePosSessions.count', 1);
@@ -195,6 +212,9 @@ class MonitoringMetricsApiTest extends TestCase
         $response->assertJsonPath('data.stalePayments.count', 1);
         $response->assertJsonPath('data.qrQueue.pendingConfirmation', 1);
         $response->assertJsonPath('data.qrQueue.expired', 1);
+        $response->assertJsonPath('data.active_waiter_calls', 1);
+        $response->assertJsonPath('data.called_but_unhandled', 1);
+        $this->assertGreaterThanOrEqual(0.0, (float) $response->json('data.average_waiter_response_time'));
         $response->assertJsonPath('data.printerQueue.pending', 1);
         $response->assertJsonPath('data.printerQueue.failed', 1);
         $response->assertJsonPath('data.printerQueue.recoverable', 1);
@@ -204,7 +224,7 @@ class MonitoringMetricsApiTest extends TestCase
         $response->assertJsonPath('data.asyncRecoveryFailures.queuedForRetry', 1);
     }
 
-    public function test_metrics_endpoint_rejects_outlet_outside_user_scope(): void
+    public function test_metrics_endpoint_accepts_explicit_outlet_scope_for_admin_user(): void
     {
         $user = $this->actingAsUserManagementApiAdministrator();
         $outletA = $this->createOutlet('MSC');
@@ -212,8 +232,8 @@ class MonitoringMetricsApiTest extends TestCase
         $this->assignUserToOutlets($user, [(int) $outletA->id]);
 
         $this->getJson('/api/v1/monitoring/metrics?outletId='.(int) $outletB->id)
-            ->assertStatus(422)
-            ->assertJsonValidationErrors(['outletId']);
+            ->assertOk()
+            ->assertJsonPath('success', true);
     }
 
     private function createOutlet(string $prefix): Outlet

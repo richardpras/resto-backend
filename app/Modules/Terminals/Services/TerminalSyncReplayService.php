@@ -232,7 +232,9 @@ class TerminalSyncReplayService
             throw ValidationException::withMessages(['requestId' => ['requestId is required.']]);
         }
         $idempotencyKey = isset($payload['idempotencyKey']) ? (string) $payload['idempotencyKey'] : null;
-        $resolved = $this->qrOrderApprovalService->confirm($user, $requestId, $idempotencyKey);
+        $mode = (string) ($payload['mode'] ?? 'confirm_only');
+        $payments = is_array($payload['payments'] ?? null) ? $payload['payments'] : [];
+        $resolved = $this->qrOrderApprovalService->confirm($user, $requestId, $mode, $payments, $idempotencyKey);
 
         return [
             'entity' => 'qr_order_request',

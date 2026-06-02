@@ -9,6 +9,16 @@ class QrOrderRequestResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $estimatedTotal = $this->whenLoaded('items', function () {
+            return (float) $this->items->sum(function ($item): float {
+                $price = $item->relationLoaded('menuItem') && $item->menuItem !== null
+                    ? (float) $item->menuItem->price
+                    : 0.0;
+
+                return (float) $item->qty * $price;
+            });
+        }, 0.0);
+
         return [
             'id' => (string) $this->id,
             'requestCode' => (string) $this->request_code,
@@ -17,6 +27,11 @@ class QrOrderRequestResource extends JsonResource
             'tableName' => $this->table?->name,
             'customerName' => $this->customer_name,
             'status' => (string) $this->status,
+            'statusLabel' => $this->statusLabel((string) $this->status),
+            'decisionMode' => $this->decision_mode,
+            'estimatedTotal' => $estimatedTotal,
+            'cashierCalledAt' => $this->cashier_called_at?->toISOString(),
+            'cashierCallCount' => (int) ($this->cashier_call_count ?? 0),
             'expiresAt' => $this->expires_at?->toISOString(),
             'confirmedAt' => $this->confirmed_at?->toISOString(),
             'rejectedAt' => $this->rejected_at?->toISOString(),
@@ -30,5 +45,16 @@ class QrOrderRequestResource extends JsonResource
             ])->values()),
             'createdAt' => $this->created_at?->toISOString(),
         ];
+    }
+
+    private function statusLabel(string $status): string
+    {
+        return match ($status) {
+            'pending_cashier_confirmation' => 'Awaiting Cashier',
+            'confirmed' => 'Confirmed',
+            'rejected' => 'Rejected',
+            'expired' => 'Expired',
+            default => $status,
+        };
     }
 }

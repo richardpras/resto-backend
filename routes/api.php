@@ -24,11 +24,14 @@ use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
 use App\Modules\Monitoring\Http\Controllers\DashboardSummaryController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Orders\Http\Controllers\OpenBillController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoveryController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoverySettlementController;
 use App\Modules\Orders\Http\Controllers\PosSessionController;
 use App\Modules\Orders\Http\Controllers\QrOrderController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
+use App\Modules\Orders\Http\Controllers\TableQrController;
+use App\Modules\Reservations\Http\Controllers\ReservationController;
 use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
 use App\Modules\Payments\Http\Controllers\XenditSandboxSimulationController;
 use App\Modules\Payments\Http\Controllers\XenditInvoiceWebhookController;
@@ -65,18 +68,22 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     Route::post('auth/login', [AuthController::class, 'login']);
     Route::post('qr-orders', [QrOrderController::class, 'store']);
+    Route::post('qr-orders/{qrOrderRequest}/call-cashier', [QrOrderController::class, 'callCashier']);
+    Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
+    Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
 
-    Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
-    Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus']);
-    Route::patch('orders/{order}', [OrderController::class, 'update']);
-    Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit']);
-    Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit']);
-    Route::post('orders/{order}/payments', [OrderController::class, 'addPayments']);
+    Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::patch('orders/{order}', [OrderController::class, 'update'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments'])->middleware('auth:api');
     Route::get('orders/{order}/events', [OrderController::class, 'listEvents'])->middleware('auth:api');
+        Route::get('open-bills/table', [OpenBillController::class, 'byTable'])->middleware('permission:pos.use');
     Route::post('payment-webhooks/{provider}', [PaymentTransactionController::class, 'webhook']);
     Route::post('payments/webhooks/xendit', [XenditInvoiceWebhookController::class, 'store']);
-    Route::post('orders/shift-close', [OrderController::class, 'closeShift']);
+    Route::post('orders/shift-close', [OrderController::class, 'closeShift'])->middleware(['auth:api', 'permission:finance.shift_close']);
     Route::apiResource('menu-items', MenuItemController::class)
         ->only(['index', 'store', 'show', 'update'])
         ->middleware(['auth:api', 'permission:pos.use']);
@@ -228,6 +235,10 @@ Route::prefix('v1')->group(function (): void {
         Route::post('tables', [TableMasterController::class, 'store'])->middleware('permission:tables.manage');
         Route::patch('tables/{table}', [TableMasterController::class, 'update'])->middleware('permission:tables.manage');
         Route::delete('tables/{table}', [TableMasterController::class, 'destroy'])->middleware('permission:tables.manage');
+        Route::post('tables/{table}/qr/generate', [TableQrController::class, 'generate'])->middleware('permission:tables.manage');
+        Route::post('tables/{table}/qr/rotate', [TableQrController::class, 'rotate'])->middleware('permission:tables.manage');
+        Route::post('tables/{table}/qr/enable', [TableQrController::class, 'enable'])->middleware('permission:tables.manage');
+        Route::post('tables/{table}/qr/disable', [TableQrController::class, 'disable'])->middleware('permission:tables.manage');
         Route::post('pos-sessions/open', [PosSessionController::class, 'open'])->middleware('permission:pos.use');
         Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
         Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
@@ -250,7 +261,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('hardware/commands/{command}/ack', [HardwareBridgeController::class, 'ack'])->middleware('permission:pos.use');
         Route::post('hardware/commands/{command}/nack', [HardwareBridgeController::class, 'nack'])->middleware('permission:pos.use');
         Route::post('sync/operations/batch', [TerminalSyncController::class, 'batch'])->middleware('permission:pos.use');
-        Route::post('payment-transactions/reconcile', [PaymentTransactionController::class, 'reconcile'])->middleware('permission:pos.use');
+        Route::post('payment-transactions/reconcile', [PaymentTransactionController::class, 'reconcile'])->middleware('permission:finance.reconcile');
         Route::post('payment-transactions/{transaction}/expire', [PaymentTransactionController::class, 'expire'])->middleware('permission:pos.use');
         Route::get('payment-transactions/{transaction}', [PaymentTransactionController::class, 'show'])->middleware('permission:pos.use');
         Route::post('gift-cards/issue', [GiftCardController::class, 'issue'])->middleware('permission:pos.use');
@@ -301,6 +312,15 @@ Route::prefix('v1')->group(function (): void {
         Route::get('qr-orders', [QrOrderController::class, 'index'])->middleware('permission:pos.use');
         Route::post('qr-orders/{qrOrderRequest}/confirm', [QrOrderController::class, 'confirm'])->middleware('permission:pos.use');
         Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission:pos.use');
+        Route::post('reservations', [ReservationController::class, 'store'])->middleware('permission:pos.use');
+        Route::get('reservations', [ReservationController::class, 'index'])->middleware('permission:pos.use');
+        Route::get('reservations/{id}', [ReservationController::class, 'show'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/confirm', [ReservationController::class, 'confirm'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/check-in', [ReservationController::class, 'checkIn'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/seat', [ReservationController::class, 'seat'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/complete', [ReservationController::class, 'complete'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/cancel', [ReservationController::class, 'cancel'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/mark-no-show', [ReservationController::class, 'markNoShow'])->middleware('permission:pos.use');
 
         Route::get('suppliers', [SupplierController::class, 'index'])->middleware('permission:suppliers.manage');
         Route::post('suppliers', [SupplierController::class, 'store'])->middleware('permission:suppliers.manage');

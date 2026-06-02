@@ -26,14 +26,25 @@ class QrOrderApprovalService
         private readonly PosAuditLogService $auditLogService,
     ) {}
 
-    public function confirm(User $user, int $requestId, ?string $idempotencyKey = null): QrOrderRequest
-    {
-        return DB::transaction(function () use ($user, $requestId, $idempotencyKey): QrOrderRequest {
+    public function confirm(
+        User $user,
+        int $requestId,
+        string $mode = 'confirm_only',
+        array $payments = [],
+        ?string $idempotencyKey = null,
+    ): QrOrderRequest {
+        if (! in_array($mode, ['confirm_only', 'pay_and_confirm'], true)) {
+            throw ValidationException::withMessages([
+                'mode' => ['Mode must be confirm_only or pay_and_confirm.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($user, $requestId, $mode, $payments, $idempotencyKey): QrOrderRequest {
             return $this->idempotencyService->run(
-                'qr-orders.confirm.'.$requestId,
+                'qr-orders.confirm.'.$requestId.'.'.$mode,
                 $idempotencyKey,
-                ['requestId' => $requestId],
-                function () use ($user, $requestId): QrOrderRequest {
+                ['requestId' => $requestId, 'mode' => $mode, 'payments' => $payments],
+                function () use ($user, $requestId, $mode, $payments): QrOrderRequest {
                     $request = $this->resolveScoped($user, $requestId, true);
                     $request = $this->qrOrderExpiryService->markExpiredIfNeeded($request);
                     $fromStatus = (string) $request->status;
@@ -95,6 +106,17 @@ class QrOrderApprovalService
                     }
 
                     $subtotal = collect($orderItems)->sum(fn (array $item): float => (float) $item['qty'] * (float) $item['price']);
+                    $orderPayments = [];
+                    if ($mode === 'pay_and_confirm') {
+                        $orderPayments = $payments !== [] ? $payments : [['method' => 'cash', 'amount' => $subtotal]];
+                        $paidSum = collect($orderPayments)->sum(fn (array $payment): float => (float) ($payment['amount'] ?? 0));
+                        if (abs($paidSum - $subtotal) > 0.01) {
+                            throw ValidationException::withMessages([
+                                'payments' => ['Payments must equal order total for pay and confirm.'],
+                            ]);
+                        }
+                    }
+
                     $order = $this->orderService->create(
                         new CreateOrderData(
                             tenantId: null,
@@ -105,7 +127,7 @@ class QrOrderApprovalService
                             status: 'confirmed',
                             paymentStatus: 'unpaid',
                             items: $orderItems,
-                            payments: [],
+                            payments: $orderPayments,
                             subtotal: $subtotal,
                             tax: 0,
                             total: $subtotal,
@@ -127,6 +149,7 @@ class QrOrderApprovalService
                     $this->transitionValidator->assertQrRequestStatusTransition($fromStatus, 'confirmed');
                     $this->qrOrderRequestRepository->update($request, [
                         'status' => 'confirmed',
+                        'decision_mode' => $mode,
                         'confirmed_at' => now(),
                         'confirmed_by_user_id' => (int) $user->id,
                         'order_id' => (int) $order->id,
@@ -139,7 +162,7 @@ class QrOrderApprovalService
                         (int) $resolved->id,
                         (int) $resolved->outlet_id,
                         $user,
-                        ['orderId' => (int) ($resolved->order_id ?? 0)]
+                        ['orderId' => (int) ($resolved->order_id ?? 0), 'mode' => $mode]
                     );
                     event(new QrOrderDecisionChanged(
                         outletId: (int) $resolved->outlet_id,
@@ -226,7 +249,7 @@ class QrOrderApprovalService
             $query->lockForUpdate();
         }
 
-        $request = $query->with(['items', 'table', 'order'])->first();
+        $request = $query->with(['items.menuItem', 'table', 'order'])->first();
         if ($request === null) {
             throw (new ModelNotFoundException)->setModel(QrOrderRequest::class, [(string) $requestId]);
         }

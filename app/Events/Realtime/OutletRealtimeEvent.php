@@ -58,15 +58,28 @@ abstract class OutletRealtimeEvent implements ShouldBroadcast
 
     public function broadcastWith(): array
     {
+        $eventId = (string) Str::uuid();
+        $occurredAt = now()->toIso8601String();
+        $data = $this->data();
+        $meta = isset($data['meta']) && is_array($data['meta']) ? $data['meta'] : [];
+        $sequence = isset($meta['sequence']) && is_numeric($meta['sequence']) ? (int) $meta['sequence'] : null;
+
         return [
-            'event_id' => (string) Str::uuid(),
+            // Canonical envelope (new contract)
+            'id' => $eventId,
+            'type' => $this->eventName(),
+            'sequence' => $sequence,
+            'occurredAt' => $occurredAt,
+            'payload' => $data,
+            // Backward-compatible fields
+            'event_id' => $eventId,
             'event_name' => $this->eventName(),
             'event_version' => $this->eventVersion,
-            'occurred_at' => now()->toIso8601String(),
+            'occurred_at' => $occurredAt,
             'aggregate_type' => $this->aggregateType(),
             'aggregate_id' => $this->aggregateId(),
             'outlet_id' => $this->outletId,
-            'data' => $this->data(),
+            'data' => $data,
         ];
     }
 }

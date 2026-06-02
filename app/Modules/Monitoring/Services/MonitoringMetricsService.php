@@ -57,6 +57,9 @@ class MonitoringMetricsService
             'paymentRate' => $this->paymentRate($scopedOutletIds, $dateFrom, $dateTo),
             'stalePayments' => $this->stalePayments($scopedOutletIds, $dateFrom, $dateTo),
             'qrQueue' => $this->qrQueue($scopedOutletIds, $dateFrom, $dateTo),
+            'active_waiter_calls' => $this->activeWaiterCalls($scopedOutletIds, $dateFrom, $dateTo),
+            'average_waiter_response_time' => $this->averageWaiterResponseTime($scopedOutletIds, $dateFrom, $dateTo),
+            'called_but_unhandled' => $this->calledButUnhandled($scopedOutletIds, $dateFrom, $dateTo),
             'printerQueue' => $this->printerQueue($scopedOutletIds, $dateFrom, $dateTo),
             'reconciliationFailures' => $this->reconciliationFailures($scopedOutletIds, $dateFrom, $dateTo),
             'asyncRecoveryFailures' => $this->asyncRecoveryFailures($scopedOutletIds, $dateFrom, $dateTo),
@@ -151,6 +154,83 @@ class MonitoringMetricsService
             'pendingConfirmation' => (int) (clone $base)->where('status', 'pending_cashier_confirmation')->count(),
             'expired' => (int) (clone $base)->where('status', 'expired')->count(),
         ];
+    }
+
+    /**
+     * @param  list<int>  $outletIds
+     */
+    private function activeWaiterCalls(array $outletIds, ?Carbon $dateFrom, ?Carbon $dateTo): int
+    {
+        $query = DB::table('qr_order_requests')
+            ->whereIn('outlet_id', $outletIds)
+            ->where('status', 'pending_cashier_confirmation')
+            ->where('cashier_call_count', '>', 0)
+            ->whereNotNull('cashier_called_at');
+        $this->applyDateRange($query, 'created_at', $dateFrom, $dateTo);
+
+        return (int) $query->count();
+    }
+
+    /**
+     * @param  list<int>  $outletIds
+     */
+    private function averageWaiterResponseTime(array $outletIds, ?Carbon $dateFrom, ?Carbon $dateTo): float
+    {
+        $rows = DB::table('qr_order_requests')
+            ->whereIn('outlet_id', $outletIds)
+            ->whereNotNull('cashier_called_at')
+            ->whereIn('status', ['confirmed', 'rejected', 'expired'])
+            ->get(['cashier_called_at', 'confirmed_at', 'rejected_at', 'updated_at', 'status', 'created_at']);
+
+        $total = 0.0;
+        $count = 0;
+        foreach ($rows as $row) {
+            try {
+                $calledAt = Carbon::parse((string) $row->cashier_called_at);
+                $resolvedAt = match ((string) $row->status) {
+                    'confirmed' => $row->confirmed_at ? Carbon::parse((string) $row->confirmed_at) : null,
+                    'rejected' => $row->rejected_at ? Carbon::parse((string) $row->rejected_at) : null,
+                    default => $row->updated_at ? Carbon::parse((string) $row->updated_at) : null,
+                };
+                if ($resolvedAt === null) {
+                    continue;
+                }
+                $delta = (float) $resolvedAt->diffInSeconds($calledAt, false);
+                if ($delta < 0) {
+                    continue;
+                }
+                if ($dateFrom !== null || $dateTo !== null) {
+                    $createdAt = Carbon::parse((string) $row->created_at);
+                    if ($dateFrom !== null && $createdAt->lt($dateFrom)) {
+                        continue;
+                    }
+                    if ($dateTo !== null && $createdAt->gt($dateTo)) {
+                        continue;
+                    }
+                }
+                $total += $delta;
+                $count++;
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return $count > 0 ? round($total / $count, 2) : 0.0;
+    }
+
+    /**
+     * @param  list<int>  $outletIds
+     */
+    private function calledButUnhandled(array $outletIds, ?Carbon $dateFrom, ?Carbon $dateTo): int
+    {
+        $query = DB::table('qr_order_requests')
+            ->whereIn('outlet_id', $outletIds)
+            ->where('status', 'pending_cashier_confirmation')
+            ->where('cashier_call_count', '>', 0)
+            ->whereNotNull('cashier_called_at');
+        $this->applyDateRange($query, 'created_at', $dateFrom, $dateTo);
+
+        return (int) $query->count();
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
+use App\Models\Modules\Payments\Domain\PaymentWebhookReceipt;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
 use App\Modules\Payments\Services\PaymentGatewayService;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -248,6 +250,75 @@ class Phase10PaymentGatewayFoundationTest extends TestCase
         ]);
     }
 
+    public function test_replay_processing_uses_persisted_signed_payload_for_signature_verification(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet();
+        $this->seedAccountingAccounts();
+        $orderId = $this->createConfirmedOrder($outlet->id, (int) $user->id, 'P10-REPLAY-VALID');
+        $transactionId = $this->createPaymentTransaction($orderId, $outlet->id, null, 'ext-p10-replay-valid-1', 'idem-p10-replay-valid-1');
+
+        $payload = [
+            'externalReference' => 'ext-p10-replay-valid-1',
+            'status' => 'paid',
+            'eventId' => 'evt-replay-valid-1',
+        ];
+        $raw = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        $signature = hash_hmac('sha256', $raw, (string) config('payments.providers.manual.webhook_secret'));
+
+        $receipt = PaymentWebhookReceipt::query()->create([
+            'provider' => 'manual',
+            'event_idempotency_key' => 'manual#evt-replay-valid-1',
+            'external_reference' => 'ext-p10-replay-valid-1',
+            'incoming_status' => 'paid',
+            'payload_hash' => hash('sha256', $raw),
+            'payload' => $payload,
+            'headers' => ['x-signature' => $signature],
+            'signed_payload' => $raw,
+            'process_attempts' => 0,
+        ]);
+
+        $processed = app(PaymentGatewayService::class)->processWebhookReceipt((int) $receipt->id);
+
+        $this->assertNotNull($processed);
+        $this->assertSame('paid', $processed?->status);
+        $this->assertDatabaseHas('payment_transactions', [
+            'id' => $transactionId,
+            'status' => 'paid',
+        ]);
+    }
+
+    public function test_replay_processing_rejects_mismatched_persisted_signed_payload(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet();
+        $orderId = $this->createConfirmedOrder($outlet->id, (int) $user->id, 'P10-REPLAY-INVALID');
+        $this->createPaymentTransaction($orderId, $outlet->id, null, 'ext-p10-replay-invalid-1', 'idem-p10-replay-invalid-1');
+
+        $payload = [
+            'externalReference' => 'ext-p10-replay-invalid-1',
+            'status' => 'paid',
+            'eventId' => 'evt-replay-invalid-1',
+        ];
+        $raw = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        $signature = hash_hmac('sha256', $raw, (string) config('payments.providers.manual.webhook_secret'));
+
+        $receipt = PaymentWebhookReceipt::query()->create([
+            'provider' => 'manual',
+            'event_idempotency_key' => 'manual#evt-replay-invalid-1',
+            'external_reference' => 'ext-p10-replay-invalid-1',
+            'incoming_status' => 'paid',
+            'payload_hash' => hash('sha256', $raw),
+            'payload' => $payload,
+            'headers' => ['x-signature' => $signature],
+            'signed_payload' => '{"tampered":true}',
+            'process_attempts' => 0,
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Invalid payment webhook signature');
+
+        app(PaymentGatewayService::class)->processWebhookReceipt((int) $receipt->id);
+    }
+
     public function test_stale_event_timestamp_is_rejected(): void
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet();
@@ -354,6 +425,8 @@ class Phase10PaymentGatewayFoundationTest extends TestCase
 
     private function createPaymentTransaction(int $orderId, int $outletId, ?int $splitId, string $externalReference, string $idempotencyKey): int
     {
+        $this->enableGatewayQrisForOutlet($outletId);
+
         $response = $this->postJson('/api/v1/payment-transactions', [
             'orderId' => $orderId,
             'orderSplitId' => $splitId,
@@ -392,8 +465,27 @@ class Phase10PaymentGatewayFoundationTest extends TestCase
             'code' => 'p10-'.uniqid(),
         ]);
         $this->assignUserToOutlets($user, [$outlet->id]);
+        $this->enableGatewayQrisForOutlet((int) $outlet->id);
 
         return [$user, $outlet];
+    }
+
+    private function enableGatewayQrisForOutlet(int $outletId): void
+    {
+        DB::table('outlet_payment_method_configs')->upsert([
+            [
+                'outlet_id' => $outletId,
+                'payment_method_code' => 'gateway_qris',
+                'type' => 'gateway_qris',
+                'provider' => 'manual',
+                'enabled' => true,
+                'display_order' => 10,
+                'is_default' => true,
+                'settings' => json_encode([], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ], ['outlet_id', 'payment_method_code'], ['enabled', 'provider', 'updated_at']);
     }
 
     private function createConfirmedOrder(int $outletId, int $openedByUserId, string $code): int

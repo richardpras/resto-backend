@@ -23,7 +23,7 @@ class EloquentQrOrderRequestRepository implements QrOrderRequestRepositoryInterf
         return QrOrderRequest::query()
             ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
             ->whereKey($id)
-            ->with(['items', 'table', 'order'])
+            ->with(['items.menuItem', 'table', 'order'])
             ->first();
     }
 
@@ -37,8 +37,18 @@ class EloquentQrOrderRequestRepository implements QrOrderRequestRepositoryInterf
             ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
             ->when($outletId !== null && $outletId > 0, fn ($query) => $query->where('outlet_id', $outletId))
             ->when(is_string($status) && $status !== '', fn ($query) => $query->where('status', $status))
-            ->with(['items', 'table', 'order'])
-            ->latest('id')
+            ->with(['items.menuItem', 'table', 'order'])
+            ->when(
+                $status === 'pending_cashier_confirmation',
+                function ($query) {
+                    $query
+                        ->orderByDesc('cashier_call_count')
+                        ->orderByDesc('cashier_called_at')
+                        ->orderBy('created_at')
+                        ->orderBy('id');
+                },
+                fn ($query) => $query->latest('id')
+            )
             ->paginate($perPage);
     }
 }

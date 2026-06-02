@@ -59,6 +59,11 @@ class RealtimeBroadcastInfrastructureTest extends TestCase
 
         $this->assertSame(1, $payload['event_version']);
         $this->assertSame('order.lifecycle.changed', $payload['event_name']);
+        $this->assertSame($payload['event_id'], $payload['id']);
+        $this->assertSame('order.lifecycle.changed', $payload['type']);
+        $this->assertSame(5, $payload['sequence']);
+        $this->assertSame($payload['data'], $payload['payload']);
+        $this->assertArrayHasKey('occurredAt', $payload);
         $this->assertSame('test-correlation-id', $payload['meta']['correlation_id']);
         $this->assertSame(5, $payload['meta']['sequence']);
         $this->assertSame('2026-05-08T10:00:00+00:00', $payload['meta']['aggregate_updated_at']);
@@ -83,6 +88,10 @@ class RealtimeBroadcastInfrastructureTest extends TestCase
 
         $this->assertSame(1, $payload['event_version']);
         $this->assertSame('payment.status.changed', $payload['event_name']);
+        $this->assertSame($payload['event_id'], $payload['id']);
+        $this->assertSame('payment.status.changed', $payload['type']);
+        $this->assertSame(17, $payload['sequence']);
+        $this->assertSame($payload['data'], $payload['payload']);
         $this->assertSame(17, $payload['data']['meta']['sequence']);
         $this->assertSame('2026-05-08T10:10:00+00:00', $payload['data']['meta']['aggregate_updated_at']);
         $this->assertSame('pay-correlation', $payload['data']['meta']['correlation_id']);

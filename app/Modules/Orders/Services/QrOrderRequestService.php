@@ -5,6 +5,9 @@ namespace App\Modules\Orders\Services;
 use App\Models\Modules\Orders\Domain\QrOrderRequestItem;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\User;
+use App\Models\Modules\Orders\Domain\QrOrderRequest;
+use App\Modules\Orders\Events\QrOrderCashierCalled;
+use App\Modules\Orders\Events\QrOrderRequestSubmitted;
 use App\Modules\Orders\Repositories\QrOrderRequestRepositoryInterface;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -41,6 +44,19 @@ class QrOrderRequestService
                         ]);
                     }
 
+                    $activePending = QrOrderRequest::query()
+                        ->where('outlet_id', (int) $payload['outletId'])
+                        ->where('table_id', (int) $payload['tableId'])
+                        ->where('status', 'pending_cashier_confirmation')
+                        ->where('expires_at', '>', now())
+                        ->lockForUpdate()
+                        ->exists();
+                    if ($activePending) {
+                        throw ValidationException::withMessages([
+                            'tableId' => ['A request for this table is already awaiting cashier confirmation.'],
+                        ]);
+                    }
+
                     $request = $this->qrOrderRequestRepository->create([
                         'outlet_id' => (int) $payload['outletId'],
                         'table_id' => (int) $payload['tableId'],
@@ -68,6 +84,15 @@ class QrOrderRequestService
                             (int) $resolved->outlet_id,
                             null
                         );
+                        event(new QrOrderRequestSubmitted(
+                            outletId: (int) $resolved->outlet_id,
+                            requestId: (int) $resolved->id,
+                            requestCode: (string) $resolved->request_code,
+                            tableId: (int) $resolved->table_id,
+                            customerName: $resolved->customer_name,
+                            sequence: (int) $resolved->id,
+                            aggregateUpdatedAtIso: $resolved->updated_at?->toIso8601String()
+                        ));
                     }
 
                     return $resolved;
@@ -89,6 +114,64 @@ class QrOrderRequestService
         }
 
         return $this->qrOrderRequestRepository->paginateScoped($perPage, $allowed, $filters);
+    }
+
+    public function callCashier(int $requestId, int $outletId, int $tableId): QrOrderRequest
+    {
+        return DB::transaction(function () use ($requestId, $outletId, $tableId): QrOrderRequest {
+            $request = QrOrderRequest::query()
+                ->whereKey($requestId)
+                ->where('outlet_id', $outletId)
+                ->where('table_id', $tableId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($request === null) {
+                throw ValidationException::withMessages([
+                    'request' => ['QR order request not found for this table.'],
+                ]);
+            }
+
+            if ((string) $request->status !== 'pending_cashier_confirmation') {
+                throw ValidationException::withMessages([
+                    'request' => ['Only awaiting-cashier requests can call the cashier.'],
+                ]);
+            }
+
+            $calledAt = now();
+            $callCount = (int) $request->cashier_call_count + 1;
+            $request->update([
+                'cashier_called_at' => $calledAt,
+                'cashier_call_count' => $callCount,
+            ]);
+
+            $resolved = QrOrderRequest::query()
+                ->whereKey($request->id)
+                ->with(['items.menuItem', 'table'])
+                ->first();
+
+            $this->auditLogService->log(
+                'qr.request.cashier_called',
+                'qr_order_request',
+                (int) $resolved->id,
+                (int) $resolved->outlet_id,
+                null,
+                ['callCount' => $callCount]
+            );
+
+            event(new QrOrderCashierCalled(
+                outletId: (int) $resolved->outlet_id,
+                requestId: (int) $resolved->id,
+                requestCode: (string) $resolved->request_code,
+                tableId: (int) $resolved->table_id,
+                callCount: $callCount,
+                calledAtIso: $calledAt->toIso8601String(),
+                sequence: (int) $resolved->id,
+                aggregateUpdatedAtIso: $resolved->updated_at?->toIso8601String()
+            ));
+
+            return $resolved;
+        });
     }
 
     private function generateRequestCode(): string

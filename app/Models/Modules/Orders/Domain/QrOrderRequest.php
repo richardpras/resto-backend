@@ -15,6 +15,7 @@ class QrOrderRequest extends Model
         'request_code',
         'customer_name',
         'status',
+        'decision_mode',
         'expires_at',
         'confirmed_at',
         'rejected_at',
@@ -22,12 +23,16 @@ class QrOrderRequest extends Model
         'rejected_by_user_id',
         'rejection_reason',
         'order_id',
+        'cashier_called_at',
+        'cashier_call_count',
     ];
 
     protected $casts = [
         'expires_at' => 'datetime',
         'confirmed_at' => 'datetime',
         'rejected_at' => 'datetime',
+        'cashier_called_at' => 'datetime',
+        'cashier_call_count' => 'integer',
     ];
 
     public function items(): HasMany

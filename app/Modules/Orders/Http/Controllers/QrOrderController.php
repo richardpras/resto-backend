@@ -3,6 +3,8 @@
 namespace App\Modules\Orders\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Orders\Http\Requests\CallQrOrderCashierRequest;
+use App\Modules\Orders\Http\Requests\ConfirmQrOrderRequest;
 use App\Modules\Orders\Http\Requests\ListQrOrderRequestsRequest;
 use App\Modules\Orders\Http\Requests\RejectQrOrderRequest;
 use App\Modules\Orders\Http\Requests\StoreQrOrderRequest;
@@ -27,6 +29,20 @@ class QrOrderController extends Controller
             'message' => 'QR order request submitted successfully.',
             'data' => new QrOrderRequestResource($qrOrderRequest),
         ], Response::HTTP_CREATED);
+    }
+
+    public function callCashier(CallQrOrderCashierRequest $request, int $qrOrderRequest): JsonResponse
+    {
+        $called = $this->qrOrderRequestService->callCashier(
+            $qrOrderRequest,
+            (int) $request->validated('outletId'),
+            (int) $request->validated('tableId'),
+        );
+
+        return response()->json([
+            'message' => 'Cashier has been notified.',
+            'data' => new QrOrderRequestResource($called),
+        ]);
     }
 
     public function index(ListQrOrderRequestsRequest $request): JsonResponse
@@ -57,19 +73,26 @@ class QrOrderController extends Controller
         ]);
     }
 
-    public function confirm(\Illuminate\Http\Request $request, int $qrOrderRequest): JsonResponse
+    public function confirm(ConfirmQrOrderRequest $request, int $qrOrderRequest): JsonResponse
     {
         $user = $request->user();
         abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
 
+        $mode = (string) ($request->validated('mode') ?? 'confirm_only');
         $confirmed = $this->qrOrderApprovalService->confirm(
             $user,
             $qrOrderRequest,
-            $request->header('Idempotency-Key')
+            $mode,
+            $request->validated('payments', []),
+            $request->validated('idempotencyKey') ?? $request->header('Idempotency-Key'),
         );
 
+        $message = $mode === 'pay_and_confirm'
+            ? 'QR order paid and sent to kitchen.'
+            : 'QR order confirmed as open bill and sent to kitchen.';
+
         return response()->json([
-            'message' => 'QR order request confirmed successfully.',
+            'message' => $message,
             'data' => new QrOrderRequestResource($confirmed),
         ]);
     }

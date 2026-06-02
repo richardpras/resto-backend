@@ -22,6 +22,7 @@ use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Payments\Events\PaymentStatusChanged;
 use App\Modules\Print\Services\PrinterRoutingService;
 use App\Modules\Settings\Support\OutletAccessResolver;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -412,64 +413,7 @@ class OrderService
         ?string $expectedUpdatedAt = null
     ) {
         if ($user === null) {
-            return DB::transaction(function () use ($id, $payments) {
-                $order = $this->orderRepository->findById($id);
-                if ($order === null) {
-                    return null;
-                }
-
-                $normalizedPayments = $this->normalizePayments($payments);
-                $incoming = collect($normalizedPayments)->sum(fn (array $payment): float => (float) $payment['amount']);
-                $existing = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
-                if (($existing + $incoming) > ((float) $order->total + 0.00001)) {
-                    throw ValidationException::withMessages([
-                        'payments' => ['Total allocated payment cannot exceed order total.'],
-                    ]);
-                }
-
-                $this->storePayments($order->id, $normalizedPayments);
-                $paidTotal = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
-                $paymentStatus = $paidTotal >= (float) $order->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
-                $status = $paymentStatus === 'paid' && $order->status !== 'cancelled' ? 'completed' : $order->status;
-                (new PosTransitionValidator)->assertPaymentStatusTransition((string) $order->payment_status, $paymentStatus);
-
-                $this->orderRepository->update($order, [
-                    'status' => $status,
-                    'payment_status' => $paymentStatus,
-                    'paid_total' => $paidTotal,
-                    'balance_due' => max(0, (float) $order->total - $paidTotal),
-                ]);
-
-                if ($paymentStatus === 'paid') {
-                    $this->recipeStockDeductionService->deductForPaidOrder($order->fresh(['items']));
-                    $this->postOrderPaymentJournal($order->fresh(['payments']));
-                    $this->printerRoutingService->queueReceiptForOrder($order->fresh(['items']), 'order-paid');
-                }
-
-                $fresh = $this->orderRepository->findWithRelations($order->id);
-                if ($fresh !== null) {
-                    event(new OrderLifecycleChanged(
-                        outletId: (int) ($fresh->outlet_id ?? 0),
-                        orderId: (int) $fresh->id,
-                        status: (string) $fresh->status,
-                        paymentStatus: (string) $fresh->payment_status,
-                        kitchenStatus: (string) $fresh->kitchen_status,
-                        sequence: (int) $fresh->id,
-                        aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
-                    ));
-                    event(new PaymentStatusChanged(
-                        outletId: (int) ($fresh->outlet_id ?? 0),
-                        transactionId: (int) $fresh->id,
-                        orderId: (int) $fresh->id,
-                        status: (string) $fresh->payment_status,
-                        provider: 'pos_direct',
-                        sequence: (int) $fresh->id,
-                        aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
-                    ));
-                }
-
-                return $fresh;
-            });
+            throw new AuthorizationException('Unauthenticated payment mutation is not allowed.');
         }
 
         $before = $this->orderRepository->findScoped($id, $this->outletAccessResolver->allowedOutletIds($user));
