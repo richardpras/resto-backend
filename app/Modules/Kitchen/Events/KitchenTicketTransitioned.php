@@ -3,16 +3,13 @@
 namespace App\Modules\Kitchen\Events;
 
 use App\Events\Realtime\OutletRealtimeEvent;
+use App\Modules\Kitchen\Support\KitchenRealtimeSnapshot;
 
 class KitchenTicketTransitioned extends OutletRealtimeEvent
 {
     public function __construct(
         int $outletId,
-        private readonly int $ticketId,
-        private readonly int $orderId,
-        private readonly string $status,
-        private readonly ?int $sequence = null,
-        private readonly ?string $aggregateUpdatedAtIso = null,
+        private readonly KitchenRealtimeSnapshot $snapshot,
         ?string $correlationId = null,
     ) {
         parent::__construct($outletId, 1, $correlationId);
@@ -30,7 +27,7 @@ class KitchenTicketTransitioned extends OutletRealtimeEvent
 
     protected function aggregateId(): string
     {
-        return (string) $this->ticketId;
+        return (string) $this->snapshot->id;
     }
 
     protected function channelSuffix(): string
@@ -41,10 +38,12 @@ class KitchenTicketTransitioned extends OutletRealtimeEvent
     protected function data(): array
     {
         return [
-            'ticket_id' => $this->ticketId,
-            'order_id' => $this->orderId,
-            'status' => $this->status,
-            'meta' => $this->meta($this->sequence, $this->aggregateUpdatedAtIso),
+            ...$this->snapshot->toPayload(),
+            'meta' => $this->meta(
+                $this->snapshot->sequence(),
+                $this->snapshot->updatedAtIso,
+                $this->snapshot->replayKey(),
+            ),
         ];
     }
 }

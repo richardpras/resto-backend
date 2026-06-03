@@ -17,13 +17,17 @@ class StoreMemberRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
+            'outletId' => ['nullable', 'integer', 'min:1'],
+            'fullName' => ['required_without:name', 'string', 'max:255'],
+            'name' => ['required_without:fullName', 'string', 'max:255'],
             'phone' => ['required', 'string', 'max:32'],
             'email' => ['nullable', 'string', 'email', 'max:255'],
+            'birthDate' => ['nullable', 'date'],
             'birthday' => ['nullable', 'date'],
+            'gender' => ['nullable', 'string', 'max:16'],
             'notes' => ['nullable', 'string'],
-            'points' => ['nullable', 'integer', 'min:0'],
-            'status' => ['required', 'in:active,inactive'],
+            'isActive' => ['nullable', 'boolean'],
+            'status' => ['nullable', 'in:active,inactive'],
         ];
     }
 }

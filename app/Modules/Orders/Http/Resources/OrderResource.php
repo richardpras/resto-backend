@@ -28,6 +28,7 @@ class OrderResource extends JsonResource
             'isPosted' => (bool) $this->is_posted,
             'customerName' => $this->customer_name,
             'customerPhone' => $this->customer_phone,
+            'memberId' => $this->member_id !== null ? (int) $this->member_id : null,
             'tableId' => $this->table_id !== null ? (int) $this->table_id : null,
             'tableName' => $this->table_name,
             /** @deprecated Prefer `tableName` / master `tableId`; legacy column `table_number` read-only. */

@@ -9,10 +9,22 @@ class KitchenTicketResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $order = $this->relationLoaded('order') ? $this->order : null;
+        $tableNumber = null;
+        if ($order !== null) {
+            $tableNumber = $order->table_name !== null && $order->table_name !== ''
+                ? (string) $order->table_name
+                : ($order->table_number !== null ? (string) $order->table_number : null);
+        }
+
         return [
             'id' => (int) $this->id,
             'outletId' => (int) $this->outlet_id,
             'orderId' => (int) $this->order_id,
+            'orderNumber' => $order !== null ? (string) $order->code : null,
+            'orderCode' => $order !== null ? (string) $order->code : null,
+            'tableNumber' => $tableNumber,
+            'serviceMode' => $order !== null ? (string) ($order->service_mode ?? '') : null,
             'ticketNo' => (string) $this->ticket_no,
             'status' => (string) $this->status,
             'queuedAt' => $this->queued_at?->toISOString(),

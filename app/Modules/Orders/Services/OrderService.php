@@ -16,6 +16,8 @@ use App\Models\User;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
 use App\Modules\Kitchen\Services\KitchenTicketService;
+use App\Modules\Members\Services\MemberTransactionRecorder;
+use App\Modules\Members\Services\OrderMemberAttachmentService;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Events\OrderLifecycleChanged;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
@@ -40,6 +42,8 @@ class OrderService
         private readonly PosAuditLogService $auditLogService,
         private readonly JournalPostingService $journalPostingService,
         private readonly PrinterRoutingService $printerRoutingService,
+        private readonly MemberTransactionRecorder $memberTransactionRecorder,
+        private readonly OrderMemberAttachmentService $orderMemberAttachmentService,
     ) {}
 
     /**
@@ -136,6 +140,11 @@ class OrderService
             $status = $paymentStatus === 'paid' && $data->status !== 'cancelled' ? 'completed' : $data->status;
 
             [$floorTableId, $floorTableName] = $this->resolveFloorTableForOrder($data);
+            $member = $this->orderMemberAttachmentService->resolveMemberForOrderCreate(
+                $user,
+                $data->outletId !== null ? (int) $data->outletId : null,
+                $data->memberId,
+            );
 
             $order = $this->orderRepository->create([
                 'tenant_id' => $data->tenantId,
@@ -155,8 +164,9 @@ class OrderService
                 'discount_amount' => $data->discountAmount,
                 'paid_total' => $paidTotal,
                 'balance_due' => max(0, $data->total - $paidTotal),
-                'customer_name' => $data->customerName,
-                'customer_phone' => $data->customerPhone,
+                'member_id' => $member?->id,
+                'customer_name' => $data->customerName ?? $member?->displayName(),
+                'customer_phone' => $data->customerPhone ?? $member?->phone,
                 'table_id' => $floorTableId,
                 'table_name' => $floorTableName,
                 'split_bill' => $data->splitBill,
@@ -186,9 +196,11 @@ class OrderService
             }
 
             if ($paymentStatus === 'paid') {
-                $this->recipeStockDeductionService->deductForPaidOrder($order);
-                $this->postOrderPaymentJournal($order->fresh(['payments']));
-                $this->printerRoutingService->queueReceiptForOrder($order->fresh(['items']), 'order-paid');
+                $paidOrder = $order->fresh(['payments', 'items']);
+                $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
+                $this->postOrderPaymentJournal($paidOrder);
+                $this->printerRoutingService->queueReceiptForOrder($paidOrder, 'order-paid');
+                $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
             }
 
             $this->auditLogService->log(
@@ -226,6 +238,12 @@ class OrderService
      */
     public function updateOrder(User $user, int $orderId, array $payload): Order
     {
+        if (array_key_exists('memberId', $payload)) {
+            $memberId = $payload['memberId'] !== null ? (int) $payload['memberId'] : null;
+
+            return $this->orderMemberAttachmentService->setOrderMember($user, $orderId, $memberId);
+        }
+
         $allowed = $this->outletAccessResolver->allowedOutletIds($user);
 
         return DB::transaction(function () use ($orderId, $payload, $allowed, $user): Order {
@@ -240,7 +258,9 @@ class OrderService
                 isset($payload['expectedUpdatedAt']) ? (string) $payload['expectedUpdatedAt'] : null
             );
 
+            $orderItemsUpdated = false;
             if (array_key_exists('items', $payload) && is_array($payload['items'])) {
+                $orderItemsUpdated = true;
                 OrderItem::query()->where('order_id', $order->id)->delete();
                 foreach ($payload['items'] as $item) {
                     OrderItem::query()->create([
@@ -282,6 +302,11 @@ class OrderService
             $fresh = $this->orderRepository->findWithRelations($order->id);
             if ($fresh === null) {
                 throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+            }
+
+            if ($orderItemsUpdated) {
+                $this->kitchenTicketService->syncTicketItemsFromOrder($fresh);
+                $fresh = $this->orderRepository->findWithRelations($order->id) ?? $fresh;
             }
 
             $this->auditLogService->log(
@@ -342,6 +367,11 @@ class OrderService
         }
 
         return $fresh;
+    }
+
+    public function setOrderMember(User $user, int $orderId, ?int $memberId): Order
+    {
+        return $this->orderMemberAttachmentService->setOrderMember($user, $orderId, $memberId);
     }
 
     /**
@@ -419,9 +449,11 @@ class OrderService
         $before = $this->orderRepository->findScoped($id, $this->outletAccessResolver->allowedOutletIds($user));
         $updated = $this->paymentAllocationService->addPayments($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt);
         if ($updated !== null && $before !== null && (string) $before->payment_status !== 'paid' && (string) $updated->payment_status === 'paid') {
-            $this->recipeStockDeductionService->deductForPaidOrder($updated->fresh(['items']));
-            $this->postOrderPaymentJournal($updated->fresh(['payments']));
-            $this->printerRoutingService->queueReceiptForOrder($updated->fresh(['items']), 'order-paid');
+            $paidOrder = $updated->fresh(['items', 'payments']);
+            $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
+            $this->postOrderPaymentJournal($paidOrder);
+            $this->printerRoutingService->queueReceiptForOrder($paidOrder, 'order-paid');
+            $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
         }
         if ($updated !== null) {
             event(new OrderLifecycleChanged(

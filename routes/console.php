@@ -32,3 +32,18 @@ Schedule::command('pos:check-stale-sessions')
     ->hourly()
     ->withoutOverlapping()
     ->name('pos-check-stale-sessions');
+
+Schedule::command('reservations:apply-auto-no-show')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->name('reservations-apply-auto-no-show');
+
+Schedule::command('loyalty:process-period-rewards')
+    ->daily()
+    ->withoutOverlapping()
+    ->name('loyalty-process-period-rewards');
+
+Schedule::command('loyalty:process-expiry')
+    ->daily()
+    ->withoutOverlapping()
+    ->name('loyalty-process-expiry');

@@ -29,7 +29,17 @@ class MembersSuppliersApiTest extends TestCase
 
         $this->getJson('/api/v1/members')->assertOk()->assertJsonStructure(['data']);
 
+        $outlet = \App\Models\Modules\Settings\Domain\Outlet::query()->create([
+            'name' => 'Members Test Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'mem-test-'.uniqid(),
+        ]);
+
         $create = $this->postJson('/api/v1/members', [
+            'outletId' => (int) $outlet->id,
             'name' => 'Test Member',
             'phone' => '081111112222',
             'email' => 'test@example.com',
@@ -39,8 +49,8 @@ class MembersSuppliersApiTest extends TestCase
         $id = $create->json('data.id');
 
         $this->patchJson("/api/v1/members/{$id}", [
-            'points' => 100,
-        ])->assertOk()->assertJsonPath('data.points', 100);
+            'notes' => 'VIP guest',
+        ])->assertOk()->assertJsonPath('data.notes', 'VIP guest');
 
         $this->patchJson("/api/v1/members/{$id}/status")->assertOk()->assertJsonPath('data.status', 'inactive');
 

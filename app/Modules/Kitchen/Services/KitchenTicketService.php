@@ -8,6 +8,7 @@ use App\Models\Modules\Orders\Domain\Order;
 use App\Models\User;
 use App\Modules\Kitchen\Events\KitchenTicketTransitioned;
 use App\Modules\Kitchen\Repositories\KitchenTicketRepositoryInterface;
+use App\Modules\Kitchen\Support\KitchenRealtimeSnapshot;
 use App\Modules\Orders\Services\PosAuditLogService;
 use App\Modules\Orders\Services\PosIdempotencyService;
 use App\Modules\Orders\Services\PosTransitionValidator;
@@ -101,14 +102,7 @@ class KitchenTicketService
                     );
                     $fresh = $this->ticketRepository->findScoped((int) $ticket->id, $allowed);
                     if ($fresh !== null) {
-                        event(new KitchenTicketTransitioned(
-                            outletId: (int) $fresh->outlet_id,
-                            ticketId: (int) $fresh->id,
-                            orderId: (int) $fresh->order_id,
-                            status: (string) $fresh->status,
-                            sequence: (int) $fresh->id,
-                            aggregateUpdatedAtIso: $fresh->updated_at?->toIso8601String()
-                        ));
+                        $this->publishTicketTransitioned($fresh);
                     }
 
                     return $fresh;
@@ -126,7 +120,13 @@ class KitchenTicketService
         return DB::transaction(function () use ($order): KitchenTicket {
             $existing = KitchenTicket::query()->where('order_id', $order->id)->lockForUpdate()->first();
             if ($existing !== null) {
-                return $existing->load('items');
+                $order->loadMissing('items');
+                $this->syncItemsForTicket($existing, $order);
+                $existing->touch();
+                $loaded = $existing->fresh(['items.orderItem', 'order']);
+                $this->publishTicketTransitioned($loaded);
+
+                return $loaded;
             }
 
             $ticket = $this->ticketRepository->create([
@@ -158,17 +158,85 @@ class KitchenTicketService
                 null,
                 ['orderId' => (int) $order->id]
             );
-            event(new KitchenTicketTransitioned(
-                outletId: (int) $ticket->outlet_id,
-                ticketId: (int) $ticket->id,
-                orderId: (int) $ticket->order_id,
-                status: (string) $ticket->status,
-                sequence: (int) $ticket->id,
-                aggregateUpdatedAtIso: $ticket->updated_at?->toIso8601String()
-            ));
+            $loaded = $ticket->load(['items.orderItem', 'order']);
+            $this->publishTicketTransitioned($loaded);
 
-            return $ticket->load('items');
+            return $loaded;
         });
+    }
+
+    public function syncTicketItemsFromOrder(Order $order): ?KitchenTicket
+    {
+        if (! in_array((string) $order->status, ['confirmed', 'completed'], true)) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($order): ?KitchenTicket {
+            $order->loadMissing('items');
+            $ticket = KitchenTicket::query()->where('order_id', $order->id)->lockForUpdate()->first();
+            if ($ticket === null) {
+                return $this->createFromOrder($order);
+            }
+
+            $this->syncItemsForTicket($ticket, $order);
+            $ticket->touch();
+            $fresh = $ticket->fresh(['items.orderItem', 'order']);
+            $this->publishTicketTransitioned($fresh);
+
+            return $fresh;
+        });
+    }
+
+    private function syncItemsForTicket(KitchenTicket $ticket, Order $order): void
+    {
+        $orderItems = $order->relationLoaded('items') ? $order->items : $order->items()->get();
+        $orderItemIds = $orderItems->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        $ticketStatus = (string) $ticket->status;
+
+        if ($orderItemIds === []) {
+            KitchenTicketItem::query()->where('kitchen_ticket_id', $ticket->id)->delete();
+
+            return;
+        }
+
+        KitchenTicketItem::query()
+            ->where('kitchen_ticket_id', $ticket->id)
+            ->whereNotIn('order_item_id', $orderItemIds)
+            ->delete();
+
+        foreach ($orderItems as $item) {
+            $existing = KitchenTicketItem::query()
+                ->where('kitchen_ticket_id', $ticket->id)
+                ->where('order_item_id', $item->id)
+                ->first();
+
+            if ($existing !== null) {
+                $existing->update([
+                    'item_name_snapshot' => (string) $item->name,
+                    'qty' => (float) $item->qty,
+                    'notes' => $item->notes,
+                ]);
+
+                continue;
+            }
+
+            KitchenTicketItem::query()->create([
+                'kitchen_ticket_id' => $ticket->id,
+                'order_item_id' => (int) $item->id,
+                'item_name_snapshot' => (string) $item->name,
+                'qty' => (float) $item->qty,
+                'notes' => $item->notes,
+                'status' => $ticketStatus,
+            ]);
+        }
+    }
+
+    private function publishTicketTransitioned(KitchenTicket $ticket): void
+    {
+        event(new KitchenTicketTransitioned(
+            outletId: (int) $ticket->outlet_id,
+            snapshot: KitchenRealtimeSnapshot::fromModel($ticket),
+        ));
     }
 
     private function generateTicketNo(int $outletId, int $orderId): string

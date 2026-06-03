@@ -27,6 +27,7 @@ class Order extends Model
         'balance_due',
         'customer_name',
         'customer_phone',
+        'member_id',
         'table_number',
         'table_id',
         'table_name',

@@ -34,6 +34,7 @@ class StoreOrderRequest extends FormRequest
             'discountAmount' => ['nullable', 'numeric', 'min:0'],
             'customerName' => ['nullable', 'string', 'max:255'],
             'customerPhone' => ['nullable', 'string', 'max:50'],
+            'memberId' => ['nullable', 'integer', 'exists:members,id'],
             'tableId' => ['nullable', 'integer', 'min:1'],
             'tableNumber' => ['nullable', 'string', 'max:120'],
             'serviceMode' => ['nullable', 'in:dine_in,takeaway'],

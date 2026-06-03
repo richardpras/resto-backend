@@ -62,8 +62,11 @@ class ReservationFoundationApiTest extends TestCase
 
     public function test_seat_reservation(): void
     {
-        $reservationId = $this->createDraftReservation();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
+        [$reservationId, $tableId] = $this->createConfirmedReservationWithTable();
+
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', [
+            'tableId' => $tableId,
+        ])->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/check-in')->assertOk();
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/seat')
@@ -74,8 +77,8 @@ class ReservationFoundationApiTest extends TestCase
 
     public function test_complete_reservation(): void
     {
-        $reservationId = $this->createDraftReservation();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
+        [$reservationId, $tableId] = $this->createConfirmedReservationWithTable();
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/check-in')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/seat')->assertOk();
 
@@ -158,5 +161,39 @@ class ReservationFoundationApiTest extends TestCase
             'status' => 'active',
             'code' => 'out-'.uniqid(),
         ]);
+    }
+
+    /** @return array{0: int, 1: int} */
+    private function createConfirmedReservationWithTable(): array
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = $this->createOutlet('Seat '.uniqid());
+        $this->assignUserToOutlets($user, [$outlet->id]);
+        $this->outletId = (int) $outlet->id;
+
+        $tableId = (int) \App\Models\Modules\Orders\Domain\RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'T-1',
+            'status' => 'active',
+            'active' => true,
+        ])->id;
+
+        $reservationId = $this->createDraftReservationFromOutlet($outlet->id);
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
+
+        return [$reservationId, $tableId];
+    }
+
+    private function createDraftReservationFromOutlet(int $outletId): int
+    {
+        $response = $this->postJson('/api/v1/reservations', [
+            'outletId' => $outletId,
+            'customerName' => 'John Doe',
+            'customerPhone' => '08123456789',
+            'partySize' => 4,
+            'reservationAt' => now()->addHour()->toISOString(),
+        ])->assertCreated();
+
+        return (int) $response->json('data.id');
     }
 }

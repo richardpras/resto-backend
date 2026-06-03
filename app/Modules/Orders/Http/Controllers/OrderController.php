@@ -10,6 +10,7 @@ use App\Modules\Orders\Http\Requests\StoreOrderSplitRequest;
 use App\Modules\Orders\Http\Requests\ShiftClosePostingRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderSplitRequest;
+use App\Modules\Orders\Http\Requests\SetOrderMemberRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderStatusRequest;
 use App\Modules\Orders\Http\Resources\OrderResource;
@@ -121,6 +122,24 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Order status updated successfully.',
+            'data' => new OrderResource($updated),
+        ]);
+    }
+
+    public function setMember(SetOrderMemberRequest $request, int $order): JsonResponse
+    {
+        $user = $this->resolveAuthenticatedUser($request);
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        $memberId = $request->validated('memberId');
+        $updated = $this->orderService->setOrderMember(
+            $user,
+            $order,
+            $memberId !== null ? (int) $memberId : null,
+        );
+
+        return response()->json([
+            'message' => 'Order member updated successfully.',
             'data' => new OrderResource($updated),
         ]);
     }

@@ -19,6 +19,11 @@ use App\Modules\GiftCards\Http\Controllers\GiftCardController;
 use App\Modules\Loyalty\Http\Controllers\CrmMetricsController;
 use App\Modules\Loyalty\Http\Controllers\CustomerController;
 use App\Modules\Loyalty\Http\Controllers\MembershipTierController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyProgramController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyProgramRuleController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyRewardController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyRewardRedemptionController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltySimulatorController;
 use App\Modules\Members\Http\Controllers\MemberController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
@@ -75,6 +80,7 @@ Route::prefix('v1')->group(function (): void {
     Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}', [OrderController::class, 'update'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::patch('orders/{order}/member', [OrderController::class, 'setMember'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
@@ -219,11 +225,37 @@ Route::prefix('v1')->group(function (): void {
         Route::post('outlets/{outlet}/payment-method-configs/static-qris-image', [OutletPaymentMethodConfigController::class, 'uploadStaticQrisImage'])->middleware('permission:settings.update');
         Route::get('outlets/{outlet}/payment-checkout-methods', [OutletPaymentMethodConfigController::class, 'checkoutMethods'])->middleware('permission:pos.use');
 
+        Route::get('members/search', [MemberController::class, 'search'])->middleware('permission.any:pos.use,members.manage');
+        Route::post('members/quick', [MemberController::class, 'quickStore'])->middleware('permission.any:pos.use,members.manage');
+        Route::get('members/{member}/profile', [MemberController::class, 'profile'])->middleware('permission.any:pos.use,members.manage');
+        Route::post('members/{member}/redeem', [MemberController::class, 'redeem'])->middleware('permission:members.manage');
+        Route::post('members/{member}/redeem-reward', [MemberController::class, 'redeemReward'])->middleware('permission:members.manage');
+        Route::get('members/{member}/redemptions', [MemberController::class, 'redemptions'])->middleware('permission.any:pos.use,members.manage');
         Route::get('members', [MemberController::class, 'index'])->middleware('permission:members.manage');
         Route::post('members', [MemberController::class, 'store'])->middleware('permission:members.manage');
         Route::patch('members/{member}', [MemberController::class, 'update'])->middleware('permission:members.manage');
         Route::patch('members/{member}/status', [MemberController::class, 'updateStatus'])->middleware('permission:members.manage');
         Route::delete('members/{member}', [MemberController::class, 'destroy'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-programs/resolve-active', [LoyaltyProgramController::class, 'resolveActive'])->middleware('permission:members.manage');
+        Route::get('loyalty-programs', [LoyaltyProgramController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-programs', [LoyaltyProgramController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('loyalty-programs/{loyaltyProgram}', [LoyaltyProgramController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('loyalty-programs/{loyaltyProgram}', [LoyaltyProgramController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('loyalty-programs/{loyaltyProgram}/activation', [LoyaltyProgramController::class, 'setActivation'])->middleware('permission:members.manage');
+        Route::get('loyalty-programs/{loyaltyProgram}/rules', [LoyaltyProgramRuleController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-programs/{loyaltyProgram}/rules', [LoyaltyProgramRuleController::class, 'store'])->middleware('permission:members.manage');
+        Route::patch('loyalty-program-rules/{loyaltyProgramRule}', [LoyaltyProgramRuleController::class, 'update'])->middleware('permission:members.manage');
+        Route::delete('loyalty-program-rules/{loyaltyProgramRule}', [LoyaltyProgramRuleController::class, 'destroy'])->middleware('permission:members.manage');
+        Route::post('loyalty-programs/simulate', [LoyaltySimulatorController::class, 'simulate'])->middleware('permission:members.manage');
+        Route::get('loyalty-engine/analytics', [LoyaltySimulatorController::class, 'analytics'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-rewards', [LoyaltyRewardController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-rewards', [LoyaltyRewardController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('loyalty-rewards/{loyaltyReward}', [LoyaltyRewardController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('loyalty-rewards/{loyaltyReward}', [LoyaltyRewardController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('loyalty-rewards/{loyaltyReward}/activation', [LoyaltyRewardController::class, 'setActivation'])->middleware('permission:members.manage');
+        Route::patch('loyalty-redemptions/{loyaltyRewardRedemption}/status', [LoyaltyRewardRedemptionController::class, 'updateStatus'])->middleware('permission:members.manage');
 
         Route::get('orders/{order}/recovery-events', [OrderItemRecoveryController::class, 'index'])->middleware('permission:orders.recovery.read');
         Route::post('orders/{order}/items/{orderItem}/recovery/report', [OrderItemRecoveryController::class, 'report'])->middleware('permission:orders.recovery.request');
@@ -288,8 +320,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('crm/dashboard', [CrmMetricsController::class, 'index'])->middleware('permission:members.manage');
         Route::get('monitoring/metrics', [MonitoringMetricsController::class, 'index'])->middleware('permission:pos.use');
         Route::get('dashboard/summary', [DashboardSummaryController::class, 'index'])->middleware('permission:pos.use');
-        Route::get('kitchen/tickets', [KitchenTicketController::class, 'index'])->middleware('permission:pos.use');
-        Route::patch('kitchen/tickets/{ticket}/status', [KitchenTicketController::class, 'updateStatus'])->middleware('permission:pos.use');
+        Route::get('kitchen/tickets', [KitchenTicketController::class, 'index'])->middleware('permission.any:kitchen.use,pos.use');
+        Route::patch('kitchen/tickets/{ticket}/status', [KitchenTicketController::class, 'updateStatus'])->middleware('permission.any:kitchen.use,pos.use');
         Route::get('print/profiles', [PrinterProfileController::class, 'index'])->middleware('permission:settings.view');
         Route::post('print/profiles', [PrinterProfileController::class, 'store'])->middleware('permission:settings.update');
         Route::patch('print/profiles/{profile}', [PrinterProfileController::class, 'update'])->middleware('permission:settings.update');
@@ -314,6 +346,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission:pos.use');
         Route::post('reservations', [ReservationController::class, 'store'])->middleware('permission:pos.use');
         Route::get('reservations', [ReservationController::class, 'index'])->middleware('permission:pos.use');
+        Route::get('reservations/dashboard', [ReservationController::class, 'dashboard'])->middleware('permission:pos.use');
+        Route::get('reservations/{id}/timeline', [ReservationController::class, 'timeline'])->middleware('permission:pos.use');
         Route::get('reservations/{id}', [ReservationController::class, 'show'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/confirm', [ReservationController::class, 'confirm'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/check-in', [ReservationController::class, 'checkIn'])->middleware('permission:pos.use');
@@ -321,6 +355,10 @@ Route::prefix('v1')->group(function (): void {
         Route::post('reservations/{id}/complete', [ReservationController::class, 'complete'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/cancel', [ReservationController::class, 'cancel'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/mark-no-show', [ReservationController::class, 'markNoShow'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/allocate-table', [ReservationController::class, 'allocateTable'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/unallocate-table', [ReservationController::class, 'unallocateTable'])->middleware('permission:pos.use');
+        Route::get('reservations/{id}/allocated-tables', [ReservationController::class, 'allocatedTables'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/start-service', [ReservationController::class, 'startService'])->middleware('permission:pos.use');
 
         Route::get('suppliers', [SupplierController::class, 'index'])->middleware('permission:suppliers.manage');
         Route::post('suppliers', [SupplierController::class, 'store'])->middleware('permission:suppliers.manage');

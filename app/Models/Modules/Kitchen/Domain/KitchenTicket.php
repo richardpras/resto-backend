@@ -2,7 +2,9 @@
 
 namespace App\Models\Modules\Kitchen\Domain;
 
+use App\Models\Modules\Orders\Domain\Order;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class KitchenTicket extends Model
@@ -24,6 +26,11 @@ class KitchenTicket extends Model
         'ready_at' => 'datetime',
         'served_at' => 'datetime',
     ];
+
+    public function order(): BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'order_id');
+    }
 
     public function items(): HasMany
     {

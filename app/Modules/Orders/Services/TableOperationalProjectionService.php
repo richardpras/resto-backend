@@ -3,11 +3,16 @@
 namespace App\Modules\Orders\Services;
 
 use App\Models\Modules\Orders\Domain\RestaurantTable;
+use App\Modules\Reservations\Services\ReservationProjectionAdapter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class TableOperationalProjectionService
 {
+    public function __construct(
+        private readonly ReservationProjectionAdapter $reservationProjectionAdapter,
+    ) {}
+
     /**
      * @param  Collection<int, RestaurantTable>  $tables
      * @return array<int, array{status: string, signals: array<string, bool|int>}>
@@ -36,15 +41,15 @@ class TableOperationalProjectionService
             ->groupBy('table_id')
             ->pluck('count', 'table_id');
 
-        // Reservation/cleaning are prepared as projection feeds for future modules.
-        $reservedTableIds = $this->reservedTableIds($tableIds);
+        $outletId = (int) ($tables->first()->outlet_id ?? 0);
+        $reservedTableIds = $this->reservationProjectionAdapter->reservedTableIds($outletId, $tableIds);
         $cleaningTableIds = $this->cleaningTableIds($tableIds);
 
         $projection = [];
         foreach ($tables as $table) {
             $tableId = (int) $table->id;
             $isDisabled = (string) $table->status !== 'active' || (bool) ($table->active ?? true) === false;
-            $isReserved = in_array($tableId, $reservedTableIds, true);
+            $hasReservation = in_array($tableId, $reservedTableIds, true);
             $isCleaning = in_array($tableId, $cleaningTableIds, true);
             $openBillCount = (int) ($openBillCounts[$tableId] ?? 0);
             $pendingQrCount = (int) ($pendingQrCounts[$tableId] ?? 0);
@@ -53,12 +58,12 @@ class TableOperationalProjectionService
             $status = 'available';
             if ($isDisabled) {
                 $status = 'disabled';
-            } elseif ($isReserved) {
+            } elseif ($isOccupied) {
+                $status = 'occupied';
+            } elseif ($hasReservation) {
                 $status = 'reserved';
             } elseif ($isCleaning) {
                 $status = 'cleaning';
-            } elseif ($isOccupied) {
-                $status = 'occupied';
             }
 
             $projection[$tableId] = [
@@ -66,7 +71,7 @@ class TableOperationalProjectionService
                 'signals' => [
                     'openBillCount' => $openBillCount,
                     'pendingQrRequestCount' => $pendingQrCount,
-                    'hasReservation' => $isReserved,
+                    'hasReservation' => $hasReservation,
                     'isCleaning' => $isCleaning,
                     'isDisabled' => $isDisabled,
                 ],
@@ -74,16 +79,6 @@ class TableOperationalProjectionService
         }
 
         return $projection;
-    }
-
-    /**
-     * @param  list<int>  $tableIds
-     * @return list<int>
-     */
-    private function reservedTableIds(array $tableIds): array
-    {
-        // Reservation module is not available yet.
-        return [];
     }
 
     /**

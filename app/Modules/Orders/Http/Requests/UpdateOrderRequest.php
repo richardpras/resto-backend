@@ -27,6 +27,7 @@ class UpdateOrderRequest extends FormRequest
             'discountAmount' => ['sometimes', 'numeric', 'min:0'],
             'customerName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'customerPhone' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'memberId' => ['sometimes', 'nullable', 'integer', 'exists:members,id'],
             'tableId' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'notes' => ['sometimes', 'nullable', 'string', 'max:500'],
             'expectedUpdatedAt' => ['sometimes', 'date'],

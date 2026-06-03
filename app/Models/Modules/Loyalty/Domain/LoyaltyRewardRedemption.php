@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LoyaltyRewardRedemption extends Model
 {
+    protected $table = 'loyalty_account_reward_redemptions';
+
     protected $fillable = [
         'loyalty_account_id',
         'outlet_id',
