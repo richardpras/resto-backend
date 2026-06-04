@@ -57,3 +57,8 @@ Schedule::command('loyalty:process-automations')
     ->daily()
     ->withoutOverlapping()
     ->name('loyalty-process-automations');
+
+Schedule::command('attendance:generate-summaries')
+    ->dailyAt('01:00')
+    ->withoutOverlapping()
+    ->name('attendance-generate-summaries');

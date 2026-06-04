@@ -9,6 +9,7 @@ use App\Modules\HR\Http\Requests\SyncAttendanceRequest;
 use App\Modules\HR\Http\Resources\AttendanceResource;
 use App\Modules\HR\Services\AttendanceCorrectionService;
 use App\Modules\HR\Services\AttendanceSyncService;
+use App\Modules\HR\Services\EmployeeMasterService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -17,11 +18,12 @@ class AttendanceController extends Controller
     public function __construct(
         private readonly AttendanceSyncService $syncService,
         private readonly AttendanceCorrectionService $correctionService,
+        private readonly EmployeeMasterService $employeeMaster,
     ) {}
 
     public function index(): JsonResponse
     {
-        $attendances = Attendance::query()
+        $query = Attendance::query()
             ->when(
                 request()->filled('employeeId'),
                 fn ($query) => $query->where('employee_id', (int) request()->query('employeeId'))
@@ -34,7 +36,10 @@ class AttendanceController extends Controller
                 request()->filled('date'),
                 fn ($query) => $query->whereDate('attendance_date', request()->query('date'))
             )
-            ->latest('id')
+            ->latest('id');
+
+        $attendances = $this->employeeMaster
+            ->scopeByEmployeeOutlet($query, $this->resolveUser())
             ->get();
 
         return response()->json([
@@ -53,6 +58,8 @@ class AttendanceController extends Controller
             'status' => ['required', 'in:present,late,absent'],
             'notes' => ['nullable', 'string'],
         ]);
+
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
 
         $attendance = Attendance::query()->create([
             'employee_id' => $validated['employeeId'],
@@ -87,7 +94,11 @@ class AttendanceController extends Controller
         ]);
 
         $row = Attendance::query()->findOrFail($attendance);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
         $targetDate = $validated['date'] ?? $row->attendance_date?->toDateString();
+        if (isset($validated['employeeId'])) {
+            $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
+        }
         $row->fill([
             'employee_id' => $validated['employeeId'] ?? $row->employee_id,
             'shift_id' => array_key_exists('shiftId', $validated) ? $validated['shiftId'] : $row->shift_id,
@@ -108,6 +119,7 @@ class AttendanceController extends Controller
     public function destroy(int $attendance): JsonResponse
     {
         $row = Attendance::query()->findOrFail($attendance);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
         $row->delete();
 
         return response()->json([
@@ -134,7 +146,9 @@ class AttendanceController extends Controller
 
     public function sync(SyncAttendanceRequest $request): JsonResponse
     {
-        $result = $this->syncService->sync($request->validated());
+        $payload = $request->validated();
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $payload['employeeId']);
+        $result = $this->syncService->sync($payload);
         $status = $result['duplicate'] ? Response::HTTP_OK : Response::HTTP_CREATED;
         $message = $result['duplicate'] ? 'Attendance sync already processed.' : 'Attendance synced successfully.';
 
@@ -157,5 +171,12 @@ class AttendanceController extends Controller
             'message' => 'Attendance corrected successfully.',
             'data' => new AttendanceResource($updatedAttendance),
         ]);
+    }
+
+    private function resolveUser(): ?\App\Models\User
+    {
+        $user = request()->user('api') ?? request()->user();
+
+        return $user instanceof \App\Models\User ? $user : null;
     }
 }

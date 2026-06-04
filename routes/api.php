@@ -6,9 +6,29 @@ use App\Modules\Accounting\Http\Controllers\JournalController;
 use App\Modules\Accounting\Http\Controllers\ReportController;
 use App\Modules\HR\Http\Controllers\AdjustmentController;
 use App\Modules\HR\Http\Controllers\AttendanceController;
+use App\Modules\HR\Http\Controllers\AttendanceRecordController;
+use App\Modules\HR\Http\Controllers\AttendancePeriodController;
+use App\Modules\HR\Http\Controllers\AttendanceSummaryController;
 use App\Modules\HR\Http\Controllers\EmployeeController;
+use App\Modules\HR\Http\Controllers\EmployeeRosterController;
+use App\Modules\HR\Http\Controllers\EmployeeShiftAssignmentController;
+use App\Modules\HR\Http\Controllers\LeaveBalanceController;
+use App\Modules\HR\Http\Controllers\LeaveRequestController;
+use App\Modules\HR\Http\Controllers\LeaveTypeController;
+use App\Modules\HR\Http\Controllers\BpjsConfigController;
+use App\Modules\HR\Http\Controllers\BpjsProfileController;
+use App\Modules\HR\Http\Controllers\CashAdvanceController;
+use App\Modules\HR\Http\Controllers\PayrollAdjustmentController;
+use App\Modules\HR\Http\Controllers\PayslipController;
+use App\Modules\HR\Http\Controllers\EmployeeLoanController;
 use App\Modules\HR\Http\Controllers\LoanController;
 use App\Modules\HR\Http\Controllers\OvertimeController;
+use App\Modules\HR\Http\Controllers\OvertimeRequestController;
+use App\Modules\HR\Http\Controllers\OvertimeSummaryController;
+use App\Modules\HR\Http\Controllers\OvertimeTypeController;
+use App\Modules\HR\Http\Controllers\EmployeeSalaryProfileController;
+use App\Modules\HR\Http\Controllers\PayrollPreparationPeriodController;
+use App\Modules\HR\Http\Controllers\PayrollRunV2Controller;
 use App\Modules\HR\Http\Controllers\PayrollController;
 use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Hardware\Http\Controllers\HardwareBridgeController;
@@ -74,7 +94,10 @@ use App\Modules\Suppliers\Http\Controllers\SupplierController;
 use App\Modules\Terminals\Http\Controllers\TerminalDeviceController;
 use App\Modules\Terminals\Http\Controllers\TerminalSyncController;
 use App\Modules\UserManagement\Http\Controllers\AuthController;
+use App\Modules\UserManagement\Http\Controllers\DepartmentController;
+use App\Modules\UserManagement\Http\Controllers\OrganizationEmployeeController;
 use App\Modules\UserManagement\Http\Controllers\PermissionController;
+use App\Modules\UserManagement\Http\Controllers\PositionController;
 use App\Modules\UserManagement\Http\Controllers\RoleController;
 use App\Modules\UserManagement\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -133,52 +156,341 @@ Route::prefix('v1')->group(function (): void {
         Route::post('auth/verify-screen-pin', [AuthController::class, 'verifyScreenPin']);
         Route::put('auth/screen-pin', [AuthController::class, 'updateScreenPin']);
 
-        // Employees: no employee.* permissions exist in seeds/migrations yet; mirror open access of index/store.
-        Route::get('employees', [EmployeeController::class, 'index']);
-        Route::post('employees', [EmployeeController::class, 'store']);
-        Route::get('employees/{employee}', [EmployeeController::class, 'show']);
-        Route::put('employees/{employee}', [EmployeeController::class, 'update']);
-        Route::patch('employees/{employee}', [EmployeeController::class, 'update']);
-        Route::delete('employees/{employee}', [EmployeeController::class, 'destroy']);
+        // HRM foundation — canonical Employee master; see EmployeeMasterService.
+        Route::get('hr/employees', [EmployeeController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,employees.view');
+        Route::post('hr/employees', [EmployeeController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,employees.manage');
+        Route::get('hr/employees/{employee}/shift-history', [EmployeeController::class, 'shiftHistory'])
+            ->middleware('permission.any:payroll.manage,shift.view,employees.view');
+        Route::get('hr/employees/{employee}/schedule', [EmployeeController::class, 'schedule'])
+            ->middleware('permission.any:payroll.manage,schedule.view,employees.view');
+        Route::get('hr/employees/{employee}/attendance', [EmployeeController::class, 'attendance'])
+            ->middleware('permission.any:payroll.manage,attendance.view,employees.view');
+        Route::get('hr/employees/{employee}/leave-balances', [LeaveBalanceController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::patch('hr/employees/{employee}/leave-balances', [LeaveBalanceController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::get('hr/employees/{employee}', [EmployeeController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,employees.view');
+        Route::put('hr/employees/{employee}', [EmployeeController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,employees.manage');
+        Route::patch('hr/employees/{employee}', [EmployeeController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,employees.manage');
+        Route::delete('hr/employees/{employee}', [EmployeeController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,employees.manage');
 
-        Route::get('shifts', [ShiftController::class, 'index']);
-        Route::post('shifts', [ShiftController::class, 'store']);
-        Route::put('shifts/{shift}', [ShiftController::class, 'update']);
-        Route::delete('shifts/{shift}', [ShiftController::class, 'destroy']);
+        Route::get('departments', [DepartmentController::class, 'index'])
+            ->middleware('permission.any:users.manage,employees.view');
+        Route::post('departments', [DepartmentController::class, 'store'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::patch('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
+            ->middleware('permission.any:users.manage,employees.manage');
 
-        Route::get('attendances', [AttendanceController::class, 'index']);
-        Route::post('attendances/sync', [AttendanceController::class, 'sync']);
-        Route::post('attendances/{attendance}/manual-correction', [AttendanceController::class, 'manualCorrection']);
+        Route::get('positions', [PositionController::class, 'index'])
+            ->middleware('permission.any:users.manage,employees.view');
+        Route::post('positions', [PositionController::class, 'store'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::patch('positions/{position}', [PositionController::class, 'update'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::delete('positions/{position}', [PositionController::class, 'destroy'])
+            ->middleware('permission.any:users.manage,employees.manage');
 
-        Route::get('attendance', [AttendanceController::class, 'index']);
-        Route::post('attendance', [AttendanceController::class, 'store']);
-        Route::patch('attendance/{attendance}', [AttendanceController::class, 'update']);
-        Route::delete('attendance/{attendance}', [AttendanceController::class, 'destroy']);
+        Route::get('employees', [OrganizationEmployeeController::class, 'index'])
+            ->middleware('permission.any:users.manage,employees.view');
+        Route::post('employees', [OrganizationEmployeeController::class, 'store'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::get('employees/{employee}', [OrganizationEmployeeController::class, 'show'])
+            ->middleware('permission.any:users.manage,employees.view');
+        Route::patch('employees/{employee}', [OrganizationEmployeeController::class, 'update'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::patch('employees/{employee}/assign-user', [OrganizationEmployeeController::class, 'assignUser'])
+            ->middleware('permission.any:users.manage,employees.manage');
+        Route::patch('employees/{employee}/remove-user', [OrganizationEmployeeController::class, 'removeUser'])
+            ->middleware('permission.any:users.manage,employees.manage');
 
-        Route::get('overtime', [OvertimeController::class, 'index']);
-        Route::post('overtime', [OvertimeController::class, 'store']);
-        Route::patch('overtime/{overtime}', [OvertimeController::class, 'update']);
-        Route::delete('overtime/{overtime}', [OvertimeController::class, 'destroy']);
+        Route::get('shifts', [ShiftController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,attendance.view');
+        Route::post('shifts', [ShiftController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::put('shifts/{shift}', [ShiftController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::delete('shifts/{shift}', [ShiftController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
 
-        Route::get('adjustments', [AdjustmentController::class, 'index']);
-        Route::post('adjustments', [AdjustmentController::class, 'store']);
-        Route::delete('adjustments/{adjustment}', [AdjustmentController::class, 'destroy']);
+        Route::get('shift-assignments', [EmployeeShiftAssignmentController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,shift.view');
+        Route::post('shift-assignments', [EmployeeShiftAssignmentController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,shift.manage');
+        Route::get('shift-assignments/{shiftAssignment}', [EmployeeShiftAssignmentController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,shift.view');
+        Route::patch('shift-assignments/{shiftAssignment}', [EmployeeShiftAssignmentController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,shift.manage');
+        Route::patch('shift-assignments/{shiftAssignment}/deactivate', [EmployeeShiftAssignmentController::class, 'deactivate'])
+            ->middleware('permission.any:payroll.manage,shift.manage');
 
-        Route::get('loans', [LoanController::class, 'index']);
-        Route::post('loans', [LoanController::class, 'store']);
-        Route::patch('loans/{loan}', [LoanController::class, 'update']);
-        Route::delete('loans/{loan}', [LoanController::class, 'destroy']);
+        Route::get('rosters', [EmployeeRosterController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,schedule.view');
+        Route::post('rosters', [EmployeeRosterController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,schedule.manage');
+        Route::patch('rosters/{roster}', [EmployeeRosterController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,schedule.manage');
+        Route::delete('rosters/{roster}', [EmployeeRosterController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,schedule.manage');
+        Route::post('rosters/generate', [EmployeeRosterController::class, 'generate'])
+            ->middleware('permission.any:payroll.manage,schedule.manage');
+        Route::post('rosters/copy', [EmployeeRosterController::class, 'copy'])
+            ->middleware('permission.any:payroll.manage,schedule.manage');
+        Route::post('rosters/publish', [EmployeeRosterController::class, 'publish'])
+            ->middleware('permission.any:payroll.manage,schedule.manage');
 
-        Route::post('payroll/run', [PayrollController::class, 'run']);
-        Route::get('payroll', [PayrollController::class, 'listRuns']);
-        Route::get('payroll/{id}', [PayrollController::class, 'showDetail']);
-        Route::post('payroll/{id}/finalize', [PayrollController::class, 'finalize']);
-        Route::post('payroll/{id}/pay', [PayrollController::class, 'pay']);
-        Route::post('payroll-lines/{id}/lock', [PayrollController::class, 'lockLine']);
-        Route::post('payroll-lines/{id}/unlock', [PayrollController::class, 'unlockLine']);
-        Route::post('payroll/{id}/post-journal', [PayrollController::class, 'postJournal']);
-        Route::get('payrolls', [PayrollController::class, 'index'])->middleware('permission:payroll.view');
-        Route::post('payrolls', [PayrollController::class, 'store'])->middleware('permission:payroll.create');
+        Route::get('attendances', [AttendanceController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,attendance.view');
+        Route::post('attendances/sync', [AttendanceController::class, 'sync'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::post('attendances/{attendance}/manual-correction', [AttendanceController::class, 'manualCorrection'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+
+        Route::get('attendance/import-batches', [AttendanceRecordController::class, 'importBatches'])
+            ->middleware('permission.any:payroll.manage,attendance.view');
+        Route::post('attendance/import', [AttendanceRecordController::class, 'import'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::get('attendance/periods', [AttendancePeriodController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::post('attendance/periods', [AttendancePeriodController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::patch('attendance/periods/{period}/approve', [AttendancePeriodController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::patch('attendance/periods/{period}/lock', [AttendancePeriodController::class, 'lock'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::patch('attendance/periods/{period}/reopen', [AttendancePeriodController::class, 'reopen'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::get('attendance/summaries', [AttendanceSummaryController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::get('attendance/summaries/{summary}', [AttendanceSummaryController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::post('attendance/summaries/{summary}/review', [AttendanceSummaryController::class, 'review'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::get('attendance/payroll-preparation', [AttendanceSummaryController::class, 'payrollPreparation'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::get('attendance', [AttendanceRecordController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,attendance.view');
+        Route::get('attendance/{attendance}', [AttendanceRecordController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,attendance.view');
+        Route::patch('attendance/{attendance}', [AttendanceRecordController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::post('attendance', [AttendanceController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::delete('attendance/{attendance}', [AttendanceController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
+
+        Route::get('leave-types', [LeaveTypeController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::post('leave-types', [LeaveTypeController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::patch('leave-types/{leaveType}', [LeaveTypeController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+
+        Route::get('leave-requests', [LeaveRequestController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::post('leave-requests', [LeaveRequestController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::get('leave-requests/{leaveRequest}', [LeaveRequestController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::patch('leave-requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::patch('leave-requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::patch('leave-requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+
+        Route::get('employees/{employee}/leave-balances', [LeaveBalanceController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+        Route::patch('employees/{employee}/leave-balances', [LeaveBalanceController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,leave.manage');
+
+        Route::get('overtime-types', [OvertimeTypeController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::post('overtime-types', [OvertimeTypeController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::patch('overtime-types/{overtimeType}', [OvertimeTypeController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+
+        Route::get('overtime-requests', [OvertimeRequestController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::post('overtime-requests', [OvertimeRequestController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::get('overtime-requests/{overtimeRequest}', [OvertimeRequestController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::patch('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::patch('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::patch('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+
+        Route::get('overtime-summaries', [OvertimeSummaryController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::get('overtime-summaries/{summary}', [OvertimeSummaryController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+
+        Route::get('payroll-preparation-periods', [PayrollPreparationPeriodController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('payroll-preparation-periods', [PayrollPreparationPeriodController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('payroll-preparation-periods/{period}/approve', [PayrollPreparationPeriodController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('payroll-preparation-periods/{period}/lock', [PayrollPreparationPeriodController::class, 'lock'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('payroll-preparation-periods/{period}/generate', [PayrollPreparationPeriodController::class, 'generate'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('payroll-preparation-periods/{period}/snapshots', [PayrollPreparationPeriodController::class, 'snapshots'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('payroll-preparation-periods/{period}/summary', [PayrollPreparationPeriodController::class, 'summary'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+
+        Route::get('salary-profiles', [EmployeeSalaryProfileController::class, 'index'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('salary-profiles', [EmployeeSalaryProfileController::class, 'store'])
+            ->middleware('permission.any:payroll.manage');
+        Route::patch('salary-profiles/{profile}', [EmployeeSalaryProfileController::class, 'update'])
+            ->middleware('permission.any:payroll.manage');
+
+        Route::get('payroll-runs-v2', [PayrollRunV2Controller::class, 'index'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2', [PayrollRunV2Controller::class, 'store'])
+            ->middleware('permission.any:payroll.manage');
+        Route::get('payroll-runs-v2/{run}', [PayrollRunV2Controller::class, 'show'])
+            ->middleware('permission.any:payroll.manage');
+        Route::patch('payroll-runs-v2/{run}/calculate', [PayrollRunV2Controller::class, 'calculate'])
+            ->middleware('permission.any:payroll.manage');
+        Route::patch('payroll-runs-v2/{run}/approve', [PayrollRunV2Controller::class, 'approve'])
+            ->middleware('permission.any:payroll.manage');
+        Route::patch('payroll-runs-v2/{run}/finalize', [PayrollRunV2Controller::class, 'finalize'])
+            ->middleware('permission.any:payroll.manage');
+        Route::get('payroll-runs-v2/{run}/items', [PayrollRunV2Controller::class, 'items'])
+            ->middleware('permission.any:payroll.manage');
+
+        Route::get('payslips', [PayslipController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('payslips/generate', [PayslipController::class, 'generate'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('employees/{employee}/payslips', [PayslipController::class, 'forEmployee'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('payslips/{payslip}/download', [PayslipController::class, 'download'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('payslips/{payslip}/publish', [PayslipController::class, 'publish'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('payslips/{payslip}/regenerate', [PayslipController::class, 'regenerate'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('payslips/{payslip}', [PayslipController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+
+        Route::get('overtime', [OvertimeController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,overtime.view');
+        Route::post('overtime', [OvertimeController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::patch('overtime/{overtime}', [OvertimeController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+        Route::delete('overtime/{overtime}', [OvertimeController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,overtime.manage');
+
+        Route::get('payroll-adjustments', [PayrollAdjustmentController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('payroll-adjustments', [PayrollAdjustmentController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('payroll-adjustments/{payrollAdjustment}', [PayrollAdjustmentController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('payroll-adjustments/{payrollAdjustment}', [PayrollAdjustmentController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('payroll-adjustments/{payrollAdjustment}/approve', [PayrollAdjustmentController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('payroll-adjustments/{payrollAdjustment}/cancel', [PayrollAdjustmentController::class, 'cancel'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+
+        Route::get('adjustments', [AdjustmentController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('adjustments', [AdjustmentController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::delete('adjustments/{adjustment}', [AdjustmentController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+
+        Route::get('cash-advances', [CashAdvanceController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::post('cash-advances', [CashAdvanceController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::get('cash-advances/{cashAdvance}', [CashAdvanceController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::patch('cash-advances/{cashAdvance}', [CashAdvanceController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::patch('cash-advances/{cashAdvance}/approve', [CashAdvanceController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::patch('cash-advances/{cashAdvance}/activate', [CashAdvanceController::class, 'activate'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::patch('cash-advances/{cashAdvance}/cancel', [CashAdvanceController::class, 'cancel'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+        Route::get('cash-advances/{cashAdvance}/installments', [CashAdvanceController::class, 'installments'])
+            ->middleware('permission.any:payroll.manage,loans.manage,cash_advance.manage');
+
+        Route::get('bpjs-configs', [BpjsConfigController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('bpjs-configs', [BpjsConfigController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('bpjs-profiles', [BpjsProfileController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('bpjs-profiles', [BpjsProfileController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('bpjs-profiles/{bpjsProfile}', [BpjsProfileController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+
+        Route::get('employee-loans', [EmployeeLoanController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::post('employee-loans', [EmployeeLoanController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::get('employee-loans/{employeeLoan}', [EmployeeLoanController::class, 'show'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::patch('employee-loans/{employeeLoan}', [EmployeeLoanController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::patch('employee-loans/{employeeLoan}/approve', [EmployeeLoanController::class, 'approve'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::patch('employee-loans/{employeeLoan}/activate', [EmployeeLoanController::class, 'activate'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::patch('employee-loans/{employeeLoan}/cancel', [EmployeeLoanController::class, 'cancel'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::get('employee-loans/{employeeLoan}/installments', [EmployeeLoanController::class, 'installments'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+
+        Route::get('loans', [LoanController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,loans.view');
+        Route::post('loans', [LoanController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::patch('loans/{loan}', [LoanController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+        Route::delete('loans/{loan}', [LoanController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,loans.manage');
+
+        Route::post('payroll/run', [PayrollController::class, 'run'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::get('payroll', [PayrollController::class, 'listRuns'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::get('payroll/{id}', [PayrollController::class, 'showDetail'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('payroll/{id}/finalize', [PayrollController::class, 'finalize'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('payroll/{id}/pay', [PayrollController::class, 'pay'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('payroll-lines/{id}/lock', [PayrollController::class, 'lockLine'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('payroll-lines/{id}/unlock', [PayrollController::class, 'unlockLine'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('payroll/{id}/post-journal', [PayrollController::class, 'postJournal'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::get('payrolls', [PayrollController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.view');
+        Route::post('payrolls', [PayrollController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
 
         Route::get('users', [UserController::class, 'index'])->middleware('permission:users.view');
         Route::post('users', [UserController::class, 'store'])->middleware('permission:users.create');

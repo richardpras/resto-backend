@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Modules\HR\Domain\Attendance;
 use App\Models\Modules\HR\Domain\Employee;
 use App\Models\Modules\HR\Domain\Shift;
+use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Database\Seeders\UserManagementPermissionsSeeder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Laravel\Passport\Passport;
@@ -31,18 +33,16 @@ class UserManagementPayrollIntegrationTest extends TestCase
         $this->seedPayrollAccounts();
 
         $this->actingAsUserManagementApiAdministrator();
+        $this->seed(UserManagementPermissionsSeeder::class);
 
-        $permission = $this->postJson('/api/v1/permissions', [
-            'code' => 'payroll.create',
-            'name' => 'Create Payroll',
-        ])->assertCreated();
+        $permissionId = (int) Permission::query()->where('code', 'payroll.create')->value('id');
 
         $role = $this->postJson('/api/v1/roles', [
             'name' => 'hr-manager',
         ])->assertCreated();
 
         $this->postJson('/api/v1/roles/'.$role->json('data.id').'/permissions', [
-            'permissionIds' => [$permission->json('data.id')],
+            'permissionIds' => [$permissionId],
         ])->assertOk();
 
         $user = $this->postJson('/api/v1/users', [
@@ -87,18 +87,16 @@ class UserManagementPayrollIntegrationTest extends TestCase
         $this->seedPayrollAccounts();
 
         $this->actingAsUserManagementApiAdministrator();
+        $this->seed(UserManagementPermissionsSeeder::class);
 
-        $permission = $this->postJson('/api/v1/permissions', [
-            'code' => 'payroll.create',
-            'name' => 'Create Payroll',
-        ])->assertCreated();
+        $permissionId = (int) Permission::query()->where('code', 'payroll.create')->value('id');
 
         $role = $this->postJson('/api/v1/roles', [
             'name' => 'hr-manager-attendance',
         ])->assertCreated();
 
         $this->postJson('/api/v1/roles/'.$role->json('data.id').'/permissions', [
-            'permissionIds' => [$permission->json('data.id')],
+            'permissionIds' => [$permissionId],
         ])->assertOk();
 
         $user = $this->postJson('/api/v1/users', [

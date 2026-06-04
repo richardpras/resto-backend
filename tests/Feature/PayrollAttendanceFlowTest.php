@@ -10,12 +10,13 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Laravel\Passport\Passport;
+use Tests\Concerns\HrmApiFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class PayrollAttendanceFlowTest extends TestCase
 {
+    use HrmApiFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -112,7 +113,7 @@ class PayrollAttendanceFlowTest extends TestCase
     {
         $this->authenticateUser('sync-auth@example.com');
 
-        $employee = $this->postJson('/api/v1/employees', [
+        $employee = $this->postJson('/api/v1/hr/employees', [
             'employeeNo' => 'EMP-SYNC-001',
             'fullName' => 'Sync Worker',
             'position' => 'Cashier',
@@ -156,7 +157,7 @@ class PayrollAttendanceFlowTest extends TestCase
     {
         $this->authenticateUser('manual-auth@example.com');
 
-        $employee = $this->postJson('/api/v1/employees', [
+        $employee = $this->postJson('/api/v1/hr/employees', [
             'employeeNo' => 'EMP-MANUAL-001',
             'fullName' => 'Manual Worker',
             'position' => 'Cashier',
@@ -212,35 +213,9 @@ class PayrollAttendanceFlowTest extends TestCase
             ],
         ]);
 
-        $this->actingAsUserManagementApiAdministrator();
+        $this->actingAsHrmApiAdministrator();
 
-        $permission = $this->postJson('/api/v1/permissions', [
-            'code' => 'payroll.create',
-            'name' => 'Create Payroll',
-        ])->assertCreated();
-
-        $role = $this->postJson('/api/v1/roles', [
-            'name' => 'payroll-attendance-role',
-        ])->assertCreated();
-
-        $this->postJson('/api/v1/roles/'.$role->json('data.id').'/permissions', [
-            'permissionIds' => [$permission->json('data.id')],
-        ])->assertOk();
-
-        $user = $this->postJson('/api/v1/users', [
-            'name' => 'Payroll Attendance User',
-            'email' => 'payroll-attendance@example.com',
-            'password' => 'secret123',
-        ])->assertCreated();
-
-        $this->postJson('/api/v1/users/'.$user->json('data.id').'/roles', [
-            'roleIds' => [$role->json('data.id')],
-        ])->assertOk();
-
-        Passport::actingAs(User::query()->findOrFail((int) $user->json('data.id')));
-
-        $employee = $this->postJson('/api/v1/employees', [
-            'userId' => $user->json('data.id'),
+        $employee = $this->postJson('/api/v1/hr/employees', [
             'employeeNo' => 'EMP-PAY-FLOW-001',
             'fullName' => 'Payroll Flow User',
             'position' => 'Cashier',
@@ -303,14 +278,6 @@ class PayrollAttendanceFlowTest extends TestCase
 
     private function authenticateUser(string $email): User
     {
-        $user = User::query()->create([
-            'name' => 'HR Attendance User',
-            'email' => $email,
-            'password' => bcrypt('secret123'),
-        ]);
-
-        Passport::actingAs($user);
-
-        return $user;
+        return $this->actingAsHrmApiAdministrator();
     }
 }

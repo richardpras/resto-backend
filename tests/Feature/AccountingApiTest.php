@@ -3,14 +3,27 @@
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class AccountingApiTest extends TestCase
 {
     use RefreshDatabase;
+    use UserManagementApiFixture;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+        Artisan::call('passport:keys', ['--force' => true]);
+    }
 
     public function test_account_crud_and_balanced_journal_lifecycle(): void
     {
+        $this->actingAsUserManagementApiAdministrator();
+
         $a1 = $this->postJson('/api/v1/accounts', [
             'code' => '1100',
             'name' => 'Cash',

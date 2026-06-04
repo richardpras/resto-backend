@@ -5,14 +5,20 @@ namespace App\Modules\HR\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Modules\HR\Domain\Loan;
 use App\Modules\HR\Http\Resources\LoanResource;
+use App\Modules\HR\Services\EmployeeMasterService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class LoanController extends Controller
 {
+    public function __construct(
+        private readonly EmployeeMasterService $employeeMaster,
+    ) {}
+
     public function index(): JsonResponse
     {
-        $rows = Loan::query()->latest('id')->get();
+        $query = Loan::query()->latest('id');
+        $rows = $this->employeeMaster->scopeByEmployeeOutlet($query, $this->resolveUser())->get();
 
         return response()->json([
             'data' => LoanResource::collection($rows),
@@ -39,6 +45,8 @@ class LoanController extends Controller
         );
         $status = $paidInstallments >= $installments ? 'completed' : 'active';
 
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
+
         $row = Loan::query()->create([
             'employee_id' => $validated['employeeId'],
             'amount' => $validated['amount'],
@@ -60,6 +68,7 @@ class LoanController extends Controller
     public function update(int $loan): JsonResponse
     {
         $row = Loan::query()->findOrFail($loan);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
 
         $validated = request()->validate([
             'employeeId' => ['sometimes', 'integer', 'exists:employees,id'],
@@ -78,6 +87,10 @@ class LoanController extends Controller
             'paidInstallments must be less than or equal to installments.'
         );
         $status = $paidInstallments >= $installments ? 'completed' : 'active';
+
+        if (isset($validated['employeeId'])) {
+            $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
+        }
 
         $row->fill([
             'employee_id' => $validated['employeeId'] ?? $row->employee_id,
@@ -99,10 +112,18 @@ class LoanController extends Controller
     public function destroy(int $loan): JsonResponse
     {
         $row = Loan::query()->findOrFail($loan);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
         $row->delete();
 
         return response()->json([
             'message' => 'Loan deleted successfully.',
         ]);
+    }
+
+    private function resolveUser(): ?\App\Models\User
+    {
+        $user = request()->user('api') ?? request()->user();
+
+        return $user instanceof \App\Models\User ? $user : null;
     }
 }

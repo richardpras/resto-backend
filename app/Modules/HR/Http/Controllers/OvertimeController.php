@@ -5,14 +5,20 @@ namespace App\Modules\HR\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Modules\HR\Domain\Overtime;
 use App\Modules\HR\Http\Resources\OvertimeResource;
+use App\Modules\HR\Services\EmployeeMasterService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class OvertimeController extends Controller
 {
+    public function __construct(
+        private readonly EmployeeMasterService $employeeMaster,
+    ) {}
+
     public function index(): JsonResponse
     {
-        $rows = Overtime::query()->latest('id')->get();
+        $query = Overtime::query()->latest('id');
+        $rows = $this->employeeMaster->scopeByEmployeeOutlet($query, $this->resolveUser())->get();
 
         return response()->json([
             'data' => OvertimeResource::collection($rows),
@@ -28,6 +34,8 @@ class OvertimeController extends Controller
             'status' => ['required', 'in:pending,approved,rejected'],
             'notes' => ['nullable', 'string'],
         ]);
+
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
 
         $row = Overtime::query()->create([
             'employee_id' => $validated['employeeId'],
@@ -56,6 +64,11 @@ class OvertimeController extends Controller
         ]);
 
         $row = Overtime::query()->findOrFail($overtime);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
+        if (isset($validated['employeeId'])) {
+            $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
+        }
+
         $row->fill([
             'employee_id' => $validated['employeeId'] ?? $row->employee_id,
             'date' => $validated['date'] ?? $row->date,
@@ -74,10 +87,18 @@ class OvertimeController extends Controller
     public function destroy(int $overtime): JsonResponse
     {
         $row = Overtime::query()->findOrFail($overtime);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
         $row->delete();
 
         return response()->json([
             'message' => 'Overtime deleted successfully.',
         ]);
+    }
+
+    private function resolveUser(): ?\App\Models\User
+    {
+        $user = request()->user('api') ?? request()->user();
+
+        return $user instanceof \App\Models\User ? $user : null;
     }
 }

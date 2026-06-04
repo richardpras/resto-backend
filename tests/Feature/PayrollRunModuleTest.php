@@ -12,11 +12,12 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Artisan;
-use Laravel\Passport\Passport;
+use Tests\Concerns\HrmApiFixture;
 use Tests\TestCase;
 
 class PayrollRunModuleTest extends TestCase
 {
+    use HrmApiFixture;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -495,12 +496,6 @@ class PayrollRunModuleTest extends TestCase
 
     private function authenticate(): void
     {
-        $user = User::query()->create([
-            'name' => 'Payroll User',
-            'email' => 'payroll-run@test.local',
-            'password' => bcrypt('secret123'),
-        ]);
-
-        Passport::actingAs($user);
+        $this->actingAsHrmApiAdministrator();
     }
 }

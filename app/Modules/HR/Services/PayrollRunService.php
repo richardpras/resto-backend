@@ -19,6 +19,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class PayrollRunService
 {
+    public function __construct(
+        private readonly EmployeeMasterService $employeeMaster,
+    ) {}
+
     public function listTable(array $filters): LengthAwarePaginator
     {
         $perPage = (int) ($filters['perPage'] ?? 10);
@@ -156,11 +160,8 @@ class PayrollRunService
                 ->exists();
             abort_if($duplicateRun, Response::HTTP_UNPROCESSABLE_ENTITY, 'Payroll run for this period and outlet already exists.');
 
-            $employees = Employee::query()
-                ->when(
-                    $outlet !== null,
-                    fn ($query) => $query->where('outlet', $outlet)
-                )
+            $employees = $this->employeeMaster
+                ->applyPayrollOutletLabelFilter(Employee::query(), $outlet)
                 ->where(function ($query) use ($periodEnd): void {
                     $query->whereNull('hire_date')
                         ->orWhereDate('hire_date', '<=', $periodEnd->toDateString());

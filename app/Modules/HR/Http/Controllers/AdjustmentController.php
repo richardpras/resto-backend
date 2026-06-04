@@ -5,14 +5,20 @@ namespace App\Modules\HR\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Modules\HR\Domain\Adjustment;
 use App\Modules\HR\Http\Resources\AdjustmentResource;
+use App\Modules\HR\Services\EmployeeMasterService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class AdjustmentController extends Controller
 {
+    public function __construct(
+        private readonly EmployeeMasterService $employeeMaster,
+    ) {}
+
     public function index(): JsonResponse
     {
-        $rows = Adjustment::query()->latest('id')->get();
+        $query = Adjustment::query()->latest('id');
+        $rows = $this->employeeMaster->scopeByEmployeeOutlet($query, $this->resolveUser())->get();
 
         return response()->json([
             'data' => AdjustmentResource::collection($rows),
@@ -29,6 +35,8 @@ class AdjustmentController extends Controller
             'date' => ['required', 'date'],
             'notes' => ['nullable', 'string'],
         ]);
+
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $validated['employeeId']);
 
         $row = Adjustment::query()->create([
             'employee_id' => $validated['employeeId'],
@@ -50,10 +58,18 @@ class AdjustmentController extends Controller
     public function destroy(int $adjustment): JsonResponse
     {
         $row = Adjustment::query()->findOrFail($adjustment);
+        $this->employeeMaster->findAccessible($this->resolveUser(), (int) $row->employee_id);
         $row->delete();
 
         return response()->json([
             'message' => 'Adjustment deleted successfully.',
         ]);
+    }
+
+    private function resolveUser(): ?\App\Models\User
+    {
+        $user = request()->user('api') ?? request()->user();
+
+        return $user instanceof \App\Models\User ? $user : null;
     }
 }
