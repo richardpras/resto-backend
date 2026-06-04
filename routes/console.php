@@ -47,3 +47,13 @@ Schedule::command('loyalty:process-expiry')
     ->daily()
     ->withoutOverlapping()
     ->name('loyalty-process-expiry');
+
+Schedule::command('loyalty:process-campaigns')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->name('loyalty-process-campaigns');
+
+Schedule::command('loyalty:process-automations')
+    ->daily()
+    ->withoutOverlapping()
+    ->name('loyalty-process-automations');

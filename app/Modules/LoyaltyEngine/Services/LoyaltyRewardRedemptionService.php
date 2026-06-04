@@ -2,9 +2,11 @@
 
 namespace App\Modules\LoyaltyEngine\Services;
 
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyAutomation;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyReward;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyRewardRedemption;
 use App\Models\Modules\LoyaltyEngine\Domain\MemberLoyaltyBalance;
+use App\Models\Modules\LoyaltyEngine\Domain\MemberTierHistory;
 use App\Models\User;
 use App\Modules\Members\Services\MemberService;
 use App\Modules\Settings\Support\OutletAccessResolver;
@@ -20,6 +22,8 @@ class LoyaltyRewardRedemptionService
         private readonly LoyaltyLedgerService $ledgerService,
         private readonly LoyaltyBalanceProjectionService $balanceProjectionService,
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly LoyaltyTierRecalculationService $loyaltyTierRecalculationService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     /**
@@ -78,7 +82,7 @@ class LoyaltyRewardRedemptionService
 
         $pointsCost = (int) $reward->points_cost;
 
-        return DB::transaction(function () use ($member, $outletId, $reward, $pointsCost, $notes): array {
+        $result = DB::transaction(function () use ($member, $outletId, $reward, $pointsCost, $notes): array {
             $balance = MemberLoyaltyBalance::query()
                 ->where('member_id', (int) $member->id)
                 ->lockForUpdate()
@@ -110,6 +114,12 @@ class LoyaltyRewardRedemptionService
 
             $balance = $this->balanceProjectionService->applyLedgerEntry($entry);
 
+            $this->loyaltyTierRecalculationService->recalculateForMember(
+                (int) $member->id,
+                $outletId,
+                MemberTierHistory::REASON_RECALCULATION,
+            );
+
             return [
                 'redemptionId' => (int) $redemption->id,
                 'rewardName' => (string) $reward->name,
@@ -118,6 +128,21 @@ class LoyaltyRewardRedemptionService
                 'status' => LoyaltyRewardRedemption::STATUS_ISSUED,
             ];
         });
+
+        $this->loyaltyNotificationService->dispatchRewardRedeemed(
+            $outletId,
+            (int) $member->id,
+            (string) $result['rewardName'],
+            (int) $result['pointsSpent'],
+        );
+
+        app(LoyaltyAutomationService::class)->safeProcessEvent(
+            $outletId,
+            (int) $member->id,
+            LoyaltyAutomation::TRIGGER_REWARD_REDEEMED,
+        );
+
+        return $result;
     }
 
     /**

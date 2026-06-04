@@ -18,6 +18,9 @@ use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Orders\Repositories\QrOrderRequestRepositoryInterface;
 use App\Modules\Payments\Repositories\EloquentPaymentTransactionRepository;
 use App\Modules\Payments\Repositories\PaymentTransactionRepositoryInterface;
+use App\Modules\LoyaltyEngine\Listeners\RedeemVoucherOnOrderPaidListener;
+use App\Modules\Orders\Events\OrderLifecycleChanged;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -45,6 +48,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Event::listen(
+            OrderLifecycleChanged::class,
+            RedeemVoucherOnOrderPaidListener::class,
+        );
     }
 }

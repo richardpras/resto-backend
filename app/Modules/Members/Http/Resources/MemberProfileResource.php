@@ -2,8 +2,14 @@
 
 namespace App\Modules\Members\Http\Resources;
 
+use App\Modules\LoyaltyEngine\Http\Resources\LoyaltyNotificationResource;
 use App\Modules\LoyaltyEngine\Http\Resources\LoyaltyRewardCatalogItemResource;
 use App\Modules\LoyaltyEngine\Http\Resources\LoyaltyRewardRedemptionResource;
+use App\Modules\LoyaltyEngine\Http\Resources\MemberSegmentMembershipResource;
+use App\Modules\LoyaltyEngine\Http\Resources\MemberTierBenefitResource;
+use App\Modules\LoyaltyEngine\Http\Resources\MemberTierHistoryResource;
+use App\Modules\LoyaltyEngine\Http\Resources\MemberTierMembershipResource;
+use App\Modules\LoyaltyEngine\Http\Resources\MemberVoucherProfileResource;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -35,6 +41,15 @@ class MemberProfileResource extends JsonResource
             ],
             'expiredPointsTotal' => (int) ($payload['expiredPointsTotal'] ?? 0),
             'expiryHistory' => LoyaltyMemberLedgerResource::collection($payload['expiryHistory'] ?? []),
+            'memberSegments' => MemberSegmentMembershipResource::collection($payload['memberSegments'] ?? []),
+            'availableVouchers' => MemberVoucherProfileResource::collection($payload['availableVouchers'] ?? []),
+            'voucherHistory' => MemberVoucherProfileResource::collection($payload['voucherHistory'] ?? []),
+            'tier' => isset($payload['tier']) && $payload['tier'] !== null
+                ? new MemberTierMembershipResource($payload['tier'])
+                : null,
+            'benefits' => MemberTierBenefitResource::collection($payload['benefits'] ?? []),
+            'tierHistory' => MemberTierHistoryResource::collection($payload['tierHistory'] ?? []),
+            'notifications' => LoyaltyNotificationResource::collection($payload['notifications'] ?? []),
             'transactions' => MemberTransactionResource::collection($payload['transactions']),
         ];
     }

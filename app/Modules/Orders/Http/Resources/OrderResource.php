@@ -78,6 +78,58 @@ class OrderResource extends JsonResource
             ])->values()),
             'createdAt' => $this->created_at?->toISOString(),
             'confirmedAt' => $this->confirmed_at?->toISOString(),
+            'voucher' => $this->whenLoaded('orderVoucher', fn () => $this->orderVoucher !== null
+                ? new OrderVoucherResource($this->orderVoucher)
+                : null),
+            'voucherDiscount' => $this->when(
+                $this->relationLoaded('orderVoucher'),
+                fn () => $this->orderVoucher !== null
+                    ? (float) $this->resolveLiveVoucherDiscount()
+                    : 0.0,
+            ),
+            'voucherPreview' => $this->when(
+                $this->relationLoaded('orderVoucher') || $this->orderVoucher !== null,
+                fn () => $this->buildVoucherPreviewArray(),
+            ),
+        ];
+    }
+
+    private function resolveLiveVoucherDiscount(): float
+    {
+        $subtotal = (float) $this->subtotal;
+        $orderVoucher = $this->orderVoucher;
+        if ($orderVoucher === null) {
+            return 0.0;
+        }
+
+        $voucher = $orderVoucher->relationLoaded('voucher') ? $orderVoucher->voucher : null;
+        if ($voucher !== null) {
+            if ($voucher->value_type === 'percentage') {
+                return min($subtotal, max(0.0, round($subtotal * ((float) $voucher->value / 100), 2)));
+            }
+
+            return min($subtotal, max(0.0, (float) $voucher->value));
+        }
+
+        if ($orderVoucher->discount_type === 'percentage') {
+            return min($subtotal, max(0.0, round($subtotal * ((float) $orderVoucher->discount_value / 100), 2)));
+        }
+
+        return min($subtotal, max(0.0, (float) $orderVoucher->discount_value));
+    }
+
+    /**
+     * @return array{subtotal: float, discount: float, subtotalAfterDiscount: float}
+     */
+    private function buildVoucherPreviewArray(): array
+    {
+        $subtotal = (float) $this->subtotal;
+        $discount = $this->resolveLiveVoucherDiscount();
+
+        return [
+            'subtotal' => $subtotal,
+            'discount' => $discount,
+            'subtotalAfterDiscount' => max(0.0, $subtotal - $discount),
         ];
     }
 }

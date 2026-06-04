@@ -61,4 +61,19 @@ class OrderLifecycleChanged extends OutletRealtimeEvent
 
         return $payload;
     }
+
+    public function getOrderId(): int
+    {
+        return $this->orderId;
+    }
+
+    public function getOrderStatus(): string
+    {
+        return $this->status;
+    }
+
+    public function getPaymentStatus(): string
+    {
+        return $this->paymentStatus;
+    }
 }

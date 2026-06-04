@@ -23,12 +23,21 @@ use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyProgramController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyProgramRuleController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyRewardController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyRewardRedemptionController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyCampaignController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyVoucherController;
+use App\Modules\LoyaltyEngine\Http\Controllers\MemberSegmentController;
+use App\Modules\LoyaltyEngine\Http\Controllers\MemberVoucherController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyNotificationController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyAnalyticsDashboardController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyAutomationController;
+use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyTierController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltySimulatorController;
 use App\Modules\Members\Http\Controllers\MemberController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
 use App\Modules\Monitoring\Http\Controllers\DashboardSummaryController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Orders\Http\Controllers\OrderVoucherController;
 use App\Modules\Orders\Http\Controllers\OpenBillController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoveryController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoverySettlementController;
@@ -81,6 +90,9 @@ Route::prefix('v1')->group(function (): void {
     Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}', [OrderController::class, 'update'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/member', [OrderController::class, 'setMember'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/voucher', [OrderVoucherController::class, 'apply'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::delete('orders/{order}/voucher', [OrderVoucherController::class, 'remove'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('orders/{order}/voucher-preview', [OrderVoucherController::class, 'preview'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
@@ -228,6 +240,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('members/search', [MemberController::class, 'search'])->middleware('permission.any:pos.use,members.manage');
         Route::post('members/quick', [MemberController::class, 'quickStore'])->middleware('permission.any:pos.use,members.manage');
         Route::get('members/{member}/profile', [MemberController::class, 'profile'])->middleware('permission.any:pos.use,members.manage');
+        Route::get('members/{member}/notifications', [LoyaltyNotificationController::class, 'indexForMember'])->middleware('permission:members.manage');
+        Route::get('members/{member}/vouchers', [MemberVoucherController::class, 'indexForMember'])->middleware('permission.any:pos.use,members.manage');
         Route::post('members/{member}/redeem', [MemberController::class, 'redeem'])->middleware('permission:members.manage');
         Route::post('members/{member}/redeem-reward', [MemberController::class, 'redeemReward'])->middleware('permission:members.manage');
         Route::get('members/{member}/redemptions', [MemberController::class, 'redemptions'])->middleware('permission.any:pos.use,members.manage');
@@ -255,7 +269,52 @@ Route::prefix('v1')->group(function (): void {
         Route::get('loyalty-rewards/{loyaltyReward}', [LoyaltyRewardController::class, 'show'])->middleware('permission:members.manage');
         Route::patch('loyalty-rewards/{loyaltyReward}', [LoyaltyRewardController::class, 'update'])->middleware('permission:members.manage');
         Route::patch('loyalty-rewards/{loyaltyReward}/activation', [LoyaltyRewardController::class, 'setActivation'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-vouchers', [LoyaltyVoucherController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-vouchers', [LoyaltyVoucherController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('loyalty-vouchers/{loyaltyVoucher}', [LoyaltyVoucherController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('loyalty-vouchers/{loyaltyVoucher}', [LoyaltyVoucherController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('loyalty-vouchers/{loyaltyVoucher}/activation', [LoyaltyVoucherController::class, 'setActivation'])->middleware('permission:members.manage');
+
+        Route::get('member-vouchers/{memberVoucher}', [MemberVoucherController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('member-vouchers/{memberVoucher}/status', [MemberVoucherController::class, 'updateStatus'])->middleware('permission:members.manage');
         Route::patch('loyalty-redemptions/{loyaltyRewardRedemption}/status', [LoyaltyRewardRedemptionController::class, 'updateStatus'])->middleware('permission:members.manage');
+
+        Route::get('member-segments', [MemberSegmentController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('member-segments', [MemberSegmentController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('member-segments/{memberSegment}', [MemberSegmentController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('member-segments/{memberSegment}', [MemberSegmentController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('member-segments/{memberSegment}/activation', [MemberSegmentController::class, 'setActivation'])->middleware('permission:members.manage');
+        Route::get('member-segments/{memberSegment}/preview', [MemberSegmentController::class, 'preview'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-tiers', [LoyaltyTierController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-tiers', [LoyaltyTierController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('loyalty-tiers/{loyaltyTier}', [LoyaltyTierController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('loyalty-tiers/{loyaltyTier}', [LoyaltyTierController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('loyalty-tiers/{loyaltyTier}/activation', [LoyaltyTierController::class, 'setActivation'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-automations', [LoyaltyAutomationController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-automations', [LoyaltyAutomationController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('loyalty-automations/{loyaltyAutomation}', [LoyaltyAutomationController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('loyalty-automations/{loyaltyAutomation}', [LoyaltyAutomationController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('loyalty-automations/{loyaltyAutomation}/activation', [LoyaltyAutomationController::class, 'setActivation'])->middleware('permission:members.manage');
+        Route::get('loyalty-automations/{loyaltyAutomation}/logs', [LoyaltyAutomationController::class, 'logs'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-analytics/dashboard', [LoyaltyAnalyticsDashboardController::class, 'show'])->middleware('permission:members.manage');
+
+        Route::patch('notifications/{notification}/read', [LoyaltyNotificationController::class, 'markRead'])->middleware('permission:members.manage');
+
+        Route::get('loyalty-campaigns', [LoyaltyCampaignController::class, 'index'])->middleware('permission:members.manage');
+        Route::post('loyalty-campaigns', [LoyaltyCampaignController::class, 'store'])->middleware('permission:members.manage');
+        Route::get('loyalty-campaigns/{loyaltyCampaign}', [LoyaltyCampaignController::class, 'show'])->middleware('permission:members.manage');
+        Route::patch('loyalty-campaigns/{loyaltyCampaign}', [LoyaltyCampaignController::class, 'update'])->middleware('permission:members.manage');
+        Route::patch('loyalty-campaigns/{loyaltyCampaign}/status', [LoyaltyCampaignController::class, 'updateStatus'])->middleware('permission:members.manage');
+        Route::get('loyalty-campaigns/{loyaltyCampaign}/audience', [LoyaltyCampaignController::class, 'audience'])->middleware('permission:members.manage');
+        Route::get('loyalty-campaigns/{loyaltyCampaign}/audience-snapshot', [LoyaltyCampaignController::class, 'audienceSnapshot'])->middleware('permission:members.manage');
+        Route::post('loyalty-campaigns/{loyaltyCampaign}/activate', [LoyaltyCampaignController::class, 'activate'])->middleware('permission:members.manage');
+        Route::post('loyalty-campaigns/{loyaltyCampaign}/complete', [LoyaltyCampaignController::class, 'complete'])->middleware('permission:members.manage');
+        Route::post('loyalty-campaigns/{loyaltyCampaign}/cancel', [LoyaltyCampaignController::class, 'cancel'])->middleware('permission:members.manage');
+        Route::post('loyalty-campaigns/{loyaltyCampaign}/issue-voucher', [LoyaltyCampaignController::class, 'issueVoucher'])->middleware('permission:members.manage');
 
         Route::get('orders/{order}/recovery-events', [OrderItemRecoveryController::class, 'index'])->middleware('permission:orders.recovery.read');
         Route::post('orders/{order}/items/{orderItem}/recovery/report', [OrderItemRecoveryController::class, 'report'])->middleware('permission:orders.recovery.request');

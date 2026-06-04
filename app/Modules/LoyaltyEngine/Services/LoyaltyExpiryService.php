@@ -2,8 +2,10 @@
 
 namespace App\Modules\LoyaltyEngine\Services;
 
+use App\Models\Member;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyMemberLedger;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyProgram;
+use App\Models\Modules\LoyaltyEngine\Domain\MemberTierHistory;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +22,8 @@ class LoyaltyExpiryService
     public function __construct(
         private readonly LoyaltyLedgerService $ledgerService,
         private readonly LoyaltyBalanceProjectionService $balanceProjectionService,
+        private readonly LoyaltyTierRecalculationService $loyaltyTierRecalculationService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     /**
@@ -105,6 +109,20 @@ class LoyaltyExpiryService
             );
 
             $this->balanceProjectionService->applyLedgerEntry($entry);
+
+            $member = Member::query()->find((int) $earning->member_id);
+            if ($member !== null && (int) $member->outlet_id > 0) {
+                $this->loyaltyTierRecalculationService->recalculateForMember(
+                    (int) $member->id,
+                    (int) $member->outlet_id,
+                    MemberTierHistory::REASON_RECALCULATION,
+                );
+                $this->loyaltyNotificationService->dispatchPointsExpired(
+                    (int) $member->outlet_id,
+                    (int) $member->id,
+                    (int) $earning->points,
+                );
+            }
 
             return true;
         });

@@ -12,6 +12,7 @@ class LoyaltySpendEarningService
         private readonly LoyaltyProgramService $programService,
         private readonly LoyaltyLedgerService $ledgerService,
         private readonly LoyaltyBalanceProjectionService $balanceProjectionService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     public function processPaidOrder(Order $order): ?LoyaltyMemberLedger
@@ -48,6 +49,11 @@ class LoyaltySpendEarningService
 
         if ($result['created']) {
             $this->balanceProjectionService->applyLedgerEntry($result['entry']);
+            $this->loyaltyNotificationService->dispatchPointsEarned(
+                $outletId,
+                (int) $order->member_id,
+                $points,
+            );
         }
 
         return $result['entry'];

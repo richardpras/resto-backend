@@ -15,6 +15,12 @@ class LoyaltyEngineAnalyticsService
 {
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly MemberSegmentAnalyticsService $segmentAnalyticsService,
+        private readonly LoyaltyCampaignAnalyticsService $campaignAnalyticsService,
+        private readonly LoyaltyVoucherAnalyticsService $voucherAnalyticsService,
+        private readonly LoyaltyTierAnalyticsService $tierAnalyticsService,
+        private readonly LoyaltyNotificationAnalyticsService $notificationAnalyticsService,
+        private readonly LoyaltyAutomationAnalyticsService $automationAnalyticsService,
     ) {}
 
     /**
@@ -35,9 +41,15 @@ class LoyaltyEngineAnalyticsService
         $memberIds = $memberQuery->pluck('id');
 
         $rewardRedemptionStats = $this->rewardRedemptionStatsForOutlet($outletId);
+        $segmentStats = $this->segmentAnalyticsService->summary($user, $outletId);
+        $campaignStats = $this->campaignAnalyticsService->summary($user, $outletId);
+        $voucherStats = $this->voucherAnalyticsService->summary($user, $outletId);
+        $tierStats = $this->tierAnalyticsService->summary($user, $outletId);
+        $notificationStats = $this->notificationAnalyticsService->summary($user, $outletId);
+        $automationStats = $this->automationAnalyticsService->summary($user, $outletId);
 
         if ($memberIds->isEmpty()) {
-            return array_merge($this->emptySummary(), $rewardRedemptionStats);
+            return array_merge($this->emptySummary(), $rewardRedemptionStats, $segmentStats, $campaignStats, $voucherStats, $tierStats, $notificationStats, $automationStats);
         }
 
         $totalPointsIssued = (int) LoyaltyMemberLedger::query()
@@ -116,7 +128,7 @@ class LoyaltyEngineAnalyticsService
             'expiredTransactions' => $expiredTransactions,
             'expiredPoints' => $expiredPoints,
             'activeRewards' => $activeRewards,
-        ], $rewardRedemptionStats);
+        ], $rewardRedemptionStats, $segmentStats, $campaignStats, $voucherStats, $tierStats, $notificationStats, $automationStats);
     }
 
     /**
@@ -161,6 +173,40 @@ class LoyaltyEngineAnalyticsService
             'fulfilledRewardRedemptions' => 0,
             'cancelledRewardRedemptions' => 0,
             'pointsSpentOnRewards' => 0,
+            'segmentsCount' => 0,
+            'segmentSummary' => [],
+            'campaignsCount' => 0,
+            'campaignSummary' => [],
+            'activeCampaigns' => 0,
+            'completedCampaigns' => 0,
+            'scheduledCampaigns' => 0,
+            'campaignAudienceCaptured' => 0,
+            'campaignExecutionSummary' => [],
+            'vouchersCount' => 0,
+            'issuedVouchers' => 0,
+            'claimedVouchers' => 0,
+            'redeemedVouchers' => 0,
+            'expiredVouchers' => 0,
+            'campaignVoucherIssuanceCount' => 0,
+            'voucherApplications' => 0,
+            'voucherPreviewAmount' => 0,
+            'topVouchersUsed' => [],
+            'voucherRedemptionCount' => 0,
+            'voucherRedemptionValue' => 0,
+            'topRedeemedVouchers' => [],
+            'tiersCount' => 0,
+            'tierSummary' => [],
+            'tierBenefitSummary' => [],
+            'notificationsCount' => 0,
+            'sentNotifications' => 0,
+            'failedNotifications' => 0,
+            'notificationSummary' => [],
+            'automationsCount' => 0,
+            'activeAutomations' => 0,
+            'automationExecutions' => 0,
+            'automationSuccess' => 0,
+            'automationFailed' => 0,
+            'automationSummary' => [],
         ];
     }
 

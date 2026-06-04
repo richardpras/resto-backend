@@ -2,6 +2,8 @@
 
 namespace App\Modules\LoyaltyEngine\Services;
 
+use App\Models\Member;
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyAutomation;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyMemberLedger;
 use App\Models\Modules\LoyaltyEngine\Domain\MemberLoyaltyBalance;
 use Illuminate\Support\Facades\DB;
@@ -10,7 +12,7 @@ class LoyaltyBalanceProjectionService
 {
     public function applyLedgerEntry(LoyaltyMemberLedger $entry): MemberLoyaltyBalance
     {
-        return DB::transaction(function () use ($entry): MemberLoyaltyBalance {
+        $balance = DB::transaction(function () use ($entry): MemberLoyaltyBalance {
             $balance = MemberLoyaltyBalance::query()
                 ->where('member_id', $entry->member_id)
                 ->lockForUpdate()
@@ -29,6 +31,22 @@ class LoyaltyBalanceProjectionService
 
             return $balance->fresh() ?? $balance;
         });
+
+        $previousBalance = (int) $balance->current_points - (int) $entry->points;
+        $member = Member::query()->whereKey($entry->member_id)->first();
+        if ($member !== null) {
+            app(LoyaltyAutomationService::class)->safeProcessEvent(
+                (int) $member->outlet_id,
+                (int) $member->id,
+                LoyaltyAutomation::TRIGGER_POINTS_MILESTONE,
+                [
+                    'previousBalance' => $previousBalance,
+                    'currentBalance' => (int) $balance->current_points,
+                ],
+            );
+        }
+
+        return $balance;
     }
 
     public function currentPointsForMember(int $memberId): int

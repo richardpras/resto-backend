@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyRewardRedemption;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -59,6 +60,11 @@ class Member extends Model
     public function transactions(): HasMany
     {
         return $this->hasMany(MemberTransaction::class);
+    }
+
+    public function rewardRedemptions(): HasMany
+    {
+        return $this->hasMany(LoyaltyRewardRedemption::class);
     }
 
     public function displayName(): string

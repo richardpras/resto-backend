@@ -3,6 +3,7 @@
 namespace App\Modules\LoyaltyEngine\Services;
 
 use App\Models\Modules\LoyaltyEngine\Domain\MemberLoyaltyBalance;
+use App\Models\Modules\LoyaltyEngine\Domain\MemberTierHistory;
 use App\Models\User;
 use App\Modules\Members\Services\MemberService;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,8 @@ class LoyaltyRedeemService
         private readonly MemberService $memberService,
         private readonly LoyaltyLedgerService $ledgerService,
         private readonly LoyaltyBalanceProjectionService $balanceProjectionService,
+        private readonly LoyaltyTierRecalculationService $loyaltyTierRecalculationService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     /**
@@ -45,7 +48,7 @@ class LoyaltyRedeemService
             ]);
         }
 
-        return DB::transaction(function () use ($member, $points, $description): array {
+        $result = DB::transaction(function () use ($member, $points, $description, $outletId): array {
             $balance = MemberLoyaltyBalance::query()
                 ->where('member_id', (int) $member->id)
                 ->lockForUpdate()
@@ -67,11 +70,21 @@ class LoyaltyRedeemService
 
             $balance = $this->balanceProjectionService->applyLedgerEntry($entry);
 
+            $this->loyaltyTierRecalculationService->recalculateForMember(
+                (int) $member->id,
+                $outletId,
+                MemberTierHistory::REASON_RECALCULATION,
+            );
+
             return [
                 'memberId' => (int) $member->id,
                 'redeemedPoints' => $points,
                 'currentBalance' => (int) $balance->current_points,
             ];
         });
+
+        $this->loyaltyNotificationService->dispatchPointsRedeemed($outletId, (int) $member->id, $points);
+
+        return $result;
     }
 }

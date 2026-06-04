@@ -5,12 +5,20 @@ namespace App\Modules\Members\Services;
 use App\Models\Member;
 use App\Models\MemberTransaction;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyMemberLedger;
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyNotification;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyProgram;
 use App\Models\User;
 use App\Modules\LoyaltyEngine\Services\LoyaltyBalanceProjectionService;
 use App\Modules\LoyaltyEngine\Services\LoyaltyProgramService;
+use App\Modules\LoyaltyEngine\Services\MemberSegmentService;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyRewardRedemption;
 use App\Modules\LoyaltyEngine\Services\LoyaltyRewardService;
+use App\Modules\LoyaltyEngine\Services\LoyaltyAutomationService;
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyAutomation;
+use App\Modules\LoyaltyEngine\Services\LoyaltyNotificationService;
+use App\Modules\LoyaltyEngine\Services\LoyaltyTierService;
+use App\Modules\LoyaltyEngine\Services\TierBenefitService;
+use App\Modules\LoyaltyEngine\Services\MemberVoucherService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +31,11 @@ class MemberService
         private readonly LoyaltyBalanceProjectionService $loyaltyBalanceProjectionService,
         private readonly LoyaltyRewardService $loyaltyRewardService,
         private readonly LoyaltyProgramService $loyaltyProgramService,
+        private readonly MemberSegmentService $memberSegmentService,
+        private readonly MemberVoucherService $memberVoucherService,
+        private readonly LoyaltyTierService $loyaltyTierService,
+        private readonly TierBenefitService $tierBenefitService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     /**
@@ -107,7 +120,16 @@ class MemberService
                 'points' => 0,
             ]);
 
-            return $member->fresh();
+            $fresh = $member->fresh();
+            if ($fresh !== null) {
+                app(LoyaltyAutomationService::class)->safeProcessEvent(
+                    $outletId,
+                    (int) $fresh->id,
+                    LoyaltyAutomation::TRIGGER_MEMBER_CREATED,
+                );
+            }
+
+            return $fresh ?? $member;
         });
     }
 
@@ -160,6 +182,9 @@ class MemberService
             ->get();
 
         $memberOutletId = (int) ($member->outlet_id ?? $outletId ?? 0);
+        $currentTierAssignment = $memberOutletId > 0
+            ? $this->loyaltyTierService->currentAssignment((int) $member->id, $memberOutletId)
+            : null;
         $availableRewards = $memberOutletId > 0
             ? $this->loyaltyRewardService->listActiveForOutlet($memberOutletId)
             : collect();
@@ -201,6 +226,29 @@ class MemberService
             'expiryPolicy' => $this->resolveExpiryPolicyForMember($member, $memberOutletId),
             'expiredPointsTotal' => $expiredPointsTotal,
             'expiryHistory' => $expiryHistory,
+            'memberSegments' => $memberOutletId > 0
+                ? $this->memberSegmentService->segmentsForMember($member, $memberOutletId)
+                : collect(),
+            'availableVouchers' => $memberOutletId > 0
+                ? $this->memberVoucherService->availableForMember($member, $memberOutletId)
+                : collect(),
+            'voucherHistory' => $memberOutletId > 0
+                ? $this->memberVoucherService->historyForMember($member, $memberOutletId)
+                : collect(),
+            'tier' => $currentTierAssignment?->tier,
+            'benefits' => $this->tierBenefitService->benefitsForTier($currentTierAssignment?->tier),
+            'tierHistory' => $memberOutletId > 0
+                ? $this->loyaltyTierService->historyForMember($member, $memberOutletId)
+                : collect(),
+            'notifications' => $memberOutletId > 0
+                ? $this->loyaltyNotificationService->listForMember(
+                    $user,
+                    (int) $member->id,
+                    $memberOutletId,
+                    20,
+                    LoyaltyNotification::CHANNEL_IN_APP,
+                )
+                : collect(),
         ];
     }
 

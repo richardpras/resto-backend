@@ -5,6 +5,7 @@ namespace App\Modules\LoyaltyEngine\Services;
 use App\Models\Member;
 use App\Models\MemberTransaction;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyProgram;
+use App\Models\Modules\LoyaltyEngine\Domain\MemberTierHistory;
 use App\Modules\LoyaltyEngine\Support\LoyaltyPeriodWindow;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -15,6 +16,8 @@ class LoyaltyPeriodSpendingService
         private readonly LoyaltyProgramService $programService,
         private readonly LoyaltyLedgerService $ledgerService,
         private readonly LoyaltyBalanceProjectionService $balanceProjectionService,
+        private readonly LoyaltyTierRecalculationService $loyaltyTierRecalculationService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     /**
@@ -108,6 +111,19 @@ class LoyaltyPeriodSpendingService
 
         if ($result['created']) {
             $this->balanceProjectionService->applyLedgerEntry($result['entry']);
+            $member = Member::query()->find($memberId);
+            if ($member !== null && (int) $member->outlet_id > 0) {
+                $this->loyaltyTierRecalculationService->recalculateForMember(
+                    $memberId,
+                    (int) $member->outlet_id,
+                    MemberTierHistory::REASON_RECALCULATION,
+                );
+                $this->loyaltyNotificationService->dispatchPointsEarned(
+                    (int) $member->outlet_id,
+                    $memberId,
+                    $points,
+                );
+            }
 
             return true;
         }

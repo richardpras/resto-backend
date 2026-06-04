@@ -45,14 +45,14 @@ class EloquentOrderRepository implements OrderRepositoryInterface
                     'payments',
                     fn ($q) => $q->where('status', 'void')
                 ))
-            ->with(['items', 'payments.allocations', 'splits.items'])
+            ->with(['items', 'payments.allocations', 'splits.items', 'orderVoucher.voucher'])
             ->latest('id')
             ->paginate($perPage);
     }
 
     public function findWithRelations(int $id): ?Order
     {
-        return Order::query()->with(['items', 'payments.allocations', 'splits.items'])->find($id);
+        return Order::query()->with(['items', 'payments.allocations', 'splits.items', 'orderVoucher.voucher'])->find($id);
     }
 
     public function findById(int $id): ?Order
@@ -66,7 +66,7 @@ class EloquentOrderRepository implements OrderRepositoryInterface
         return Order::query()
             ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
             ->whereKey($id)
-            ->with(['items', 'payments.allocations', 'splits.items'])
+            ->with(['items', 'payments.allocations', 'splits.items', 'orderVoucher.voucher'])
             ->first();
     }
 

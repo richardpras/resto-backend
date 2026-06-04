@@ -3,6 +3,7 @@
 namespace App\Modules\LoyaltyEngine\Services;
 
 use App\Models\MemberTransaction;
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyAutomation;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyMemberLedger;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyProgram;
 use App\Models\Modules\Orders\Domain\Order;
@@ -13,6 +14,7 @@ class LoyaltyVisitEarningService
         private readonly LoyaltyProgramService $programService,
         private readonly LoyaltyLedgerService $ledgerService,
         private readonly LoyaltyBalanceProjectionService $balanceProjectionService,
+        private readonly LoyaltyNotificationService $loyaltyNotificationService,
     ) {}
 
     public function processPaidOrder(Order $order): ?LoyaltyMemberLedger
@@ -59,6 +61,18 @@ class LoyaltyVisitEarningService
 
         if ($result['created']) {
             $this->balanceProjectionService->applyLedgerEntry($result['entry']);
+            $this->loyaltyNotificationService->dispatchPointsEarned(
+                $outletId,
+                (int) $order->member_id,
+                $pointsAwarded,
+            );
+
+            app(LoyaltyAutomationService::class)->safeProcessEvent(
+                $outletId,
+                (int) $order->member_id,
+                LoyaltyAutomation::TRIGGER_VISIT_MILESTONE,
+                ['visitCount' => $visitCount],
+            );
         }
 
         return $result['entry'];
