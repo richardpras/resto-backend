@@ -3,6 +3,6 @@
 namespace App\Modules\HR\Services;
 
 /**
- * @deprecated Use PayrollPostingService directly.
+ * @deprecated Use LegacyPayrollPostingService directly.
  */
-class PayrollService extends PayrollPostingService {}
+class PayrollService extends LegacyPayrollPostingService {}

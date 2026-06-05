@@ -13,10 +13,14 @@ class GoodsReceivingNoteItem extends Model
         'purchase_order_item_id',
         'ingredient_id',
         'received_qty',
+        'original_po_cost',
+        'actual_received_cost',
     ];
 
     protected $casts = [
         'received_qty' => 'decimal:2',
+        'original_po_cost' => 'decimal:4',
+        'actual_received_cost' => 'decimal:4',
     ];
 
     public function goodsReceivingNote(): BelongsTo

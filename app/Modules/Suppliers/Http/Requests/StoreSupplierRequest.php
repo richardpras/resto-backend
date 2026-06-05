@@ -23,6 +23,15 @@ class StoreSupplierRequest extends FormRequest
             'address' => ['nullable', 'string', 'max:500'],
             'notes' => ['nullable', 'string'],
             'status' => ['required', 'in:active,inactive'],
+            'paymentTermDays' => ['nullable', 'integer', 'gte:0'],
+            'leadTimeDays' => ['nullable', 'integer', 'gte:0'],
+            'taxNumber' => ['nullable', 'string', 'max:64'],
+            'taxName' => ['nullable', 'string', 'max:255'],
+            'taxAddress' => ['nullable', 'string'],
+            'contactPerson' => ['nullable', 'string', 'max:255'],
+            'contactPhone' => ['nullable', 'string', 'max:64'],
+            'contactEmail' => ['nullable', 'string', 'email', 'max:255'],
+            'isActive' => ['nullable', 'boolean'],
         ];
     }
 }

@@ -9,6 +9,9 @@ use App\Modules\HR\Http\Controllers\AttendanceController;
 use App\Modules\HR\Http\Controllers\AttendanceRecordController;
 use App\Modules\HR\Http\Controllers\AttendancePeriodController;
 use App\Modules\HR\Http\Controllers\AttendanceSummaryController;
+use App\Modules\HR\Http\Controllers\EssAuthController;
+use App\Modules\HR\Http\Controllers\EssDashboardController;
+use App\Modules\HR\Http\Controllers\EssProfileController;
 use App\Modules\HR\Http\Controllers\EmployeeController;
 use App\Modules\HR\Http\Controllers\EmployeeRosterController;
 use App\Modules\HR\Http\Controllers\EmployeeShiftAssignmentController;
@@ -17,6 +20,9 @@ use App\Modules\HR\Http\Controllers\LeaveRequestController;
 use App\Modules\HR\Http\Controllers\LeaveTypeController;
 use App\Modules\HR\Http\Controllers\BpjsConfigController;
 use App\Modules\HR\Http\Controllers\BpjsProfileController;
+use App\Modules\HR\Http\Controllers\EmployeeTaxProfileController;
+use App\Modules\HR\Http\Controllers\Pph21ConfigController;
+use App\Modules\HR\Http\Controllers\ReimbursementController;
 use App\Modules\HR\Http\Controllers\CashAdvanceController;
 use App\Modules\HR\Http\Controllers\PayrollAdjustmentController;
 use App\Modules\HR\Http\Controllers\PayslipController;
@@ -28,6 +34,8 @@ use App\Modules\HR\Http\Controllers\OvertimeSummaryController;
 use App\Modules\HR\Http\Controllers\OvertimeTypeController;
 use App\Modules\HR\Http\Controllers\EmployeeSalaryProfileController;
 use App\Modules\HR\Http\Controllers\PayrollPreparationPeriodController;
+use App\Modules\HR\Http\Controllers\PayrollClosingController;
+use App\Modules\HR\Http\Controllers\PayrollPostingController;
 use App\Modules\HR\Http\Controllers\PayrollRunV2Controller;
 use App\Modules\HR\Http\Controllers\PayrollController;
 use App\Modules\HR\Http\Controllers\ShiftController;
@@ -75,9 +83,15 @@ use App\Modules\Print\Http\Controllers\PrintQueueController;
 use App\Modules\Print\Http\Controllers\ReceiptDocumentController;
 use App\Modules\Print\Http\Controllers\ReceiptLayoutsController;
 use App\Modules\Purchase\Http\Controllers\GoodsReceiptController;
+use App\Modules\Purchase\Http\Controllers\InventoryProcurementSettingController;
+use App\Modules\Purchase\Http\Controllers\ProcurementMatchController;
+use App\Modules\Purchase\Http\Controllers\ProcurementPayablesController;
+use App\Modules\Purchase\Http\Controllers\ProcurementSummaryController;
+use App\Modules\Purchase\Http\Controllers\WarehouseController;
 use App\Modules\Purchase\Http\Controllers\PurchaseInvoiceController;
+use App\Modules\Purchase\Http\Controllers\SupplierPaymentController;
 use App\Modules\Purchase\Http\Controllers\PurchaseOrderController;
-use App\Modules\Purchase\Http\Controllers\PurchaseRequestController;
+use App\Modules\Procurement\Http\Controllers\PurchaseRequestController;
 use App\Modules\Promotions\Http\Controllers\CouponValidationController;
 use App\Modules\Settings\Http\Controllers\BankAccountSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\IntegrationSettingsController;
@@ -104,6 +118,16 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::post('auth/login', [AuthController::class, 'login']);
+
+    Route::prefix('ess')->middleware('ess.enabled')->group(function (): void {
+        Route::post('login', [EssAuthController::class, 'login']);
+        Route::middleware('auth:employee_api')->group(function (): void {
+            Route::post('logout', [EssAuthController::class, 'logout']);
+            Route::get('me', [EssAuthController::class, 'me']);
+            Route::get('dashboard', [EssDashboardController::class, 'show']);
+            Route::get('profile', [EssProfileController::class, 'show']);
+        });
+    });
     Route::post('qr-orders', [QrOrderController::class, 'store']);
     Route::post('qr-orders/{qrOrderRequest}/call-cashier', [QrOrderController::class, 'callCashier']);
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
@@ -372,6 +396,26 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('permission.any:payroll.manage');
         Route::get('payroll-runs-v2/{run}/items', [PayrollRunV2Controller::class, 'items'])
             ->middleware('permission.any:payroll.manage');
+        Route::get('payroll-runs-v2/{run}/closing-summary', [PayrollClosingController::class, 'closingSummary'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2/{run}/start-payment', [PayrollClosingController::class, 'startPayment'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2/{run}/mark-paid', [PayrollClosingController::class, 'markPaid'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2/{run}/close', [PayrollClosingController::class, 'close'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2/{run}/reopen', [PayrollClosingController::class, 'reopen'])
+            ->middleware('permission.any:payroll.manage');
+        Route::get('payroll-runs-v2/{run}/audit', [PayrollClosingController::class, 'audit'])
+            ->middleware('permission.any:payroll.manage');
+        Route::get('payroll-runs-v2/{run}/posting-preview', [PayrollPostingController::class, 'preview'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2/{run}/post', [PayrollPostingController::class, 'post'])
+            ->middleware('permission.any:payroll.manage');
+        Route::post('payroll-runs-v2/{run}/reverse-posting', [PayrollPostingController::class, 'reverse'])
+            ->middleware('permission.any:payroll.manage');
+        Route::get('payroll-runs-v2/{run}/posting', [PayrollPostingController::class, 'status'])
+            ->middleware('permission.any:payroll.manage');
 
         Route::get('payslips', [PayslipController::class, 'index'])
             ->middleware('permission.any:payroll.manage,payroll.create');
@@ -444,6 +488,42 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('permission.any:payroll.manage,payroll.create');
         Route::patch('bpjs-profiles/{bpjsProfile}', [BpjsProfileController::class, 'update'])
             ->middleware('permission.any:payroll.manage,payroll.create');
+
+        Route::get('pph21-configs', [Pph21ConfigController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('pph21-configs', [Pph21ConfigController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('pph21-configs/{pph21Config}', [Pph21ConfigController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::get('employee-tax-profiles', [EmployeeTaxProfileController::class, 'index'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::post('employee-tax-profiles', [EmployeeTaxProfileController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::patch('employee-tax-profiles/{employeeTaxProfile}', [EmployeeTaxProfileController::class, 'update'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+
+        Route::get('reimbursements', [ReimbursementController::class, 'index'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::post('reimbursements', [ReimbursementController::class, 'store'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::get('reimbursements/{reimbursement}', [ReimbursementController::class, 'show'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::patch('reimbursements/{reimbursement}', [ReimbursementController::class, 'update'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::delete('reimbursements/{reimbursement}', [ReimbursementController::class, 'destroy'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::post('reimbursements/{reimbursement}/submit', [ReimbursementController::class, 'submit'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::post('reimbursements/{reimbursement}/reject', [ReimbursementController::class, 'reject'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::post('reimbursements/{reimbursement}/cancel', [ReimbursementController::class, 'cancel'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::post('reimbursements/{reimbursement}/attachments', [ReimbursementController::class, 'storeAttachment'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
+        Route::delete('reimbursements/attachments/{attachment}', [ReimbursementController::class, 'destroyAttachment'])
+            ->middleware('permission.any:reimbursement.manage,payroll.manage');
 
         Route::get('employee-loans', [EmployeeLoanController::class, 'index'])
             ->middleware('permission.any:payroll.manage,loans.manage');
@@ -737,10 +817,65 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('suppliers/{supplier}/status', [SupplierController::class, 'updateStatus'])->middleware('permission:suppliers.manage');
         Route::delete('suppliers/{supplier}', [SupplierController::class, 'destroy'])->middleware('permission:suppliers.manage');
 
-        Route::apiResource('purchase-requests', PurchaseRequestController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
-        Route::apiResource('purchase-orders', PurchaseOrderController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
-        Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store']);
-        Route::apiResource('purchase-invoices', PurchaseInvoiceController::class)->only(['index', 'store', 'update']);
-        Route::post('purchase-invoices/{purchaseInvoice}/payments', [PurchaseInvoiceController::class, 'addPayment']);
+        Route::get('procurement/summary', [ProcurementSummaryController::class, 'summary'])->middleware('permission:purchase.manage');
+        Route::get('procurement/payables', [ProcurementPayablesController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::get('procurement/ap-aging', [SupplierPaymentController::class, 'apAging'])->middleware('permission:purchase.manage');
+        Route::get('procurement/supplier-statement', [SupplierPaymentController::class, 'supplierStatement'])->middleware('permission:purchase.manage');
+        Route::get('procurement/match-results', [ProcurementMatchController::class, 'indexResults'])->middleware('permission:purchase.manage');
+        Route::get('procurement/match-results/{invoiceId}', [ProcurementMatchController::class, 'showResult'])->middleware('permission:purchase.manage');
+        Route::post('procurement/match-results/revalidate', [ProcurementMatchController::class, 'revalidate'])->middleware('permission:purchase.manage');
+        Route::get('procurement/match-configs', [ProcurementMatchController::class, 'indexConfigs'])->middleware('permission:purchase.manage');
+        Route::post('procurement/match-configs', [ProcurementMatchController::class, 'storeConfig'])->middleware('permission:purchase.manage');
+        Route::patch('procurement/match-configs/{procurementMatchConfig}', [ProcurementMatchController::class, 'updateConfig'])->middleware('permission:purchase.manage');
+        Route::get('warehouses', [WarehouseController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::get('procurement-settings', [InventoryProcurementSettingController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('procurement-settings', [InventoryProcurementSettingController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::patch('procurement-settings/{inventoryProcurementSetting}', [InventoryProcurementSettingController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::delete('procurement-settings/{inventoryProcurementSetting}', [InventoryProcurementSettingController::class, 'destroy'])->middleware('permission:purchase.manage');
+
+        Route::get('purchase-requests', [PurchaseRequestController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests', [PurchaseRequestController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::get('purchase-requests/{purchaseRequest}', [PurchaseRequestController::class, 'show'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-requests/{purchaseRequest}', [PurchaseRequestController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests/{purchaseRequest}/submit', [PurchaseRequestController::class, 'submit'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests/{purchaseRequest}/approve', [PurchaseRequestController::class, 'approve'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests/{purchaseRequest}/reject', [PurchaseRequestController::class, 'reject'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests/{purchaseRequest}/cancel', [PurchaseRequestController::class, 'cancel'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests/{purchaseRequest}/convert', [PurchaseRequestController::class, 'convert'])->middleware('permission:purchase.manage');
+        Route::get('purchase-orders', [PurchaseOrderController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('purchase-orders', [PurchaseOrderController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::delete('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'destroy'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submit'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}/cancel', [PurchaseOrderController::class, 'cancel'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}/close', [PurchaseOrderController::class, 'close'])->middleware('permission:purchase.manage');
+        Route::get('purchase-orders/{purchaseOrder}/progress', [PurchaseOrderController::class, 'progress'])->middleware('permission:purchase.manage');
+        Route::get('goods-receipts', [GoodsReceiptController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('goods-receipts', [GoodsReceiptController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::get('goods-receipts/{goodsReceipt}', [GoodsReceiptController::class, 'show'])->middleware('permission:purchase.manage');
+        Route::patch('goods-receipts/{goodsReceipt}', [GoodsReceiptController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::delete('goods-receipts/{goodsReceipt}', [GoodsReceiptController::class, 'destroy'])->middleware('permission:purchase.manage');
+        Route::patch('goods-receipts/{goodsReceipt}/receive', [GoodsReceiptController::class, 'receive'])->middleware('permission:purchase.manage');
+        Route::patch('goods-receipts/{goodsReceipt}/post', [GoodsReceiptController::class, 'post'])->middleware('permission:purchase.manage');
+        Route::patch('goods-receipts/{goodsReceipt}/cancel', [GoodsReceiptController::class, 'cancel'])->middleware('permission:purchase.manage');
+        Route::get('goods-receipts/{goodsReceipt}/progress', [GoodsReceiptController::class, 'progress'])->middleware('permission:purchase.manage');
+        Route::get('purchase-invoices', [PurchaseInvoiceController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('purchase-invoices', [PurchaseInvoiceController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::get('purchase-invoices/{purchaseInvoice}', [PurchaseInvoiceController::class, 'show'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-invoices/{purchaseInvoice}', [PurchaseInvoiceController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-invoices/{purchaseInvoice}/submit', [PurchaseInvoiceController::class, 'submit'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-invoices/{purchaseInvoice}/approve', [PurchaseInvoiceController::class, 'approve'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-invoices/{purchaseInvoice}/void', [PurchaseInvoiceController::class, 'void'])->middleware('permission:purchase.manage');
+        Route::get('purchase-invoices/{purchaseInvoice}/outstanding', [PurchaseInvoiceController::class, 'outstanding'])->middleware('permission:purchase.manage');
+        Route::post('purchase-invoices/{purchaseInvoice}/payments', [PurchaseInvoiceController::class, 'addPayment'])->middleware('permission:purchase.manage');
+        Route::get('supplier-payments', [SupplierPaymentController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('supplier-payments', [SupplierPaymentController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::get('supplier-payments/{supplierPayment}', [SupplierPaymentController::class, 'show'])->middleware('permission:purchase.manage');
+        Route::patch('supplier-payments/{supplierPayment}', [SupplierPaymentController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::patch('supplier-payments/{supplierPayment}/approve', [SupplierPaymentController::class, 'approve'])->middleware('permission:purchase.manage');
+        Route::patch('supplier-payments/{supplierPayment}/post', [SupplierPaymentController::class, 'post'])->middleware('permission:purchase.manage');
+        Route::patch('supplier-payments/{supplierPayment}/void', [SupplierPaymentController::class, 'void'])->middleware('permission:purchase.manage');
     });
 });

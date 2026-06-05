@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => \App\Http\Middleware\EnsurePermission::class,
             'permission.any' => \App\Http\Middleware\EnsureAnyPermission::class,
+            'ess.enabled' => \App\Http\Middleware\EnsureEmployeeSelfServiceEnabled::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

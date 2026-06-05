@@ -46,6 +46,10 @@ return [
             'driver' => 'passport',
             'provider' => 'users',
         ],
+        'employee_api' => [
+            'driver' => 'passport',
+            'provider' => 'employee_users',
+        ],
     ],
 
     /*
@@ -69,6 +73,10 @@ return [
         'users' => [
             'driver' => 'eloquent',
             'model' => env('AUTH_MODEL', User::class),
+        ],
+        'employee_users' => [
+            'driver' => 'eloquent',
+            'model' => \App\Models\Modules\HR\Domain\EmployeeUser::class,
         ],
 
         // 'users' => [

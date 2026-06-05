@@ -4,102 +4,54 @@ namespace App\Modules\Purchase\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Modules\Purchase\Domain\GoodsReceivingNote;
-use App\Models\Modules\Purchase\Domain\GoodsReceivingNoteItem;
-use App\Models\Modules\Purchase\Domain\PurchaseOrder;
-use App\Models\Modules\Purchase\Domain\PurchaseOrderItem;
-use App\Modules\Inventory\Services\IngredientOutletStockLedger;
 use App\Modules\Purchase\Http\Requests\StoreGoodsReceiptRequest;
+use App\Modules\Purchase\Http\Requests\UpdateGoodsReceiptRequest;
 use App\Modules\Purchase\Http\Resources\GoodsReceiptResource;
+use App\Modules\Purchase\Services\GoodsReceivingLifecycleService;
+use App\Modules\Purchase\Services\PurchaseScopeService;
+use App\Modules\Purchase\Services\ReceivingProgressService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class GoodsReceiptController extends Controller
 {
     public function __construct(
-        private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
+        private readonly GoodsReceivingLifecycleService $goodsReceivingLifecycleService,
+        private readonly PurchaseScopeService $purchaseScopeService,
+        private readonly ReceivingProgressService $receivingProgressService,
     ) {}
 
     public function index(): JsonResponse
     {
-        $rows = GoodsReceivingNote::query()
-            ->with(['purchaseOrder', 'items.purchaseOrderItem'])
-            ->latest('id')
-            ->get();
+        $query = GoodsReceivingNote::query()->with(['purchaseOrder', 'items.purchaseOrderItem', 'invoice']);
+        $this->purchaseScopeService->applyOutletScope(
+            $query,
+            request()->user('api'),
+            $this->purchaseScopeService->requestedOutletIdFromRequest()
+        );
+
+        $rows = $query->latest('id')->get();
 
         return response()->json([
             'data' => GoodsReceiptResource::collection($rows),
         ]);
     }
 
+    public function show(GoodsReceivingNote $goodsReceipt): JsonResponse
+    {
+        $this->purchaseScopeService->assertDocumentOutlet(
+            request()->user('api'),
+            $goodsReceipt->outlet_id !== null ? (int) $goodsReceipt->outlet_id : null
+        );
+
+        return response()->json([
+            'data' => new GoodsReceiptResource($goodsReceipt->load(['purchaseOrder', 'items.purchaseOrderItem', 'invoice', 'warehouse'])),
+        ]);
+    }
+
     public function store(StoreGoodsReceiptRequest $request): JsonResponse
     {
-        $data = $request->validated();
-
-        $created = DB::transaction(function () use ($data): GoodsReceivingNote {
-            /** @var PurchaseOrder|null $purchaseOrder */
-            $purchaseOrder = PurchaseOrder::query()->with('items')->lockForUpdate()->find((int) $data['purchaseOrderId']);
-            abort_if($purchaseOrder === null, Response::HTTP_NOT_FOUND, 'Purchase order not found.');
-            abort_if(! in_array($purchaseOrder->status, ['sent', 'partial'], true), Response::HTTP_UNPROCESSABLE_ENTITY, 'Only sent/partial PO can be received.');
-            abort_if(
-                $purchaseOrder->outlet_id === null || (int) $purchaseOrder->outlet_id < 1,
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-                'Purchase order outlet_id is required to receive stock.'
-            );
-
-            $gr = GoodsReceivingNote::query()->create([
-                'tenant_id' => $purchaseOrder->tenant_id,
-                'outlet_id' => $purchaseOrder->outlet_id,
-                'purchase_order_id' => $purchaseOrder->id,
-                'number' => $this->nextNumber(),
-                'received_date' => $data['date'],
-                'notes' => $data['notes'] ?? null,
-            ]);
-
-            $numericOutlet = (int) $purchaseOrder->outlet_id;
-
-            foreach ($data['items'] as $line) {
-                $ingredientId = (int) $line['inventoryItemId'];
-                $receivedQty = (float) $line['receivedQty'];
-
-                /** @var PurchaseOrderItem|null $poItem */
-                $poItem = $purchaseOrder->items->firstWhere('ingredient_id', $ingredientId);
-                abort_if($poItem === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Item is not part of selected PO.');
-
-                $remaining = (float) $poItem->ordered_qty - (float) $poItem->received_qty;
-                abort_if($receivedQty > $remaining, Response::HTTP_UNPROCESSABLE_ENTITY, 'Received quantity cannot exceed remaining PO quantity.');
-
-                GoodsReceivingNoteItem::query()->create([
-                    'goods_receiving_note_id' => $gr->id,
-                    'purchase_order_item_id' => $poItem->id,
-                    'ingredient_id' => $ingredientId,
-                    'received_qty' => $receivedQty,
-                ]);
-
-                $poItem->update([
-                    'received_qty' => (float) $poItem->received_qty + $receivedQty,
-                ]);
-
-                $this->ingredientOutletStockLedger->apply(
-                    $numericOutlet,
-                    $ingredientId,
-                    'purchase',
-                    $receivedQty,
-                    'GR',
-                    $gr->number,
-                );
-            }
-
-            $purchaseOrder->refresh()->load('items');
-            $allReceived = $purchaseOrder->items->every(
-                static fn (PurchaseOrderItem $item): bool => (float) $item->received_qty >= (float) $item->ordered_qty
-            );
-            $purchaseOrder->update([
-                'status' => $allReceived ? 'completed' : 'partial',
-            ]);
-
-            return $gr->fresh()->load(['purchaseOrder', 'items.purchaseOrderItem']);
-        });
+        $created = $this->goodsReceivingLifecycleService->create($request->user('api'), $request->validated());
 
         return response()->json([
             'message' => 'Goods receipt created successfully.',
@@ -107,9 +59,66 @@ class GoodsReceiptController extends Controller
         ], Response::HTTP_CREATED);
     }
 
-    private function nextNumber(): string
+    public function update(UpdateGoodsReceiptRequest $request, GoodsReceivingNote $goodsReceipt): JsonResponse
     {
-        $lastId = (int) (GoodsReceivingNote::query()->max('id') ?? 0);
-        return 'GRN-'.str_pad((string) ($lastId + 1), 4, '0', STR_PAD_LEFT);
+        $updated = $this->goodsReceivingLifecycleService->update($goodsReceipt, $request->user('api'), $request->validated());
+
+        return response()->json([
+            'message' => 'Goods receipt updated successfully.',
+            'data' => new GoodsReceiptResource($updated),
+        ]);
+    }
+
+    public function destroy(GoodsReceivingNote $goodsReceipt): JsonResponse
+    {
+        $this->goodsReceivingLifecycleService->destroy($goodsReceipt, request()->user('api'));
+
+        return response()->json([
+            'message' => 'Goods receipt deleted successfully.',
+        ]);
+    }
+
+    public function receive(GoodsReceivingNote $goodsReceipt): JsonResponse
+    {
+        $updated = $this->goodsReceivingLifecycleService->receive($goodsReceipt, request()->user('api'));
+
+        return response()->json([
+            'message' => 'Goods receipt marked as received.',
+            'data' => new GoodsReceiptResource($updated),
+        ]);
+    }
+
+    public function post(GoodsReceivingNote $goodsReceipt): JsonResponse
+    {
+        $updated = $this->goodsReceivingLifecycleService->post($goodsReceipt, request()->user('api'));
+
+        return response()->json([
+            'message' => 'Goods receipt posted to inventory.',
+            'data' => new GoodsReceiptResource($updated),
+        ]);
+    }
+
+    public function cancel(GoodsReceivingNote $goodsReceipt): JsonResponse
+    {
+        $updated = $this->goodsReceivingLifecycleService->cancel($goodsReceipt, request()->user('api'));
+
+        return response()->json([
+            'message' => 'Goods receipt cancelled.',
+            'data' => new GoodsReceiptResource($updated),
+        ]);
+    }
+
+    public function progress(GoodsReceivingNote $goodsReceipt): JsonResponse
+    {
+        $this->purchaseScopeService->assertDocumentOutlet(
+            request()->user('api'),
+            $goodsReceipt->outlet_id !== null ? (int) $goodsReceipt->outlet_id : null
+        );
+
+        $progress = $this->receivingProgressService->forGoodsReceivingNote($goodsReceipt->load(['items.purchaseOrderItem', 'purchaseOrder.items']));
+
+        return response()->json([
+            'data' => $progress,
+        ]);
     }
 }

@@ -81,7 +81,13 @@ class PayslipService
         $run = $this->payrollRuns->findAccessible($user, $payrollRunId);
         $run->load(['preparationPeriod', 'outlet', 'items.employee']);
 
-        if ($run->status !== PayrollRunV2::STATUS_FINALIZED) {
+        $run->assertNotClosed();
+
+        if ($run->status !== PayrollRunV2::STATUS_FINALIZED
+            && ! in_array($run->status, [
+                PayrollRunV2::STATUS_PROCESSING_PAYMENT,
+                PayrollRunV2::STATUS_PAID,
+            ], true)) {
             throw ValidationException::withMessages([
                 'payrollRunId' => ['Payslips can only be generated from finalized payroll runs.'],
             ]);
@@ -161,6 +167,11 @@ class PayslipService
     public function regenerate(?User $user, int $payslipId): PayrollPayslip
     {
         $payslip = $this->findAccessible($user, $payslipId);
+        $payslip->loadMissing('payrollRun');
+
+        if ($payslip->payrollRun !== null) {
+            $payslip->payrollRun->assertNotClosed();
+        }
 
         $path = $this->pdfService->renderAndStore($payslip);
         $payslip->update([

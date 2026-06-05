@@ -7,6 +7,7 @@ use App\Models\Supplier;
 use App\Modules\Suppliers\Http\Requests\StoreSupplierRequest;
 use App\Modules\Suppliers\Http\Requests\UpdateSupplierRequest;
 use App\Modules\Suppliers\Http\Resources\SupplierResource;
+use App\Modules\Suppliers\Support\SupplierPayloadMapper;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -23,7 +24,7 @@ class SupplierController extends Controller
 
     public function store(StoreSupplierRequest $request): JsonResponse
     {
-        $supplier = Supplier::query()->create($request->validated());
+        $supplier = Supplier::query()->create(SupplierPayloadMapper::toAttributes($request->validated()));
 
         return response()->json([
             'message' => 'Supplier created successfully.',
@@ -33,7 +34,7 @@ class SupplierController extends Controller
 
     public function update(UpdateSupplierRequest $request, Supplier $supplier): JsonResponse
     {
-        $supplier->fill($request->validated());
+        $supplier->fill(SupplierPayloadMapper::toAttributes($request->validated()));
         $supplier->save();
 
         return response()->json([
@@ -45,6 +46,7 @@ class SupplierController extends Controller
     public function updateStatus(Supplier $supplier): JsonResponse
     {
         $supplier->status = $supplier->status === 'active' ? 'inactive' : 'active';
+        $supplier->is_active = $supplier->status === 'active';
         $supplier->save();
 
         return response()->json([

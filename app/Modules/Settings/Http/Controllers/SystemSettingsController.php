@@ -25,6 +25,7 @@ class SystemSettingsController extends Controller
             'enableMultiPayment' => ['required', 'boolean'],
             'confirmBeforePayment' => ['required', 'boolean'],
             'enableQROrdering' => ['required', 'boolean'],
+            'employeeSelfServiceEnabled' => ['sometimes', 'boolean'],
         ]);
 
         return response()->json([

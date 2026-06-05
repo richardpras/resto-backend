@@ -18,8 +18,13 @@ class PayrollRunV2Resource extends JsonResource
             'outletId' => (int) $this->outlet_id,
             'payrollPreparationPeriodId' => (int) $this->payroll_preparation_period_id,
             'status' => $this->status,
+            'paymentStatus' => $this->payment_status,
             'approvedAt' => $this->approved_at?->toIso8601String(),
             'finalizedAt' => $this->finalized_at?->toIso8601String(),
+            'paidAt' => $this->paid_at?->toIso8601String(),
+            'closedAt' => $this->closed_at?->toIso8601String(),
+            'closedNotes' => $this->closed_notes,
+            'isClosed' => $this->status === PayrollRunV2::STATUS_CLOSED,
             'itemCount' => $this->when(
                 isset($this->item_count),
                 fn () => (int) $this->item_count,

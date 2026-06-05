@@ -42,6 +42,9 @@
         <tr><th>Allowance</th><td class="amount">IDR {{ number_format($allowance, 0, ',', '.') }}</td></tr>
         <tr><th>Overtime Pay</th><td class="amount">IDR {{ number_format($overtimePay, 0, ',', '.') }}</td></tr>
         <tr><th>Adjustment Earnings</th><td class="amount">IDR {{ number_format($adjustmentEarning, 0, ',', '.') }}</td></tr>
+        @if(($reimbursementEarning ?? 0) > 0)
+        <tr><th>Reimbursement</th><td class="amount">IDR {{ number_format($reimbursementEarning, 0, ',', '.') }}</td></tr>
+        @endif
     </table>
 
     <h2>Deductions</h2>
@@ -61,7 +64,20 @@
         @if($bpjsJpEmployee > 0)
         <tr><th>JP (Employee)</th><td class="amount">IDR {{ number_format($bpjsJpEmployee, 0, ',', '.') }}</td></tr>
         @endif
+        @if(($pph21Amount ?? 0) > 0)
+        <tr><th>PPh21</th><td class="amount">IDR {{ number_format($pph21Amount, 0, ',', '.') }}</td></tr>
+        @endif
     </table>
+
+    @if(($pph21Amount ?? 0) > 0)
+    <h2>Tax</h2>
+    <table>
+        <tr><th>PTKP Status</th><td>{{ $ptkpStatus }}</td></tr>
+        <tr><th>Annual PKP</th><td class="amount">IDR {{ number_format($annualPkp, 0, ',', '.') }}</td></tr>
+        <tr><th>Estimated Annual Tax</th><td class="amount">IDR {{ number_format($annualPph21, 0, ',', '.') }}</td></tr>
+        <tr><th>Monthly PPh21</th><td class="amount">IDR {{ number_format($pph21Amount, 0, ',', '.') }}</td></tr>
+    </table>
+    @endif
 
     @if($bpjsKesehatanCompany > 0 || $bpjsJhtCompany > 0 || $bpjsJpCompany > 0 || $bpjsJkkCompany > 0 || $bpjsJkmCompany > 0)
     <h2>Employer Contributions</h2>

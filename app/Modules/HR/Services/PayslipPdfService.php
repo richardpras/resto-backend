@@ -37,6 +37,7 @@ class PayslipPdfService
         $breakdown = $payslip->breakdown_json ?? [];
         $calc = $breakdown['calculation'] ?? [];
         $bpjs = is_array($calc['bpjs'] ?? null) ? $calc['bpjs'] : [];
+        $pph21 = is_array($calc['pph21'] ?? null) ? $calc['pph21'] : [];
 
         return View::make('payslips.pdf', [
             'payslipNo' => $payslip->payslip_no,
@@ -51,6 +52,7 @@ class PayslipPdfService
             'allowance' => (float) ($calc['allowance'] ?? 0),
             'overtimePay' => (float) ($calc['overtimePay'] ?? 0),
             'adjustmentEarning' => (float) ($calc['adjustmentEarning'] ?? 0),
+            'reimbursementEarning' => (float) ($calc['reimbursementEarning'] ?? 0),
             'defaultDeduction' => (float) ($calc['defaultDeduction'] ?? 0),
             'unpaidLeaveDeduction' => (float) ($calc['unpaidLeaveDeduction'] ?? 0),
             'attendanceDeduction' => (float) ($calc['attendanceDeduction'] ?? 0),
@@ -65,6 +67,10 @@ class PayslipPdfService
             'bpjsJpCompany' => (float) ($bpjs['bpjs_jp_company'] ?? 0),
             'bpjsJkkCompany' => (float) ($bpjs['bpjs_jkk_company'] ?? 0),
             'bpjsJkmCompany' => (float) ($bpjs['bpjs_jkm_company'] ?? 0),
+            'pph21Amount' => (float) ($pph21['pph21_amount'] ?? 0),
+            'ptkpStatus' => (string) ($pph21['ptkp_status'] ?? ''),
+            'annualPkp' => (float) ($pph21['annual_pkp'] ?? 0),
+            'annualPph21' => (float) ($pph21['annual_pph21'] ?? 0),
             'grossSalary' => (float) $payslip->gross_salary,
             'totalDeductions' => (float) $payslip->total_deductions,
             'netSalary' => (float) $payslip->net_salary,

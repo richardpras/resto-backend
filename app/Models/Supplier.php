@@ -13,5 +13,20 @@ class Supplier extends Model
         'address',
         'notes',
         'status',
+        'payment_term_days',
+        'lead_time_days',
+        'tax_number',
+        'tax_name',
+        'tax_address',
+        'contact_person',
+        'contact_phone',
+        'contact_email',
+        'is_active',
+    ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'payment_term_days' => 'integer',
+        'lead_time_days' => 'integer',
     ];
 }

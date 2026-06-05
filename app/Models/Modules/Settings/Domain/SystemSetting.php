@@ -11,6 +11,7 @@ class SystemSetting extends Model
         'enable_multi_payment',
         'confirm_before_payment',
         'enable_qr_ordering',
+        'employee_self_service_enabled',
     ];
 
     protected $casts = [
@@ -18,5 +19,6 @@ class SystemSetting extends Model
         'enable_multi_payment' => 'boolean',
         'confirm_before_payment' => 'boolean',
         'enable_qr_ordering' => 'boolean',
+        'employee_self_service_enabled' => 'boolean',
     ];
 }

@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Services;
 
 use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
+use App\Models\Modules\HR\Domain\PayrollRunAudit;
 use App\Models\Modules\HR\Domain\PayrollRunItemV2;
 use App\Models\Modules\HR\Domain\PayrollRunV2;
 use App\Models\User;
@@ -17,6 +18,8 @@ class PayrollRunServiceV2
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly PayrollCalculationService $calculation,
+        private readonly ReimbursementService $reimbursements,
+        private readonly PayrollRunAuditService $audits,
     ) {}
 
     /**
@@ -90,6 +93,7 @@ class PayrollRunServiceV2
     public function calculate(?User $user, int $runId): PayrollRunV2
     {
         $run = $this->findAccessible($user, $runId);
+        $run->assertNotClosed();
 
         if (! in_array($run->status, [PayrollRunV2::STATUS_DRAFT, PayrollRunV2::STATUS_CALCULATED], true)) {
             throw ValidationException::withMessages([
@@ -99,9 +103,10 @@ class PayrollRunServiceV2
 
         $run->load('preparationPeriod');
 
-        DB::transaction(function () use ($run) {
+        DB::transaction(function () use ($run, $user) {
             $this->calculation->calculateRun($run);
             $run->update(['status' => PayrollRunV2::STATUS_CALCULATED]);
+            $this->audits->record($run->id, PayrollRunAudit::ACTION_CALCULATED, $user);
         });
 
         return $run->refresh()->load(['preparationPeriod', 'items.employee']);
@@ -110,6 +115,7 @@ class PayrollRunServiceV2
     public function approve(?User $user, int $runId): PayrollRunV2
     {
         $run = $this->findAccessible($user, $runId);
+        $run->assertNotClosed();
 
         if ($run->status !== PayrollRunV2::STATUS_CALCULATED) {
             throw ValidationException::withMessages([
@@ -123,12 +129,15 @@ class PayrollRunServiceV2
             'approved_at' => now(),
         ]);
 
+        $this->audits->record($run->id, PayrollRunAudit::ACTION_APPROVED, $user);
+
         return $run->refresh()->load(['preparationPeriod', 'items.employee']);
     }
 
     public function finalize(?User $user, int $runId): PayrollRunV2
     {
         $run = $this->findAccessible($user, $runId);
+        $run->assertNotClosed();
 
         if ($run->status !== PayrollRunV2::STATUS_APPROVED) {
             throw ValidationException::withMessages([
@@ -136,11 +145,17 @@ class PayrollRunServiceV2
             ]);
         }
 
-        $run->update([
-            'status' => PayrollRunV2::STATUS_FINALIZED,
-            'finalized_by' => $user?->id,
-            'finalized_at' => now(),
-        ]);
+        DB::transaction(function () use ($run, $user) {
+            $run->update([
+                'status' => PayrollRunV2::STATUS_FINALIZED,
+                'payment_status' => PayrollRunV2::PAYMENT_PENDING,
+                'finalized_by' => $user?->id,
+                'finalized_at' => now(),
+            ]);
+
+            $this->reimbursements->markPaidForPayrollRun((int) $run->id, $user);
+            $this->audits->record($run->id, PayrollRunAudit::ACTION_FINALIZED, $user);
+        });
 
         return $run->refresh()->load(['preparationPeriod', 'items.employee']);
     }

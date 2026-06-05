@@ -399,6 +399,7 @@ class SettingsDomainService
                 'enableMultiPayment' => (bool) ($s['enableMultiPayment'] ?? true),
                 'confirmBeforePayment' => (bool) ($s['confirmBeforePayment'] ?? true),
                 'enableQROrdering' => (bool) ($s['enableQROrdering'] ?? true),
+                'employeeSelfServiceEnabled' => (bool) ($s['employeeSelfServiceEnabled'] ?? false),
             ];
         }
 
@@ -407,6 +408,7 @@ class SettingsDomainService
             'enableMultiPayment' => $row->enable_multi_payment,
             'confirmBeforePayment' => $row->confirm_before_payment,
             'enableQROrdering' => $row->enable_qr_ordering,
+            'employeeSelfServiceEnabled' => (bool) $row->employee_self_service_enabled,
         ];
     }
 
@@ -420,6 +422,7 @@ class SettingsDomainService
                 'enable_multi_payment' => $data['enableMultiPayment'],
                 'confirm_before_payment' => $data['confirmBeforePayment'],
                 'enable_qr_ordering' => $data['enableQROrdering'],
+                'employee_self_service_enabled' => (bool) ($data['employeeSelfServiceEnabled'] ?? false),
             ],
         );
 
@@ -428,6 +431,7 @@ class SettingsDomainService
             'enableMultiPayment' => $row->enable_multi_payment,
             'confirmBeforePayment' => $row->confirm_before_payment,
             'enableQROrdering' => $row->enable_qr_ordering,
+            'employeeSelfServiceEnabled' => (bool) $row->employee_self_service_enabled,
         ];
     }
 

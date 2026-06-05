@@ -66,6 +66,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'orders.recovery.approve', 'name' => 'Approve order item recovery resolutions'],
             ['code' => 'finance.reconcile', 'name' => 'Run payment reconciliation'],
             ['code' => 'finance.shift_close', 'name' => 'Run shift close financial posting'],
+            ['code' => 'employee.portal', 'name' => 'Employee self service portal'],
         ];
 
         foreach ($definitions as $row) {

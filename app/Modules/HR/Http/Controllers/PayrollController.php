@@ -9,7 +9,7 @@ use App\Modules\HR\Http\Requests\StorePayrollRequest;
 use App\Modules\HR\Http\Resources\PayrollResource;
 use App\Modules\HR\Http\Resources\PayrollRunResource;
 use App\Modules\HR\Services\LegacyPayrollService;
-use App\Modules\HR\Services\PayrollPostingService;
+use App\Modules\HR\Services\LegacyPayrollPostingService;
 use App\Modules\HR\Services\PayrollRunService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,7 +19,7 @@ class PayrollController extends Controller
     public function __construct(
         private readonly LegacyPayrollService $legacyService,
         private readonly PayrollRunService $runService,
-        private readonly PayrollPostingService $postingService,
+        private readonly LegacyPayrollPostingService $postingService,
     ) {}
 
     public function index(): JsonResponse

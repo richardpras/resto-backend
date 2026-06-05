@@ -18,22 +18,55 @@ class PayrollRunV2 extends Model
 
     public const STATUS_FINALIZED = 'finalized';
 
+    public const STATUS_PROCESSING_PAYMENT = 'processing_payment';
+
+    public const STATUS_PAID = 'paid';
+
+    public const STATUS_CLOSED = 'closed';
+
+    public const PAYMENT_PENDING = 'pending';
+
+    public const PAYMENT_PROCESSING = 'processing';
+
+    public const PAYMENT_PAID = 'paid';
+
     protected $table = 'payroll_runs_v2';
 
     protected $fillable = [
         'outlet_id',
         'payroll_preparation_period_id',
         'status',
+        'payment_status',
         'approved_by',
         'approved_at',
         'finalized_by',
         'finalized_at',
+        'paid_at',
+        'closed_at',
+        'closed_by',
+        'closed_notes',
     ];
 
     protected $casts = [
         'approved_at' => 'datetime',
         'finalized_at' => 'datetime',
+        'paid_at' => 'datetime',
+        'closed_at' => 'datetime',
     ];
+
+    public function isClosed(): bool
+    {
+        return $this->status === self::STATUS_CLOSED;
+    }
+
+    public function assertNotClosed(): void
+    {
+        if ($this->isClosed()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'status' => ['Payroll run already closed.'],
+            ]);
+        }
+    }
 
     public function outlet(): BelongsTo
     {
@@ -63,5 +96,20 @@ class PayrollRunV2 extends Model
     public function items(): HasMany
     {
         return $this->hasMany(PayrollRunItemV2::class, 'payroll_run_id');
+    }
+
+    public function closedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by');
+    }
+
+    public function audits(): HasMany
+    {
+        return $this->hasMany(PayrollRunAudit::class, 'payroll_run_id');
+    }
+
+    public function posting(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(PayrollPosting::class, 'payroll_run_id');
     }
 }

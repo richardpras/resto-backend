@@ -9,7 +9,7 @@ use App\Models\Modules\HR\Domain\PayrollRunV2;
 use Illuminate\Support\Collection;
 
 /**
- * Salary calculation from locked preparation snapshots — no tax or accounting.
+ * Salary calculation from locked preparation snapshots — includes PPh21; no accounting.
  */
 class PayrollCalculationService
 {
@@ -24,6 +24,8 @@ class PayrollCalculationService
         private readonly CashAdvanceService $cashAdvances,
         private readonly PayrollAdjustmentService $payrollAdjustments,
         private readonly BpjsCalculationService $bpjsCalculation,
+        private readonly Pph21CalculationService $pph21Calculation,
+        private readonly ReimbursementService $reimbursements,
     ) {}
 
     /**
@@ -39,6 +41,7 @@ class PayrollCalculationService
 
         $this->employeeLoans->resetDeductionsForPayrollRun((int) $run->id);
         $this->cashAdvances->resetDeductionsForPayrollRun((int) $run->id);
+        $this->reimbursements->resetForPayrollRun((int) $run->id);
 
         $snapshots = PayrollPreparationSnapshot::query()
             ->with('employee')
@@ -55,7 +58,7 @@ class PayrollCalculationService
         foreach ($snapshots as $snapshot) {
             $employeeId = (int) $snapshot->employee_id;
             $profile = $profiles->get($employeeId);
-            $line = $this->buildLineItem($snapshot, $profile, 0, 0, 0, 0, 0, 0, $periodStart, $periodEnd);
+            $line = $this->buildLineItem($snapshot, $profile, 0, 0, 0, 0, 0, 0, 0, 0, $periodStart, $periodEnd);
 
             $item = PayrollRunItemV2::query()->updateOrCreate(
                 [
@@ -84,6 +87,12 @@ class PayrollCalculationService
 
             $adjustments = $this->payrollAdjustments->totalsForEmployeeInPeriod($employeeId, $periodStart, $periodEnd);
 
+            $reimb = $this->reimbursements->applyForPayrollItem(
+                (int) $item->id,
+                $employeeId,
+                $periodEnd,
+            );
+
             $line = $this->buildLineItem(
                 $snapshot,
                 $profile,
@@ -93,6 +102,8 @@ class PayrollCalculationService
                 $cash['remainingBalance'],
                 $adjustments['adjustmentEarning'],
                 $adjustments['adjustmentDeduction'],
+                $reimb['reimbursementEarning'],
+                $reimb['remainingReimbursement'],
                 $periodStart,
                 $periodEnd,
             );
@@ -116,6 +127,8 @@ class PayrollCalculationService
         float $remainingCashAdvanceBalance = 0,
         float $adjustmentEarning = 0,
         float $adjustmentDeduction = 0,
+        float $reimbursementEarning = 0,
+        float $remainingReimbursement = 0,
         ?string $periodStart = null,
         ?string $periodEnd = null,
     ): array {
@@ -146,16 +159,24 @@ class PayrollCalculationService
         $remainingCashAdvanceBalance = round($remainingCashAdvanceBalance, 2);
         $adjustmentEarning = round($adjustmentEarning, 2);
         $adjustmentDeduction = round($adjustmentDeduction, 2);
+        $reimbursementEarning = round($reimbursementEarning, 2);
+        $remainingReimbursement = round($remainingReimbursement, 2);
 
         $bpjs = $periodEnd !== null
             ? $this->bpjsCalculation->calculateForEmployee($employeeId, $basic + $allowance, $periodEnd)
             : $this->zeroBpjs();
         $bpjsEmployeeDeduction = $this->bpjsCalculation->employeeDeductionTotal($bpjs);
 
-        $gross = round($basic + $allowance + $overtimePay + $adjustmentEarning, 2);
+        $gross = round($basic + $allowance + $overtimePay + $adjustmentEarning + $reimbursementEarning, 2);
+
+        $pph21 = $periodEnd !== null
+            ? $this->pph21Calculation->calculateForEmployee($employeeId, $gross, $bpjsEmployeeDeduction, $periodEnd)
+            : $this->zeroPph21();
+        $pph21Amount = round((float) ($pph21['pph21_amount'] ?? 0), 2);
+
         $totalDeductions = round(
             $defaultDeduction + $unpaidLeaveDeduction + $attendanceDeduction + $loanDeduction
-            + $cashAdvanceDeduction + $adjustmentDeduction + $bpjsEmployeeDeduction,
+            + $cashAdvanceDeduction + $adjustmentDeduction + $bpjsEmployeeDeduction + $pph21Amount,
             2,
         );
         $net = round($gross - $totalDeductions, 2);
@@ -175,9 +196,12 @@ class PayrollCalculationService
             'remainingCashAdvanceBalance' => $remainingCashAdvanceBalance,
             'adjustmentEarning' => $adjustmentEarning,
             'adjustmentDeduction' => $adjustmentDeduction,
+            'reimbursementEarning' => $reimbursementEarning,
+            'remainingReimbursement' => $remainingReimbursement,
             'defaultDeduction' => $defaultDeduction,
             'bpjs' => $bpjs,
             'bpjsEmployeeDeductionTotal' => $bpjsEmployeeDeduction,
+            'pph21' => $pph21,
             'grossSalary' => $gross,
             'totalDeductions' => $totalDeductions,
             'netSalary' => $net,
@@ -212,6 +236,11 @@ class PayrollCalculationService
             'bpjs_jp_company' => $bpjs['bpjs_jp_company'],
             'bpjs_jkk_company' => $bpjs['bpjs_jkk_company'],
             'bpjs_jkm_company' => $bpjs['bpjs_jkm_company'],
+            'taxable_income' => (float) ($pph21['taxable_income'] ?? 0),
+            'annual_taxable_income' => (float) ($pph21['annual_taxable_income'] ?? 0),
+            'pph21_amount' => $pph21Amount,
+            'reimbursement_earning' => $reimbursementEarning,
+            'remaining_reimbursement' => $remainingReimbursement,
             'gross_salary' => $gross,
             'total_deductions' => $totalDeductions,
             'net_salary' => $net,
@@ -233,6 +262,23 @@ class PayrollCalculationService
             'bpjs_jp_company' => 0.0,
             'bpjs_jkk_company' => 0.0,
             'bpjs_jkm_company' => 0.0,
+        ];
+    }
+
+    /**
+     * @return array<string, float|string|null>
+     */
+    private function zeroPph21(): array
+    {
+        return [
+            'taxable_income' => 0.0,
+            'annual_taxable_income' => 0.0,
+            'annual_pkp' => 0.0,
+            'annual_pph21' => 0.0,
+            'pph21_amount' => 0.0,
+            'ptkp_status' => null,
+            'ptkp_amount' => 0.0,
+            'npwp_number' => null,
         ];
     }
 
