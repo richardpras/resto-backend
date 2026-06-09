@@ -19,7 +19,6 @@ class ReportController extends Controller
             'accountId' => ['required', 'string'],
             'from' => ['nullable', 'date_format:Y-m-d'],
             'to' => ['nullable', 'date_format:Y-m-d'],
-            'outlet' => ['nullable', 'string'],
             'outletId' => ['nullable', 'integer', 'min:1'],
             'tenantId' => ['nullable', 'integer'],
         ]);
@@ -32,7 +31,7 @@ class ReportController extends Controller
             $v['accountId'],
             $v['from'] ?? null,
             $v['to'] ?? null,
-            $v['outlet'] ?? null,
+            isset($v['outletId']) ? (int) $v['outletId'] : null,
             isset($v['tenantId']) ? (int) $v['tenantId'] : null,
         );
 
@@ -44,7 +43,6 @@ class ReportController extends Controller
         $v = $request->validate([
             'from' => ['nullable', 'date_format:Y-m-d'],
             'to' => ['nullable', 'date_format:Y-m-d'],
-            'outlet' => ['nullable', 'string'],
             'outletId' => ['nullable', 'integer', 'min:1'],
             'tenantId' => ['nullable', 'integer'],
         ]);
@@ -56,7 +54,7 @@ class ReportController extends Controller
         $data = $this->accountingService->buildProfitLossReport(
             $v['from'] ?? null,
             $v['to'] ?? null,
-            $v['outlet'] ?? null,
+            isset($v['outletId']) ? (int) $v['outletId'] : null,
             isset($v['tenantId']) ? (int) $v['tenantId'] : null,
         );
 
@@ -67,7 +65,6 @@ class ReportController extends Controller
     {
         $v = $request->validate([
             'to' => ['nullable', 'date_format:Y-m-d'],
-            'outlet' => ['nullable', 'string'],
             'outletId' => ['nullable', 'integer', 'min:1'],
             'tenantId' => ['nullable', 'integer'],
         ]);
@@ -78,7 +75,7 @@ class ReportController extends Controller
 
         $data = $this->accountingService->buildBalanceSheetReport(
             $v['to'] ?? null,
-            $v['outlet'] ?? null,
+            isset($v['outletId']) ? (int) $v['outletId'] : null,
             isset($v['tenantId']) ? (int) $v['tenantId'] : null,
         );
 

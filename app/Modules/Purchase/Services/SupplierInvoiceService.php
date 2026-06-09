@@ -22,6 +22,7 @@ final class SupplierInvoiceService
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly PurchaseAuditService $purchaseAuditService,
         private readonly ThreeWayMatchService $threeWayMatchService,
+        private readonly ProcurementPostingService $procurementPostingService,
     ) {}
 
     /** @param array<string,mixed> $data */
@@ -186,6 +187,8 @@ final class SupplierInvoiceService
                 'number' => $fresh->number,
                 'outstandingAmount' => (float) $fresh->outstanding_amount,
             ]);
+
+            $this->procurementPostingService->attemptAutoPostInvoice($fresh, $actor);
 
             return $fresh;
         });

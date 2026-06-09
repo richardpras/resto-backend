@@ -18,18 +18,17 @@ class JournalPostingService
     public function __construct(
         private readonly AccountingPeriodService $periodService,
         private readonly PosAuditLogService $auditLogService,
+        private readonly AccountingPostingIntegrityService $integrityService,
+        private readonly AccountingPostingFailureService $failureService,
+        private readonly AccountingSettingsService $accountingSettingsService,
+        private readonly RevenuePostingGuardService $revenuePostingGuard,
     ) {}
 
     /** @param array<string,mixed> $payload */
     public function post(array $payload): Journal
     {
         $lines = $payload['lines'] ?? [];
-        $this->assertBalancedLines($lines);
-        $this->periodService->assertDateOpen(
-            (string) $payload['journal_date'],
-            isset($payload['tenant_id']) ? (int) $payload['tenant_id'] : null,
-            isset($payload['outlet_id']) ? (int) $payload['outlet_id'] : null
-        );
+        $this->integrityService->validateBeforePost($payload);
 
         return DB::transaction(function () use ($payload, $lines): Journal {
             $scope = (string) ($payload['scope'] ?? (($payload['source_type'] ?? 'manual').'.'.($payload['source_id'] ?? 'na')));
@@ -194,36 +193,62 @@ class JournalPostingService
         if ($sales <= 0) {
             return null;
         }
-        $cash = $this->resolveAccount('cash_bank', ['1100'], ['asset'], $outletId);
-        $revenue = $this->resolveAccount('sales_revenue', ['4100'], ['revenue'], $outletId);
-        if ($cash === null || $revenue === null) {
+
+        if ($this->accountingSettingsService->isShiftCloseMode($tenantId, $outletId)) {
             return null;
         }
 
-        $lines = [
-            ['account_id' => $cash->id, 'debit' => $sales, 'credit' => 0, 'memo' => 'Payment completion'],
-            ['account_id' => $revenue->id, 'debit' => 0, 'credit' => $sales, 'memo' => 'Revenue recognition'],
-        ];
-        if ($cogs > 0) {
-            $cogsAcc = $this->resolveAccount('cogs', ['5100'], ['expense'], $outletId);
-            $inventory = $this->resolveAccount('inventory', ['1300'], ['asset'], $outletId);
-            if ($cogsAcc !== null && $inventory !== null) {
-                $lines[] = ['account_id' => $cogsAcc->id, 'debit' => $cogs, 'credit' => 0, 'memo' => 'COGS recognition'];
-                $lines[] = ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $cogs, 'memo' => 'Inventory reduction'];
-            }
+        $duplicate = $this->revenuePostingGuard->shouldSkipDuplicate($orderId, 'order_payment', (string) $orderId, $outletId);
+        if ($duplicate !== null) {
+            return $duplicate;
         }
 
-        return $this->post([
-            'tenant_id' => $tenantId,
-            'outlet_id' => $outletId,
-            'source_type' => 'order_payment',
-            'source_id' => $orderId,
-            'journal_date' => now()->toDateString(),
-            'description' => 'Auto posting from order payment completion',
-            'posting_key' => 'order-payment-'.$orderId,
-            'scope' => 'order_payment.'.$orderId,
-            'lines' => $lines,
-        ]);
+        try {
+            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100'], ['asset'], $outletId);
+            $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100'], ['revenue'], $outletId);
+
+            $lines = [
+                ['account_id' => $cash->id, 'debit' => $sales, 'credit' => 0, 'memo' => 'Payment completion'],
+                ['account_id' => $revenue->id, 'debit' => 0, 'credit' => $sales, 'memo' => 'Revenue recognition'],
+            ];
+            if ($cogs > 0) {
+                $cogsAcc = $this->integrityService->resolveAccount('cogs', ['5100'], ['expense'], $outletId);
+                $inventory = $this->integrityService->resolveAccount('inventory', ['1300'], ['asset'], $outletId);
+                if ($cogsAcc !== null && $inventory !== null) {
+                    $lines[] = ['account_id' => $cogsAcc->id, 'debit' => $cogs, 'credit' => 0, 'memo' => 'COGS recognition'];
+                    $lines[] = ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $cogs, 'memo' => 'Inventory reduction'];
+                }
+            }
+
+            $payload = [
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'order_payment',
+                'source_id' => $orderId,
+                'journal_date' => now()->toDateString(),
+                'description' => 'Auto posting from order payment completion',
+                'posting_key' => 'order-payment-'.$orderId,
+                'scope' => 'order_payment.'.$orderId,
+                'lines' => $lines,
+            ];
+
+            return $this->post($payload);
+        } catch (\Throwable $e) {
+            $this->recordAutoPostFailure('order_payment', $orderId, $outletId, $e, [
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'order_payment',
+                'source_id' => $orderId,
+                'journal_date' => now()->toDateString(),
+                'description' => 'Auto posting from order payment completion',
+                'posting_key' => 'order-payment-'.$orderId,
+                'scope' => 'order_payment.'.$orderId,
+                'sales' => $sales,
+                'cogs' => $cogs,
+            ]);
+
+            return null;
+        }
     }
 
     public function postForInventoryMovement(string $type, int $movementId, int $tenantId, ?int $outletId, float $amount): ?Journal
@@ -231,31 +256,40 @@ class JournalPostingService
         if ($amount <= 0) {
             return null;
         }
-        $inventory = $this->resolveAccount('inventory', ['1300'], ['asset'], $outletId);
-        $counter = $type === 'waste'
-            ? $this->resolveAccount('waste_expense', ['5200'], ['expense'], $outletId)
-            : $this->resolveAccount('stock_adjustment', ['5300'], ['expense', 'revenue'], $outletId);
-        if ($inventory === null || $counter === null) {
+
+        try {
+            $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
+            $counter = $type === 'waste'
+                ? $this->integrityService->resolveAccountOrFail('waste_expense', ['5200'], ['expense'], $outletId)
+                : $this->integrityService->resolveAccountOrFail('stock_adjustment', ['5300'], ['expense', 'revenue'], $outletId);
+
+            $isCreditInventory = in_array($type, ['waste', 'sale'], true);
+            $lines = [
+                ['account_id' => $counter->id, 'debit' => $isCreditInventory ? $amount : 0, 'credit' => $isCreditInventory ? 0 : $amount, 'memo' => 'Inventory '.$type],
+                ['account_id' => $inventory->id, 'debit' => $isCreditInventory ? 0 : $amount, 'credit' => $isCreditInventory ? $amount : 0, 'memo' => 'Inventory '.$type],
+            ];
+
+            return $this->post([
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'inventory_'.$type,
+                'source_id' => $movementId,
+                'journal_date' => now()->toDateString(),
+                'description' => 'Auto posting from inventory '.$type,
+                'posting_key' => 'inventory-'.$type.'-'.$movementId,
+                'scope' => 'inventory_'.$type.'.'.$movementId,
+                'lines' => $lines,
+            ]);
+        } catch (\Throwable $e) {
+            $this->recordAutoPostFailure('inventory_'.$type, $movementId, $outletId, $e, [
+                'type' => $type,
+                'amount' => $amount,
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+            ]);
+
             return null;
         }
-
-        $isCreditInventory = in_array($type, ['waste', 'sale'], true);
-        $lines = [
-            ['account_id' => $counter->id, 'debit' => $isCreditInventory ? $amount : 0, 'credit' => $isCreditInventory ? 0 : $amount, 'memo' => 'Inventory '.$type],
-            ['account_id' => $inventory->id, 'debit' => $isCreditInventory ? 0 : $amount, 'credit' => $isCreditInventory ? $amount : 0, 'memo' => 'Inventory '.$type],
-        ];
-
-        return $this->post([
-            'tenant_id' => $tenantId,
-            'outlet_id' => $outletId,
-            'source_type' => 'inventory_'.$type,
-            'source_id' => $movementId,
-            'journal_date' => now()->toDateString(),
-            'description' => 'Auto posting from inventory '.$type,
-            'posting_key' => 'inventory-'.$type.'-'.$movementId,
-            'scope' => 'inventory_'.$type.'.'.$movementId,
-            'lines' => $lines,
-        ]);
     }
 
     public function postForCashVariance(int $sessionId, int $tenantId, ?int $outletId, float $variance): ?Journal
@@ -263,73 +297,98 @@ class JournalPostingService
         if (abs($variance) < 0.00001) {
             return null;
         }
-        $cash = $this->resolveAccount('cash_bank', ['1100'], ['asset'], $outletId);
-        $overShort = $this->resolveAccount('cash_variance', ['5400'], ['expense', 'revenue'], $outletId);
-        if ($cash === null || $overShort === null) {
+
+        try {
+            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100'], ['asset'], $outletId);
+            $overShort = $this->integrityService->resolveAccountOrFail('cash_variance', ['5400'], ['expense', 'revenue'], $outletId);
+            $abs = abs($variance);
+            $isShort = $variance < 0;
+            $lines = [
+                ['account_id' => $overShort->id, 'debit' => $isShort ? $abs : 0, 'credit' => $isShort ? 0 : $abs, 'memo' => 'POS cash variance'],
+                ['account_id' => $cash->id, 'debit' => $isShort ? 0 : $abs, 'credit' => $isShort ? $abs : 0, 'memo' => 'POS cash variance'],
+            ];
+
+            return $this->post([
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'pos_cash_variance',
+                'source_id' => $sessionId,
+                'journal_date' => now()->toDateString(),
+                'description' => 'Auto posting from POS cash variance',
+                'posting_key' => 'pos-cash-variance-'.$sessionId,
+                'scope' => 'pos_cash_variance.'.$sessionId,
+                'lines' => $lines,
+            ]);
+        } catch (\Throwable $e) {
+            $this->recordAutoPostFailure('pos_cash_variance', $sessionId, $outletId, $e, [
+                'variance' => $variance,
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+            ]);
+
             return null;
         }
-        $abs = abs($variance);
-        $isShort = $variance < 0;
-        $lines = [
-            ['account_id' => $overShort->id, 'debit' => $isShort ? $abs : 0, 'credit' => $isShort ? 0 : $abs, 'memo' => 'POS cash variance'],
-            ['account_id' => $cash->id, 'debit' => $isShort ? 0 : $abs, 'credit' => $isShort ? $abs : 0, 'memo' => 'POS cash variance'],
-        ];
-
-        return $this->post([
-            'tenant_id' => $tenantId,
-            'outlet_id' => $outletId,
-            'source_type' => 'pos_cash_variance',
-            'source_id' => $sessionId,
-            'journal_date' => now()->toDateString(),
-            'description' => 'Auto posting from POS cash variance',
-            'posting_key' => 'pos-cash-variance-'.$sessionId,
-            'scope' => 'pos_cash_variance.'.$sessionId,
-            'lines' => $lines,
-        ]);
     }
 
-    /** @param list<array{account_id:int|string,debit:float|int|string,credit:float|int|string,memo?:string|null,meta?:array<string,mixed>|null}> $lines */
-    private function assertBalancedLines(array $lines): void
-    {
-        if (count($lines) < 2) {
-            throw ValidationException::withMessages(['lines' => 'A journal must have at least two lines.']);
+    public function postForShiftClose(
+        int $tenantId,
+        ?int $outletId,
+        float $totalSales,
+        float $totalCogs,
+        string $batchKey,
+    ): ?Journal {
+        if ($totalSales <= 0) {
+            return null;
         }
-        $debit = 0.0;
-        $credit = 0.0;
-        foreach ($lines as $line) {
-            $d = (float) $line['debit'];
-            $c = (float) $line['credit'];
-            if ($d < 0 || $c < 0 || ($d > 0 && $c > 0)) {
-                throw ValidationException::withMessages(['lines' => 'Invalid debit/credit line values.']);
-            }
-            $debit += $d;
-            $credit += $c;
-        }
-        if (round($debit, 2) !== round($credit, 2) || $debit <= 0) {
-            throw new UnprocessableEntityHttpException('Journal is not balanced.');
+
+        try {
+            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100', '1001'], ['asset'], $outletId);
+            $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100', '4001'], ['revenue'], $outletId);
+            $cogsAcc = $this->integrityService->resolveAccountOrFail('cogs', ['5100'], ['expense'], $outletId);
+            $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
+
+            $lines = [
+                ['account_id' => $cash->id, 'debit' => $totalSales, 'credit' => 0, 'memo' => 'Cash received from paid POS orders'],
+                ['account_id' => $revenue->id, 'debit' => 0, 'credit' => $totalSales, 'memo' => 'Revenue recognized on shift close'],
+                ['account_id' => $cogsAcc->id, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS recognized on shift close'],
+                ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction on shift close'],
+            ];
+
+            return $this->post([
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'shift_close',
+                'source_id' => abs(crc32($batchKey)),
+                'journal_date' => now()->toDateString(),
+                'description' => 'POS shift close posting',
+                'posting_key' => 'shift-close-'.$batchKey,
+                'scope' => 'shift_close.'.$outletId,
+                'lines' => $lines,
+            ]);
+        } catch (\Throwable $e) {
+            $this->recordAutoPostFailure('shift_close', (int) crc32($batchKey), $outletId, $e, [
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'total_sales' => $totalSales,
+                'total_cogs' => $totalCogs,
+                'batch_key' => $batchKey,
+            ]);
+
+            return null;
         }
     }
 
-    private function resolveAccount(string $category, array $fallbackCodes, array $types, ?int $outletId): ?Account
+    /** @param array<string,mixed>|null $payload */
+    private function recordAutoPostFailure(string $sourceType, int $sourceId, ?int $outletId, \Throwable $e, ?array $payload): void
     {
-        $query = Account::query()->whereIn('type', $types)->where('is_active', true);
-        if ($outletId !== null && $outletId > 0) {
-            $query->where(function ($q) use ($outletId) {
-                $q->where('outlet_id', $outletId)->orWhereNull('outlet_id');
-            });
-        }
-        $byCategory = (clone $query)->where('category', $category)->orderByRaw('outlet_id is null')->first();
-        if ($byCategory !== null) {
-            return $byCategory;
-        }
-        foreach ($fallbackCodes as $code) {
-            $candidate = (clone $query)->where('code', $code)->orderByRaw('outlet_id is null')->first();
-            if ($candidate !== null) {
-                return $candidate;
-            }
-        }
-
-        return (clone $query)->orderBy('id')->first();
+        $this->failureService->record(
+            $sourceType,
+            $sourceId,
+            $outletId,
+            $this->integrityService->classifyError($e),
+            $e->getMessage(),
+            $payload,
+        );
     }
 
     private function generateJournalNo(): string

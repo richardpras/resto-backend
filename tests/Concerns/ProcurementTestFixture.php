@@ -116,9 +116,11 @@ trait ProcurementTestFixture
     protected function seedAccountingAccounts(): void
     {
         DB::table('accounts')->insert([
-            ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset', 'created_at' => now(), 'updated_at' => now()],
-            ['code' => '1300', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset', 'created_at' => now(), 'updated_at' => now()],
-            ['code' => '2100', 'name' => 'Accounts Payable', 'type' => 'liability', 'subtype' => 'short_term_liability', 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'cash_bank', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '1110', 'name' => 'Bank', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'bank', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '1300', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'inventory', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '2100', 'name' => 'Accounts Payable', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'accounts_payable', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '2140', 'name' => 'GRNI', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'grni', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
         ]);
     }
 

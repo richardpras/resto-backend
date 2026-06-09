@@ -23,14 +23,14 @@ final class PurchaseScopeService
         return $outletId;
     }
 
-    /** @return list<int>|null null = unrestricted (view all outlets) */
+    /** @return list<int>|null null = unrestricted (super admin) */
     public function allowedOutletIds(?User $actor): ?array
     {
         if ($actor === null) {
             return null;
         }
 
-        if ($actor->hasPermission('outlets.view_all') || $actor->hasPermission('dashboard.view_all_outlets')) {
+        if ($actor->isSuperAdmin()) {
             return null;
         }
 

@@ -90,4 +90,16 @@ class PurchaseInvoice extends Model
     {
         return $this->hasMany(ProcurementMatchResult::class, 'invoice_id');
     }
+
+    public function supplierPaymentAllocations(): HasMany
+    {
+        return $this->hasMany(SupplierPaymentAllocation::class, 'purchase_invoice_id');
+    }
+
+    public function latestProcurementPosting(): HasOne
+    {
+        return $this->hasOne(ProcurementPosting::class, 'source_id')
+            ->where('procurement_postings.source_type', ProcurementPosting::SOURCE_INVOICE)
+            ->latestOfMany();
+    }
 }

@@ -116,6 +116,50 @@ final class PurchaseAuditService
     }
 
     /** @param array<string,mixed>|null $payload */
+    public function logProcurementAnalytics(string $action, ?User $actor = null, mixed $outletId = null, ?array $payload = null): void
+    {
+        $event = match ($action) {
+            'summary_viewed' => 'procurement_analytics_viewed',
+            'supplier_performance_viewed' => 'supplier_performance_viewed',
+            'spend_analysis_viewed' => 'spend_analysis_viewed',
+            'posting_analytics_viewed' => 'posting_analytics_viewed',
+            default => 'procurement_analytics_'.$action,
+        };
+
+        $this->auditLogService->log(
+            $event,
+            'procurement_analytics',
+            0,
+            is_numeric($outletId) ? (int) $outletId : null,
+            $actor,
+            $payload
+        );
+    }
+
+    /** @param array<string,mixed>|null $payload */
+    public function logProcurementPosting(string $action, int $postingId, ?int $outletId, ?User $actor = null, ?array $payload = null): void
+    {
+        $event = match ($action) {
+            'created' => 'procurement_posting_created',
+            'reversed' => 'procurement_posting_reversed',
+            'failed' => 'posting_failed',
+            'grn_posted_to_accounting' => 'grn_posted_to_accounting',
+            'invoice_posted_to_accounting' => 'invoice_posted_to_accounting',
+            'payment_posted_to_accounting' => 'payment_posted_to_accounting',
+            default => 'procurement_posting_'.$action,
+        };
+
+        $this->auditLogService->log(
+            $event,
+            'procurement_posting',
+            $postingId,
+            $outletId,
+            $actor,
+            $payload
+        );
+    }
+
+    /** @param array<string,mixed>|null $payload */
     public function logProcurementMatch(string $action, int $invoiceId, ?int $outletId, ?User $actor = null, ?array $payload = null): void
     {
         $event = match ($action) {

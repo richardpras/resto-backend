@@ -5,13 +5,17 @@ namespace App\Modules\Payments\Services;
 use App\Jobs\Payments\ProcessPaymentWebhookReceiptJob;
 use App\Jobs\Payments\ReconcilePaymentTransactionJob;
 use App\Models\Modules\Accounting\Domain\Account;
+use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderSplit;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\Modules\Payments\Domain\PaymentTransactionEvent;
 use App\Models\Modules\Payments\Domain\PaymentWebhookReceipt;
 use App\Models\User;
+use App\Modules\Accounting\Services\AccountingRefundPostingService;
+use App\Modules\Accounting\Services\AccountingSettingsService;
 use App\Modules\Accounting\Services\JournalPostingService;
+use App\Modules\Accounting\Services\RevenuePostingGuardService;
 use App\Modules\GiftCards\Services\GiftCardSettlementHookService;
 use App\Modules\Payments\Events\PaymentStatusChanged;
 use App\Modules\Payments\Registry\PaymentGatewayRegistry;
@@ -39,6 +43,9 @@ class PaymentGatewayService
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly GatewayProviderResolutionService $gatewayProviderResolutionService,
         private readonly OutletPaymentMethodConfigService $outletPaymentMethodConfigService,
+        private readonly AccountingRefundPostingService $accountingRefundPostingService,
+        private readonly AccountingSettingsService $accountingSettingsService,
+        private readonly RevenuePostingGuardService $revenuePostingGuard,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -352,6 +359,7 @@ class PaymentGatewayService
                     $this->recordEvent((int) $transaction->id, 'refunded', [
                         'source' => 'reconcile',
                     ]);
+                    $this->accountingRefundPostingService->postRefundForPaymentTransaction($transaction->fresh(), null);
                 }
                 $this->emitPaymentStatusChanged($transaction);
             }
@@ -625,6 +633,7 @@ class PaymentGatewayService
                 $this->recordEvent((int) $updated->id, 'refunded', [
                     'source' => 'webhook',
                 ]);
+                $this->accountingRefundPostingService->postRefundForPaymentTransaction($updated->fresh(), null);
             }
 
             if ($currentStatus !== 'paid' && $nextStatus === 'paid') {
@@ -755,6 +764,21 @@ class PaymentGatewayService
                 'outlet' => ['Cannot post payment journal: order and payment transaction both lack a valid outlet_id.'],
             ]);
         }
+
+        if ($this->accountingSettingsService->isShiftCloseMode((int) ($order->tenant_id ?? 0), $outletForJournal)) {
+            return;
+        }
+
+        $duplicate = $this->revenuePostingGuard->shouldSkipDuplicate(
+            (int) $order->id,
+            'payment_transaction',
+            (string) $transaction->id,
+            $outletForJournal,
+        );
+        if ($duplicate !== null) {
+            return;
+        }
+
         if ($orderOutlet !== null && $txOutlet !== null && $orderOutlet !== $txOutlet) {
             Log::warning('payment journal: order.outlet_id differs from payment_transactions.outlet_id; using order outlet for journal', [
                 'order_id' => (int) $order->id,

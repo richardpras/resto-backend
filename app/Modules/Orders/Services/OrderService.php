@@ -3,8 +3,6 @@
 namespace App\Modules\Orders\Services;
 
 use App\Models\Modules\Accounting\Domain\Account;
-use App\Models\Modules\Accounting\Domain\Journal;
-use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
@@ -13,6 +11,8 @@ use App\Models\Modules\Orders\Domain\PosEventLog;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\User;
+use App\Modules\Accounting\Services\AccountingSettingsService;
+use App\Modules\Accounting\Services\AccountingVoidPostingService;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
 use App\Modules\Kitchen\Services\KitchenTicketService;
@@ -44,6 +44,8 @@ class OrderService
         private readonly PrinterRoutingService $printerRoutingService,
         private readonly MemberTransactionRecorder $memberTransactionRecorder,
         private readonly OrderMemberAttachmentService $orderMemberAttachmentService,
+        private readonly AccountingSettingsService $accountingSettingsService,
+        private readonly AccountingVoidPostingService $accountingVoidPostingService,
     ) {}
 
     /**
@@ -413,6 +415,13 @@ class OrderService
         }
 
         $this->orderRepository->update($order, ['status' => $status]);
+        if ($status === 'cancelled') {
+            $this->accountingVoidPostingService->voidPostedOrderCancellation(
+                (int) $order->id,
+                $order->outlet_id !== null ? (int) $order->outlet_id : null,
+                $user,
+            );
+        }
         if (in_array($status, ['confirmed', 'completed'], true)) {
             $this->printerRoutingService->queueKitchenTicketsForOrder($order->fresh(['items']));
             $this->kitchenTicketService->createFromOrder($order->fresh(['items']));
@@ -487,6 +496,17 @@ class OrderService
         ?string $cogsAccountCode = null,
         ?string $inventoryAccountCode = null
     ): array {
+        if ($this->accountingSettingsService->isRealtimeMode($tenantId, $outletId)) {
+            return [
+                'orderCount' => 0,
+                'totalSales' => 0.0,
+                'totalCogs' => 0.0,
+                'journalId' => null,
+                'skipped' => true,
+                'reason' => 'Revenue posting mode is realtime; shift close revenue posting skipped.',
+            ];
+        }
+
         return DB::transaction(function () use ($tenantId, $outletId, $cashAccountCode, $revenueAccountCode, $cogsAccountCode, $inventoryAccountCode): array {
             $orders = Order::query()
                 ->where('payment_status', 'paid')
@@ -509,62 +529,22 @@ class OrderService
             $totalSales = (float) $orders->sum(fn (Order $order): float => (float) $order->paid_total);
             $totalCogs = $this->calculateCogsForOrders($orders);
 
-            $cashAccount = $this->resolveAccount($cashAccountCode, ['1100', '1001'], ['asset']);
-            $revenueAccount = $this->resolveAccount($revenueAccountCode, ['4100', '4001'], ['revenue']);
-            $cogsAccount = $this->resolveAccount($cogsAccountCode, ['5100'], ['expense'], 'cogs');
-            $inventoryAccount = $this->resolveAccount($inventoryAccountCode, ['1300'], ['asset']);
+            $journalOutletId = $this->resolveShiftCloseJournalOutletId($outletId, $orders);
+            $batchKey = now()->format('YmdHis').'-'.$journalOutletId;
 
-            if ($cashAccount === null || $revenueAccount === null || $cogsAccount === null || $inventoryAccount === null) {
+            $journal = $this->journalPostingService->postForShiftClose(
+                (int) ($tenantId ?? 0),
+                $journalOutletId,
+                round($totalSales, 2),
+                round($totalCogs, 2),
+                $batchKey,
+            );
+
+            if ($journal === null) {
                 throw ValidationException::withMessages([
-                    'accounts' => ['Shift close posting requires mapped Cash, Revenue, COGS, and Inventory accounts.'],
+                    'accounts' => ['Shift close posting failed. Check accounting health for missing mappings or period lock.'],
                 ]);
             }
-
-            $journalOutletId = $this->resolveShiftCloseJournalOutletId($outletId, $orders);
-
-            $journal = Journal::query()->create([
-                'tenant_id' => $tenantId,
-                'outlet_id' => $journalOutletId,
-                'journal_no' => 'JRN-SHIFT-'.now()->format('YmdHis'),
-                'source_type' => 'shift_close',
-                'source_id' => now()->format('YmdHis'),
-                'journal_date' => now()->toDateString(),
-                'status' => 'posted',
-                'description' => 'POS shift close posting',
-            ]);
-
-            JournalEntry::query()->create([
-                'journal_id' => $journal->id,
-                'account_id' => $cashAccount->id,
-                'debit' => $totalSales,
-                'credit' => 0,
-                'memo' => 'Cash received from paid POS orders',
-                'line_no' => 1,
-            ]);
-            JournalEntry::query()->create([
-                'journal_id' => $journal->id,
-                'account_id' => $revenueAccount->id,
-                'debit' => 0,
-                'credit' => $totalSales,
-                'memo' => 'Revenue recognized on shift close',
-                'line_no' => 2,
-            ]);
-            JournalEntry::query()->create([
-                'journal_id' => $journal->id,
-                'account_id' => $cogsAccount->id,
-                'debit' => $totalCogs,
-                'credit' => 0,
-                'memo' => 'COGS recognized on shift close',
-                'line_no' => 3,
-            ]);
-            JournalEntry::query()->create([
-                'journal_id' => $journal->id,
-                'account_id' => $inventoryAccount->id,
-                'debit' => 0,
-                'credit' => $totalCogs,
-                'memo' => 'Inventory reduction on shift close',
-                'line_no' => 4,
-            ]);
 
             Order::query()
                 ->whereIn('id', $orders->pluck('id')->all())
@@ -901,18 +881,29 @@ class OrderService
 
     private function postOrderPaymentJournal(Order $order): void
     {
+        if ($this->accountingSettingsService->isShiftCloseMode(
+            (int) ($order->tenant_id ?? 0),
+            $order->outlet_id !== null ? (int) $order->outlet_id : null,
+        )) {
+            return;
+        }
+
         $sales = (float) $order->paid_total;
         $cogs = (float) DB::table('stock_movements')
             ->where('source_type', 'order_payment')
             ->where('source_id', (string) $order->code)
             ->sum('total_cost');
 
-        $this->journalPostingService->postForOrderPayment(
+        $journal = $this->journalPostingService->postForOrderPayment(
             (int) $order->id,
             (int) ($order->tenant_id ?? 0),
             $order->outlet_id !== null ? (int) $order->outlet_id : null,
             $sales,
             $cogs
         );
+
+        if ($journal !== null) {
+            Order::query()->where('id', $order->id)->update(['is_posted' => true]);
+        }
     }
 }

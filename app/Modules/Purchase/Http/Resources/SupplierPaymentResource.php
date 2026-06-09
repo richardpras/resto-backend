@@ -2,6 +2,7 @@
 
 namespace App\Modules\Purchase\Http\Resources;
 
+use App\Modules\Purchase\Services\ProcurementPostingStatusService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -33,6 +34,7 @@ class SupplierPaymentResource extends JsonResource
                 'allocatedAmount' => (float) $row->allocated_amount,
             ])->values(),
             'createdAt' => optional($this->created_at)->toISOString(),
+            'postingStatus' => app(ProcurementPostingStatusService::class)->forPayment($this->resource),
         ];
     }
 }

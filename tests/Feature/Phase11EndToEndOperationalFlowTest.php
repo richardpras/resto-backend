@@ -216,7 +216,9 @@ class Phase11EndToEndOperationalFlowTest extends TestCase
             'tenantId' => 1,
             'outletId' => (int) $outlet->id,
         ]);
-        $closeShift->assertOk()->assertJsonPath('data.orderCount', 1);
+        $closeShift->assertOk()
+            ->assertJsonPath('data.orderCount', 0)
+            ->assertJsonPath('data.skipped', true);
 
         $closeSession = $this->postJson("/api/v1/pos-sessions/{$sessionId}/close", [
             'closingCash' => 149000,
@@ -227,7 +229,8 @@ class Phase11EndToEndOperationalFlowTest extends TestCase
             ->assertJsonPath('data.cashVariance', 49000);
 
         $this->assertDatabaseHas('orders', ['id' => $orderId, 'is_posted' => true]);
-        $this->assertDatabaseHas('journals', ['source_type' => 'shift_close', 'outlet_id' => (int) $outlet->id]);
+        $this->assertDatabaseHas('journals', ['source_type' => 'order_payment', 'outlet_id' => (int) $outlet->id]);
+        $this->assertDatabaseMissing('journals', ['source_type' => 'shift_close', 'outlet_id' => (int) $outlet->id]);
         $this->assertDatabaseHas('journals', ['source_type' => 'pos_cash_variance', 'source_id' => (string) $sessionId]);
     }
 

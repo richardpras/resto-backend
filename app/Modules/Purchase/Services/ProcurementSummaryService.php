@@ -17,6 +17,7 @@ final class ProcurementSummaryService
     public function __construct(
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly AccountsPayableSummaryService $accountsPayableSummaryService,
+        private readonly ProcurementPostingService $procurementPostingService,
     ) {}
 
     /** @return array<string,int> */
@@ -60,6 +61,8 @@ final class ProcurementSummaryService
         $matchRate = $totalMatchResults > 0
             ? round(($totalMatchedInvoices / $totalMatchResults) * 100, 2)
             : 0.0;
+
+        $postingMetrics = $this->procurementPostingService->summaryMetrics($actor, $requestedOutletId);
 
         return [
             'totalSuppliers' => Supplier::query()->count(),
@@ -108,6 +111,12 @@ final class ProcurementSummaryService
             'mismatchInvoices' => $mismatchCount,
             'blockedInvoices' => $blockedCount,
             'matchRate' => $matchRate,
+            'postedGrnValue' => $postingMetrics['postedGrnValue'],
+            'postedInvoiceValue' => $postingMetrics['postedInvoiceValue'],
+            'postedPaymentValue' => $postingMetrics['postedPaymentValue'],
+            'unpostedGrnValue' => $postingMetrics['unpostedGrnValue'],
+            'unpostedInvoiceValue' => $postingMetrics['unpostedInvoiceValue'],
+            'unpostedPaymentValue' => $postingMetrics['unpostedPaymentValue'],
         ];
     }
 }

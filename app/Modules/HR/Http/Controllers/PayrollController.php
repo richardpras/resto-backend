@@ -125,19 +125,8 @@ class PayrollController extends Controller
 
     public function postJournal(int $id): JsonResponse
     {
-        $journal = $this->postingService->postRunToJournal(
-            runId: $id,
-            actorUserId: (int) request()->user()->id,
-            cashAccountCode: (string) request()->input('cashAccountCode', '1001'),
-            salaryExpenseAccountCode: (string) request()->input('salaryExpenseAccountCode', '5001'),
-        );
-
         return response()->json([
-            'message' => 'Payroll run posted to journal successfully.',
-            'data' => [
-                'journalId' => (int) $journal->id,
-                'journalNo' => $journal->journal_no,
-            ],
-        ]);
+            'message' => 'Legacy posting retired. Use Payroll V2 Posting.',
+        ], Response::HTTP_GONE);
     }
 }

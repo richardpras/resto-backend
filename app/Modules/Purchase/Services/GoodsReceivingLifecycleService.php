@@ -20,6 +20,7 @@ final class GoodsReceivingLifecycleService
         private readonly PurchaseOrderLifecycleService $purchaseOrderLifecycleService,
         private readonly ReceivingProgressService $receivingProgressService,
         private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
+        private readonly ProcurementPostingService $procurementPostingService,
     ) {}
 
     /** @param array<string,mixed> $data */
@@ -191,6 +192,8 @@ final class GoodsReceivingLifecycleService
                 'number' => $fresh->number,
                 'purchaseOrderId' => $purchaseOrder->id,
             ]);
+
+            $this->procurementPostingService->attemptAutoPostGoodsReceipt($fresh, $actor);
 
             return $fresh;
         });

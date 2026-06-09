@@ -6,6 +6,7 @@ use App\Models\Supplier;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class SupplierPayment extends Model
 {
@@ -48,5 +49,12 @@ class SupplierPayment extends Model
     public function allocations(): HasMany
     {
         return $this->hasMany(SupplierPaymentAllocation::class);
+    }
+
+    public function latestProcurementPosting(): HasOne
+    {
+        return $this->hasOne(ProcurementPosting::class, 'source_id')
+            ->where('procurement_postings.source_type', ProcurementPosting::SOURCE_SUPPLIER_PAYMENT)
+            ->latestOfMany();
     }
 }

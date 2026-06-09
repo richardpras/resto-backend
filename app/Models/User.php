@@ -88,6 +88,13 @@ class User extends Authenticatable
         return $this->permissions()->whereIn('code', $candidates)->exists();
     }
 
+    public function isSuperAdmin(): bool
+    {
+        return $this->roles()
+            ->whereRaw('LOWER(name) = ?', ['super_admin'])
+            ->exists();
+    }
+
     public function employee()
     {
         return $this->hasOne(Employee::class);

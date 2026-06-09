@@ -7,6 +7,7 @@ use App\Models\Modules\Purchase\Domain\SupplierPayment;
 use App\Models\Modules\Purchase\Domain\SupplierPaymentAllocation;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Modules\Accounting\Services\AccountingVoidPostingService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
@@ -20,6 +21,8 @@ final class SupplierPaymentService
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly PurchaseAuditService $purchaseAuditService,
         private readonly ThreeWayMatchService $threeWayMatchService,
+        private readonly ProcurementPostingService $procurementPostingService,
+        private readonly AccountingVoidPostingService $accountingVoidPostingService,
     ) {}
 
     /** @param array<string,mixed> $data */
@@ -171,6 +174,8 @@ final class SupplierPaymentService
                 'allocatedAmount' => (float) $fresh->allocated_amount,
             ]);
 
+            $this->procurementPostingService->attemptAutoPostPayment($fresh, $actor);
+
             return $fresh;
         });
     }
@@ -193,6 +198,7 @@ final class SupplierPaymentService
                 foreach ($payment->allocations as $allocation) {
                     $this->reverseAllocationFromInvoice($allocation);
                 }
+                $this->accountingVoidPostingService->voidSupplierPayment($payment->fresh(), $actor);
             }
 
             $fresh = $payment->fresh()->load(['supplier', 'allocations.purchaseInvoice']);

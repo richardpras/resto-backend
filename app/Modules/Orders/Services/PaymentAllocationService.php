@@ -10,6 +10,7 @@ use App\Models\Modules\Orders\Domain\OrderSplitItem;
 use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\User;
+use App\Modules\Accounting\Services\AccountingVoidPostingService;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -26,6 +27,7 @@ class PaymentAllocationService
         private readonly PosTransitionValidator $transitionValidator,
         private readonly PosAuditLogService $auditLogService,
         private readonly OptimisticConcurrencyService $optimisticConcurrencyService,
+        private readonly AccountingVoidPostingService $accountingVoidPostingService,
     ) {}
 
     /**
@@ -49,7 +51,7 @@ class PaymentAllocationService
                     $normalized = $this->normalizePayments($payments);
                     $this->assertNoOverpayment($order, $normalized);
                     $beforePaymentStatus = (string) $order->payment_status;
-                    $this->storePayments($order, $normalized);
+                    $this->storePayments($order, $normalized, $user);
                     $this->recomputePaymentStatus($order);
                     $fresh = $this->orderRepository->findWithRelations($order->id);
                     if ($fresh !== null) {
@@ -154,7 +156,10 @@ class PaymentAllocationService
 
     public function recomputePaymentStatus(Order $order): void
     {
-        $paidTotal = (float) Payment::query()->where('order_id', $order->id)->sum('amount');
+        $paidTotal = (float) Payment::query()
+            ->where('order_id', $order->id)
+            ->where('status', '!=', 'void')
+            ->sum('amount');
         $paymentStatus = $paidTotal >= (float) $order->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
         $status = $paymentStatus === 'paid' && (string) $order->status !== 'cancelled'
             ? 'completed'
@@ -256,7 +261,7 @@ class PaymentAllocationService
     /**
      * @param array<int,array<string,mixed>> $payments
      */
-    private function storePayments(Order $order, array $payments): void
+    private function storePayments(Order $order, array $payments, User $user): void
     {
         $orderItems = OrderItem::query()
             ->where('order_id', $order->id)
@@ -287,11 +292,19 @@ class PaymentAllocationService
                 'order_split_id' => $split?->id,
                 'method' => $payment['method'],
                 'amount' => $payment['amount'],
-                'status' => $payment['status'],
+                'status' => $payment['status'] ?? 'paid',
                 'split_bill_label' => $payment['splitBillLabel'],
                 'split_bill_group' => $payment['splitBillGroup'],
                 'paid_at' => $payment['paidAt'] ?? now(),
             ]);
+
+            if ((string) ($payment['status'] ?? 'paid') === 'void') {
+                $this->accountingVoidPostingService->voidPosOrderPayment(
+                    (int) $order->id,
+                    $order->outlet_id !== null ? (int) $order->outlet_id : null,
+                    $user,
+                );
+            }
 
             foreach ($allocations as $allocation) {
                 OrderPaymentAllocation::query()->create([

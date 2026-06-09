@@ -2,6 +2,7 @@
 
 namespace App\Modules\Purchase\Http\Resources;
 
+use App\Modules\Purchase\Services\ProcurementPostingStatusService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -43,6 +44,7 @@ class PurchaseInvoiceResource extends JsonResource
             'matchQtyDifference' => $this->latestMatchResult !== null ? (float) $this->latestMatchResult->qty_difference : null,
             'matchPriceDifference' => $this->latestMatchResult !== null ? (float) $this->latestMatchResult->price_difference : null,
             'matchAmountDifference' => $this->latestMatchResult !== null ? (float) $this->latestMatchResult->amount_difference : null,
+            'postingStatus' => app(ProcurementPostingStatusService::class)->forInvoice($this->resource),
             'items' => $this->items->map(static fn ($item): array => [
                 'inventoryItemId' => (string) $item->ingredient_id,
                 'receivedQty' => (float) ($item->received_qty ?? 0),

@@ -267,10 +267,7 @@ class AccountingService
         if ($outletId !== null && $outletId > 0) {
             $accounts = $accounts->filter(fn (Account $a): bool => $a->outlet_id === null || (int) $a->outlet_id === $outletId)->values();
         }
-        $posted = $this->listPostedJournalsForReports($tenantId, null, null, $to);
-        if ($outletId !== null && $outletId > 0) {
-            $posted = $posted->filter(fn (Journal $j): bool => $j->outlet_id === null || (int) $j->outlet_id === $outletId)->values();
-        }
+        $posted = $this->listPostedJournalsForReports($tenantId, $outletId, null, $to);
 
         $rows = [];
         $totalDebit = 0.0;
@@ -316,14 +313,14 @@ class AccountingService
      *   closing: float
      * }
      */
-    public function buildLedgerReport(string $accountId, ?string $from, ?string $to, ?string $outlet = null, ?int $tenantId = null): array
+    public function buildLedgerReport(string $accountId, ?string $from, ?string $to, ?int $outletId = null, ?int $tenantId = null): array
     {
         $account = Account::query()->find($accountId);
         if (! $account instanceof Account) {
             return ['account' => null, 'rows' => [], 'opening' => 0.0, 'closing' => 0.0];
         }
 
-        $allPosted = $this->listPostedJournalsForReports($tenantId, $outlet, null, null);
+        $allPosted = $this->listPostedJournalsForReports($tenantId, $outletId, null, null);
         $opening = 0.0;
         if ($from !== null && $from !== '') {
             $openingRows = $allPosted->filter(function (Journal $j) use ($from): bool {
@@ -334,7 +331,7 @@ class AccountingService
             $opening = $this->accountBalance($account->id, $openingRows, $account->type);
         }
 
-        $periodPosted = $this->listPostedJournalsForReports($tenantId, $outlet, $from, $to);
+        $periodPosted = $this->listPostedJournalsForReports($tenantId, $outletId, $from, $to);
         $rows = [];
         $running = $opening;
 
@@ -385,10 +382,13 @@ class AccountingService
      *   netProfit: float
      * }
      */
-    public function buildProfitLossReport(?string $from, ?string $to, ?string $outlet = null, ?int $tenantId = null): array
+    public function buildProfitLossReport(?string $from, ?string $to, ?int $outletId = null, ?int $tenantId = null): array
     {
         $accounts = $this->listAccounts($tenantId);
-        $posted = $this->listPostedJournalsForReports($tenantId, $outlet, $from, $to);
+        if ($outletId !== null && $outletId > 0) {
+            $accounts = $accounts->filter(fn (Account $a): bool => $a->outlet_id === null || (int) $a->outlet_id === $outletId)->values();
+        }
+        $posted = $this->listPostedJournalsForReports($tenantId, $outletId, $from, $to);
 
         $revenue = [];
         $cogs = [];
@@ -441,10 +441,13 @@ class AccountingService
      *   balanced: bool
      * }
      */
-    public function buildBalanceSheetReport(?string $to, ?string $outlet = null, ?int $tenantId = null): array
+    public function buildBalanceSheetReport(?string $to, ?int $outletId = null, ?int $tenantId = null): array
     {
         $accounts = $this->listAccounts($tenantId);
-        $posted = $this->listPostedJournalsForReports($tenantId, $outlet, null, $to);
+        if ($outletId !== null && $outletId > 0) {
+            $accounts = $accounts->filter(fn (Account $a): bool => $a->outlet_id === null || (int) $a->outlet_id === $outletId)->values();
+        }
+        $posted = $this->listPostedJournalsForReports($tenantId, $outletId, null, $to);
 
         $group = function (string $subtype) use ($accounts, $posted): array {
             $rows = [];
@@ -467,7 +470,7 @@ class AccountingService
         $longLiab = $group('long_term_liability');
         $equity = $group('equity');
 
-        $pl = $this->buildProfitLossReport(null, $to, $outlet, $tenantId);
+        $pl = $this->buildProfitLossReport(null, $to, $outletId, $tenantId);
 
         $totalAssets = array_reduce($currentAssets, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0)
             + array_reduce($fixedAssets, fn (float $s, array $x): float => $s + (float) $x['amount'], 0.0);
@@ -485,7 +488,7 @@ class AccountingService
                 'totalEquity' => $totalEquity,
                 'difference' => $diff,
                 'tolerance' => 0.01,
-                'outlet' => $outlet,
+                'outletId' => $outletId,
                 'to' => $to,
                 'tenantId' => $tenantId,
             ]);
@@ -602,7 +605,7 @@ class AccountingService
      */
     private function listPostedJournalsForReports(
         ?int $tenantId,
-        ?string $outlet,
+        ?int $outletId,
         ?string $from,
         ?string $to
     ): Collection {
@@ -615,8 +618,10 @@ class AccountingService
         if ($tenantId !== null && $tenantId > 0) {
             $query->where('tenant_id', $tenantId);
         }
-        if ($outlet !== null && $outlet !== '' && $outlet !== 'all') {
-            $query->where('outlet', $outlet);
+        if ($outletId !== null && $outletId > 0) {
+            $query->where(function ($q) use ($outletId): void {
+                $q->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+            });
         }
         if ($from !== null && $from !== '') {
             $query->whereDate('journal_date', '>=', Carbon::parse($from)->toDateString());

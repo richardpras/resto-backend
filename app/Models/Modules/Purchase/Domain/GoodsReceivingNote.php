@@ -69,4 +69,11 @@ class GoodsReceivingNote extends Model
     {
         return $this->hasMany(PurchaseInvoice::class);
     }
+
+    public function latestProcurementPosting(): HasOne
+    {
+        return $this->hasOne(ProcurementPosting::class, 'source_id')
+            ->where('procurement_postings.source_type', ProcurementPosting::SOURCE_GRN)
+            ->latestOfMany();
+    }
 }

@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Models\Modules\Inventory\Domain\Ingredient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingRemediationFixture;
 use Tests\TestCase;
 
 class PosOrderFlowTest extends TestCase
 {
     use RefreshDatabase;
+    use AccountingRemediationFixture;
 
     public function test_confirm_order_creates_unpaid_order_and_kitchen_print_job(): void
     {
@@ -231,6 +233,8 @@ class PosOrderFlowTest extends TestCase
 
     public function test_shift_close_posts_sales_and_cogs_journal_then_marks_orders_posted(): void
     {
+        $this->setRevenuePostingMode(\App\Models\Modules\Accounting\Domain\AccountingSetting::MODE_SHIFT_CLOSE, 1);
+
         $ingredient = Ingredient::query()->create([
             'tenant_id' => 1,
             'outlet_id' => 1,
