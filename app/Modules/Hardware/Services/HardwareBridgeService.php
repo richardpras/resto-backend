@@ -293,6 +293,76 @@ class HardwareBridgeService
             ?? throw (new ModelNotFoundException)->setModel(HardwareBridgeDevice::class, [(string) $deviceId]);
     }
 
+    /**
+     * System/internal enqueue for print pipeline (no user outlet scope).
+     *
+     * @param  array<string,mixed>  $payload
+     * @return array{command: HardwareCommandLog, deduplicated: bool}
+     */
+    public function enqueueSystemCommand(
+        int $outletId,
+        string $deviceKey,
+        string $commandType,
+        string $idempotencyKey,
+        array $payload,
+        ?int $sessionId = null,
+    ): array {
+        $device = $this->resolveActiveDevice($outletId, $deviceKey);
+
+        $existing = HardwareCommandLog::query()
+            ->where('outlet_id', $outletId)
+            ->where('idempotency_key', trim($idempotencyKey))
+            ->first();
+        if ($existing instanceof HardwareCommandLog) {
+            return ['command' => $existing, 'deduplicated' => true];
+        }
+
+        $command = HardwareCommandLog::query()->create([
+            'outlet_id' => $outletId,
+            'hardware_bridge_device_id' => (int) $device->id,
+            'hardware_device_session_id' => $sessionId,
+            'command_type' => $commandType,
+            'status' => 'pending',
+            'idempotency_key' => trim($idempotencyKey),
+            'payload' => $payload,
+            'max_retries' => max(0, (int) config('hardware.default_max_retries', 3)),
+            'next_retry_at' => null,
+        ]);
+
+        event(new CommandReceived($outletId, (int) $command->id, (string) $command->command_type, HardwareRuntimeContract::toSpoolStatus((string) $command->status)));
+        $this->recordDeviceEvent($outletId, (int) $device->id, $sessionId, 'command_enqueued', [
+            'commandId' => (int) $command->id,
+            'commandType' => (string) $command->command_type,
+            'source' => 'system_print_bridge',
+        ]);
+
+        return ['command' => $command, 'deduplicated' => false];
+    }
+
+    public function resolveActiveDevice(int $outletId, string $deviceKey): HardwareBridgeDevice
+    {
+        return $this->resolveUsableDevice($outletId, $deviceKey);
+    }
+
+    public function resolveDefaultDeviceForOutlet(int $outletId): HardwareBridgeDevice
+    {
+        $device = HardwareBridgeDevice::query()
+            ->where('outlet_id', $outletId)
+            ->where('status', 'active')
+            ->whereNull('disabled_at')
+            ->whereNull('revoked_at')
+            ->orderByDesc('last_seen_at')
+            ->first();
+
+        if (! $device instanceof HardwareBridgeDevice) {
+            throw ValidationException::withMessages([
+                'deviceKey' => ['No active hardware bridge device is registered for this outlet.'],
+            ]);
+        }
+
+        return $device;
+    }
+
     /** @param array<string,mixed> $data @return array{command: HardwareCommandLog, deduplicated: bool} */
     public function enqueueCommand(User $user, array $data): array
     {

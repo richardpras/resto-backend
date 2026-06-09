@@ -2,6 +2,7 @@
 
 namespace App\Modules\Print\Services;
 
+use App\Models\Modules\Hardware\Domain\HardwareBridgeDevice;
 use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
@@ -151,17 +152,84 @@ class PrinterManagementService
     {
         $pending = (int) PrintJob::query()->where('outlet_id', $outletId)->where('status', 'pending')->count();
         $failed = (int) PrintJob::query()->where('outlet_id', $outletId)->where('status', 'failed')->count();
+        $awaitingAck = (int) PrintJob::query()
+            ->where('outlet_id', $outletId)
+            ->where('status', 'pending')
+            ->where('recovery_state', 'awaiting_ack')
+            ->count();
         $doneToday = (int) PrintJob::query()
             ->where('outlet_id', $outletId)
             ->where('status', 'done')
             ->whereDate('processed_at', now()->toDateString())
             ->count();
 
+        $bridgeConnected = HardwareBridgeDevice::query()
+            ->where('outlet_id', $outletId)
+            ->where('status', 'active')
+            ->whereNull('disabled_at')
+            ->whereNull('revoked_at')
+            ->where('last_seen_at', '>=', now()->subMinutes(max(1, (int) config('hardware.session_stale_after_minutes', 15))))
+            ->exists();
+
+        $profiles = PrinterProfile::query()
+            ->where('outlet_id', $outletId)
+            ->orderBy('name')
+            ->get();
+
+        $queues = $profiles->map(function (PrinterProfile $profile) use ($outletId): array {
+            $jobs = PrintJob::query()
+                ->where('outlet_id', $outletId)
+                ->where('printer_profile_id', (int) $profile->id)
+                ->whereIn('status', ['pending', 'failed'])
+                ->orderByDesc('id')
+                ->limit(10)
+                ->get()
+                ->map(fn (PrintJob $job): array => [
+                    'id' => (string) $job->id,
+                    'status' => (string) ($job->recovery_state === 'awaiting_ack' ? 'printing' : $job->status),
+                    'route' => (string) ($job->type ?? 'receipt'),
+                    'attempts' => (int) $job->attempts,
+                    'createdAt' => $job->created_at?->toIso8601String(),
+                ])
+                ->values()
+                ->all();
+
+            $profilePending = (int) PrintJob::query()
+                ->where('outlet_id', $outletId)
+                ->where('printer_profile_id', (int) $profile->id)
+                ->where('status', 'pending')
+                ->count();
+            $profileFailed = (int) PrintJob::query()
+                ->where('outlet_id', $outletId)
+                ->where('printer_profile_id', (int) $profile->id)
+                ->where('status', 'failed')
+                ->count();
+            $profilePrinting = (int) PrintJob::query()
+                ->where('outlet_id', $outletId)
+                ->where('printer_profile_id', (int) $profile->id)
+                ->where('status', 'pending')
+                ->where('recovery_state', 'awaiting_ack')
+                ->count();
+
+            return [
+                'printerId' => (string) $profile->id,
+                'printerName' => (string) $profile->name,
+                'pending' => $profilePending,
+                'failed' => $profileFailed,
+                'printing' => $profilePrinting,
+                'jobs' => $jobs,
+            ];
+        })->values()->all();
+
         return [
             'outletId' => $outletId,
             'pending' => $pending,
             'failed' => $failed,
+            'awaitingAck' => $awaitingAck,
             'doneToday' => $doneToday,
+            'bridgeConnected' => $bridgeConnected,
+            'printerOnline' => $bridgeConnected && $profiles->contains(fn (PrinterProfile $p): bool => (string) $p->health_status !== 'offline'),
+            'queues' => $queues,
         ];
     }
 

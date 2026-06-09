@@ -13,6 +13,7 @@ final class AccountingHealthService
         private readonly AccountsPayableReconciliationService $apReconciliationService,
         private readonly ProcurementReconciliationService $procurementReconciliationService,
         private readonly PayrollReconciliationService $payrollReconciliationService,
+        private readonly \App\Modules\Inventory\Services\InventoryValuationReconciliationService $inventoryValuationReconciliationService,
     ) {}
 
     /** @return array<string,int|float|string|bool> */
@@ -38,6 +39,7 @@ final class AccountingHealthService
         $apReconciliation = $this->apReconciliationService->report($actor, $outletId);
         $procurementReconciliation = $this->procurementReconciliationService->report($actor, $outletId);
         $payrollReconciliation = $this->payrollReconciliationService->report($actor, $outletId);
+        $inventoryValuation = $this->inventoryValuationReconciliationService->report($actor, $outletId);
 
         $healthScore = max(0, min(100, 100
             - ($failedPostings * 2)
@@ -67,6 +69,10 @@ final class AccountingHealthService
             'payrollReconciliationStatus' => (string) ($payrollReconciliation['status'] ?? 'unknown'),
             'cashFlowAvailable' => true,
             'duplicatePostingPrevented' => $duplicatePrevented,
+            'inventoryValuationStatus' => (string) ($inventoryValuation['inventoryValuationStatus'] ?? 'unknown'),
+            'inventoryGlBalance' => (float) ($inventoryValuation['inventoryGlBalance'] ?? 0),
+            'inventoryValuationBalance' => (float) ($inventoryValuation['inventoryValuationBalance'] ?? 0),
+            'inventoryValuationDifference' => (float) ($inventoryValuation['difference'] ?? 0),
         ];
     }
 }

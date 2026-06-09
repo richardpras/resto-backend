@@ -46,6 +46,7 @@ use App\Modules\HR\Http\Controllers\PayrollController;
 use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Hardware\Http\Controllers\HardwareBridgeController;
 use App\Modules\Inventory\Http\Controllers\IngredientController;
+use App\Modules\Inventory\Http\Controllers\InventoryValuationController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Kitchen\Http\Controllers\KitchenTicketController;
 use App\Modules\GiftCards\Http\Controllers\GiftCardController;
@@ -66,6 +67,15 @@ use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyAutomationController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyTierController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltySimulatorController;
 use App\Modules\Members\Http\Controllers\MemberController;
+use App\Modules\Menu\Http\Controllers\MenuCostingController;
+use App\Modules\Menu\Http\Controllers\MenuAnalyticsController;
+use App\Modules\Menu\Http\Controllers\MenuEngineeringController;
+use App\Modules\Menu\Http\Controllers\MenuAutomationController;
+use App\Modules\Menu\Http\Controllers\MenuDashboardController;
+use App\Modules\Menu\Http\Controllers\MenuForecastingController;
+use App\Modules\Menu\Http\Controllers\MenuOptimizationController;
+use App\Modules\Menu\Http\Controllers\MenuProductionController;
+use App\Modules\Menu\Http\Controllers\MenuProfitabilityController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
 use App\Modules\Monitoring\Http\Controllers\DashboardSummaryController;
@@ -160,11 +170,165 @@ Route::prefix('v1')->group(function (): void {
         ->only(['index', 'store', 'show', 'update'])
         ->middleware(['auth:api', 'permission:pos.use']);
 
+    Route::prefix('menu-costing')->middleware(['auth:api', 'permission:pos.use'])->group(function (): void {
+        Route::get('menu-items/{menuItem}/breakdown', [MenuCostingController::class, 'breakdown']);
+        Route::get('menu-items/{menuItem}/history', [MenuCostingController::class, 'history']);
+        Route::get('menu-items/{menuItem}/food-cost', [MenuCostingController::class, 'foodCost']);
+        Route::post('menu-items/{menuItem}/recalculate', [MenuCostingController::class, 'recalculate'])
+            ->middleware('permission:menu.manage');
+    });
+
+    Route::prefix('menu-profitability')->middleware(['auth:api', 'permission:foodcost.view'])->group(function (): void {
+        Route::get('menu-items/{menuItem}', [MenuProfitabilityController::class, 'show']);
+        Route::get('menu-items/{menuItem}/history', [MenuProfitabilityController::class, 'history']);
+        Route::post('menu-items/{menuItem}/simulate', [MenuProfitabilityController::class, 'simulate'])
+            ->middleware('permission:menu.manage');
+    });
+
+    Route::prefix('menu-production')->middleware(['auth:api'])->group(function (): void {
+        Route::get('menu-items/{menuItem}/versions', [MenuProductionController::class, 'listVersions'])
+            ->middleware('permission:recipe.view');
+        Route::get('menu-items/{menuItem}/versions/{versionId}', [MenuProductionController::class, 'showVersion'])
+            ->middleware('permission:recipe.view');
+        Route::post('menu-items/{menuItem}/versions', [MenuProductionController::class, 'createVersion'])
+            ->middleware('permission:recipe.manage');
+        Route::post('menu-items/{menuItem}/activate-version', [MenuProductionController::class, 'activateVersion'])
+            ->middleware('permission:recipe.manage');
+        Route::get('orders/{orderId}/recipe-snapshot', [MenuProductionController::class, 'orderRecipeSnapshot'])
+            ->middleware('permission:recipe.view');
+        Route::get('production-plan', [MenuProductionController::class, 'productionPlan'])
+            ->middleware('permission:production.view');
+        Route::get('prep-forecast', [MenuProductionController::class, 'prepForecast'])
+            ->middleware('permission:forecast.view');
+        Route::get('ingredient-demand', [MenuProductionController::class, 'ingredientDemand'])
+            ->middleware('permission:production.view');
+        Route::get('shortages', [MenuProductionController::class, 'shortages'])
+            ->middleware('permission:production.view');
+    });
+
+    Route::prefix('menu-analytics')->middleware(['auth:api', 'permission:analytics.view'])->group(function (): void {
+        Route::get('executive', [MenuAnalyticsController::class, 'executive']);
+        Route::get('food-cost', [MenuAnalyticsController::class, 'foodCost']);
+        Route::get('food-cost/trend', [MenuAnalyticsController::class, 'foodCostTrend']);
+        Route::get('food-cost/highest', [MenuAnalyticsController::class, 'foodCostHighest']);
+        Route::get('food-cost/lowest', [MenuAnalyticsController::class, 'foodCostLowest']);
+        Route::get('food-cost/increase-alerts', [MenuAnalyticsController::class, 'foodCostIncreaseAlerts']);
+        Route::get('profitability', [MenuAnalyticsController::class, 'profitability']);
+        Route::get('profitability/trend', [MenuAnalyticsController::class, 'profitabilityTrend']);
+        Route::get('profitability/top-margin', [MenuAnalyticsController::class, 'profitabilityTopMargin']);
+        Route::get('profitability/low-margin', [MenuAnalyticsController::class, 'profitabilityLowMargin']);
+        Route::get('profitability/erosion-alerts', [MenuAnalyticsController::class, 'profitabilityErosionAlerts']);
+        Route::get('production', [MenuAnalyticsController::class, 'production']);
+        Route::get('production/most-produced', [MenuAnalyticsController::class, 'productionMostProduced']);
+        Route::get('production/least-produced', [MenuAnalyticsController::class, 'productionLeastProduced']);
+        Route::get('production/yield-loss', [MenuAnalyticsController::class, 'productionYieldLoss']);
+        Route::get('production/efficiency', [MenuAnalyticsController::class, 'productionEfficiency']);
+        Route::get('inventory', [MenuAnalyticsController::class, 'inventory']);
+        Route::get('inventory/fast-moving', [MenuAnalyticsController::class, 'inventoryFastMoving']);
+        Route::get('inventory/slow-moving', [MenuAnalyticsController::class, 'inventorySlowMoving']);
+        Route::get('inventory/dead-stock', [MenuAnalyticsController::class, 'inventoryDeadStock']);
+        Route::get('inventory/turnover', [MenuAnalyticsController::class, 'inventoryTurnover']);
+        Route::get('inventory/value-trend', [MenuAnalyticsController::class, 'inventoryValueTrend']);
+        Route::post('snapshots/create', [MenuAnalyticsController::class, 'createSnapshot'])
+            ->middleware('permission:analytics.manage');
+    });
+
+    Route::prefix('menu-engineering')->middleware(['auth:api', 'permission:analytics.view'])->group(function (): void {
+        Route::get('matrix', [MenuEngineeringController::class, 'matrix']);
+        Route::get('matrix/stars', [MenuEngineeringController::class, 'stars']);
+        Route::get('matrix/puzzles', [MenuEngineeringController::class, 'puzzles']);
+        Route::get('matrix/plowhorses', [MenuEngineeringController::class, 'plowhorses']);
+        Route::get('matrix/dogs', [MenuEngineeringController::class, 'dogs']);
+        Route::get('matrix/trends', [MenuEngineeringController::class, 'trends']);
+        Route::get('matrix/menu-items/{menuItem}', [MenuEngineeringController::class, 'menuItem']);
+        Route::get('matrix/menu-items/{menuItem}/history', [MenuEngineeringController::class, 'menuItemHistory']);
+        Route::get('matrix/top-performers', [MenuEngineeringController::class, 'topPerformers']);
+        Route::get('matrix/worst-performers', [MenuEngineeringController::class, 'worstPerformers']);
+        Route::post('matrix/snapshots/create', [MenuEngineeringController::class, 'createSnapshot'])
+            ->middleware('permission:analytics.manage');
+    });
+
+    Route::prefix('menu-optimization')->middleware(['auth:api', 'permission:optimization.view'])->group(function (): void {
+        Route::get('recommendations', [MenuOptimizationController::class, 'recommendations']);
+        Route::get('recommendations/stars', [MenuOptimizationController::class, 'stars']);
+        Route::get('recommendations/puzzles', [MenuOptimizationController::class, 'puzzles']);
+        Route::get('recommendations/plowhorses', [MenuOptimizationController::class, 'plowhorses']);
+        Route::get('recommendations/dogs', [MenuOptimizationController::class, 'dogs']);
+        Route::get('pricing', [MenuOptimizationController::class, 'pricing']);
+        Route::get('pricing/opportunities', [MenuOptimizationController::class, 'pricingOpportunities']);
+        Route::get('bundles', [MenuOptimizationController::class, 'bundles']);
+        Route::get('bundles/top', [MenuOptimizationController::class, 'topBundles']);
+        Route::get('ingredients/opportunities', [MenuOptimizationController::class, 'ingredientOpportunities']);
+        Route::get('yield/opportunities', [MenuOptimizationController::class, 'yieldOpportunities']);
+        Route::post('simulate-price', [MenuOptimizationController::class, 'simulatePrice']);
+        Route::post('simulate-recipe', [MenuOptimizationController::class, 'simulateRecipe']);
+        Route::post('simulate-yield', [MenuOptimizationController::class, 'simulateYield']);
+        Route::get('snapshots', [MenuOptimizationController::class, 'snapshots']);
+        Route::post('snapshots/create', [MenuOptimizationController::class, 'createSnapshot'])
+            ->middleware('permission:optimization.manage');
+    });
+
+    Route::prefix('menu-automation')->middleware(['auth:api', 'permission:automation.view'])->group(function (): void {
+        Route::get('alerts', [MenuAutomationController::class, 'alerts']);
+        Route::get('alerts/open', [MenuAutomationController::class, 'openAlerts']);
+        Route::get('alerts/critical', [MenuAutomationController::class, 'criticalAlerts']);
+        Route::get('alerts/history', [MenuAutomationController::class, 'alertHistory']);
+        Route::get('rules', [MenuAutomationController::class, 'rules']);
+        Route::post('rules', [MenuAutomationController::class, 'storeRule'])
+            ->middleware('permission:automation.manage');
+        Route::put('rules/{id}', [MenuAutomationController::class, 'updateRule'])
+            ->middleware('permission:automation.manage');
+        Route::delete('rules/{id}', [MenuAutomationController::class, 'destroyRule'])
+            ->middleware('permission:automation.manage');
+        Route::post('alerts/{id}/resolve', [MenuAutomationController::class, 'resolveAlert'])
+            ->middleware('permission:automation.manage');
+        Route::get('notifications', [MenuAutomationController::class, 'notifications']);
+        Route::get('dashboard-summary', [MenuAutomationController::class, 'dashboardSummary']);
+        Route::get('snapshots', [MenuAutomationController::class, 'snapshots']);
+        Route::post('snapshots/create', [MenuAutomationController::class, 'createSnapshot'])
+            ->middleware('permission:automation.manage');
+        Route::get('escalations', [MenuAutomationController::class, 'escalations']);
+        Route::post('escalations/run', [MenuAutomationController::class, 'runEscalations'])
+            ->middleware('permission:automation.manage');
+    });
+
+    Route::prefix('menu-forecasting')->middleware(['auth:api', 'permission:forecasting.view'])->group(function (): void {
+        Route::get('demand', [MenuForecastingController::class, 'demand']);
+        Route::get('revenue', [MenuForecastingController::class, 'revenue']);
+        Route::get('food-cost', [MenuForecastingController::class, 'foodCost']);
+        Route::get('ingredients', [MenuForecastingController::class, 'ingredients']);
+        Route::get('production', [MenuForecastingController::class, 'production']);
+        Route::get('stock-risk', [MenuForecastingController::class, 'stockRisk']);
+        Route::get('menu-items/{menuItem}', [MenuForecastingController::class, 'menuItem']);
+        Route::get('summary', [MenuForecastingController::class, 'summary']);
+        Route::get('snapshots', [MenuForecastingController::class, 'snapshots']);
+        Route::post('snapshots/create', [MenuForecastingController::class, 'createSnapshot'])
+            ->middleware('permission:forecasting.manage');
+    });
+
+    Route::prefix('menu-dashboard')->middleware(['auth:api', 'permission:dashboard.view'])->group(function (): void {
+        Route::get('summary', [MenuDashboardController::class, 'summary']);
+        Route::get('kpis', [MenuDashboardController::class, 'kpis']);
+        Route::get('engineering', [MenuDashboardController::class, 'engineering']);
+        Route::get('optimization', [MenuDashboardController::class, 'optimization']);
+        Route::get('automation', [MenuDashboardController::class, 'automation']);
+        Route::get('forecasting', [MenuDashboardController::class, 'forecasting']);
+        Route::get('inventory', [MenuDashboardController::class, 'inventory']);
+        Route::get('health', [MenuDashboardController::class, 'health']);
+        Route::get('system-health', [MenuDashboardController::class, 'systemHealth']);
+        Route::get('snapshots', [MenuDashboardController::class, 'snapshots']);
+        Route::post('snapshots/create', [MenuDashboardController::class, 'createSnapshot'])
+            ->middleware('permission:dashboard.manage');
+    });
+
     Route::apiResource('ingredients', IngredientController::class)
         ->only(['index', 'store', 'update', 'destroy'])
         ->middleware(['auth:api', 'permission:pos.use']);
     Route::get('stock-movements', [StockMovementController::class, 'index'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('stock-movements', [StockMovementController::class, 'store'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('inventory/valuations', [InventoryValuationController::class, 'index'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('inventory/valuations/recalculate', [InventoryValuationController::class, 'recalculate'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::get('inventory/valuations/{ingredientId}', [InventoryValuationController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
 
     Route::apiResource('accounts', AccountController::class)->only(['index', 'store', 'update', 'destroy'])
         ->middleware(['auth:api', 'permission:accounting.manage']);

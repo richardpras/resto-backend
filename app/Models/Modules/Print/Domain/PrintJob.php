@@ -38,6 +38,7 @@ class PrintJob extends Model
         'failure_context',
         'processed_at',
         'receipt_render_history_id',
+        'hardware_command_log_id',
     ];
 
     protected $casts = [

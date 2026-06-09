@@ -8,6 +8,7 @@ use App\Models\Modules\Purchase\Domain\PurchaseOrder;
 use App\Models\Modules\Purchase\Domain\PurchaseOrderItem;
 use App\Models\User;
 use App\Modules\Inventory\Services\IngredientOutletStockLedger;
+use App\Modules\Inventory\Services\InventoryValuationService;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -21,6 +22,7 @@ final class GoodsReceivingLifecycleService
         private readonly ReceivingProgressService $receivingProgressService,
         private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
         private readonly ProcurementPostingService $procurementPostingService,
+        private readonly InventoryValuationService $inventoryValuationService,
     ) {}
 
     /** @param array<string,mixed> $data */
@@ -171,11 +173,20 @@ final class GoodsReceivingLifecycleService
                     'GR',
                     $grn->number,
                     [
-                        'cost_method' => 'moving_average_ready',
+                        'cost_method' => 'moving_average',
                         'unit_cost' => $actualReceivedCost,
                         'original_po_cost' => $originalPoCost,
                         'event' => 'purchase_grn',
                     ],
+                );
+
+                $this->inventoryValuationService->recordPurchase(
+                    $ingredientId,
+                    $numericOutlet,
+                    $receivedQty,
+                    $actualReceivedCost,
+                    (int) $grn->id,
+                    $actor,
                 );
             }
 

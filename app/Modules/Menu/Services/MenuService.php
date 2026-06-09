@@ -2,7 +2,6 @@
 
 namespace App\Modules\Menu\Services;
 
-use App\Models\Modules\Menu\Domain\MenuRecipe;
 use App\Models\Modules\Menu\Domain\MenuItemOutlet;
 use App\Models\Modules\Inventory\Domain\Ingredient;
 use App\Modules\Menu\DTOs\CreateMenuItemData;
@@ -15,6 +14,7 @@ class MenuService
 {
     public function __construct(
         private readonly MenuRepositoryInterface $menuRepository,
+        private readonly RecipeVersionService $recipeVersionService,
     ) {}
 
     public function listByTenant(int $tenantId, int $perPage = 20, ?int $outletId = null)
@@ -97,15 +97,7 @@ class MenuService
             'Recipes can only use inventory items with type ingredient.'
         );
 
-        MenuRecipe::query()->where('menu_item_id', $menuItemId)->delete();
-
-        foreach ($recipes as $recipe) {
-            MenuRecipe::query()->create([
-                'menu_item_id' => $menuItemId,
-                'inventory_item_id' => (int) $recipe['inventoryItemId'],
-                'quantity' => (float) $recipe['quantity'],
-            ]);
-        }
+        $this->recipeVersionService->createVersionFromRecipes($menuItemId, $recipes);
     }
 
     private function syncOutletMappings(int $menuItemId, array $menuItemOutlets): void

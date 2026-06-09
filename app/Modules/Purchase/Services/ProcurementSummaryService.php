@@ -18,6 +18,8 @@ final class ProcurementSummaryService
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly AccountsPayableSummaryService $accountsPayableSummaryService,
         private readonly ProcurementPostingService $procurementPostingService,
+        private readonly \App\Modules\Inventory\Services\InventoryValuationService $inventoryValuationService,
+        private readonly \App\Modules\Inventory\Services\InventoryValuationReconciliationService $inventoryValuationReconciliationService,
     ) {}
 
     /** @return array<string,int> */
@@ -63,6 +65,14 @@ final class ProcurementSummaryService
             : 0.0;
 
         $postingMetrics = $this->procurementPostingService->summaryMetrics($actor, $requestedOutletId);
+        $scopedOutletId = is_numeric($requestedOutletId) && (int) $requestedOutletId > 0 ? (int) $requestedOutletId : null;
+        $inventoryValue = $this->inventoryValuationService->outletValuationTotal($scopedOutletId);
+        $valuationRows = $this->inventoryValuationService->list($scopedOutletId);
+        $averageInventoryCost = $valuationRows->count() > 0
+            ? round((float) $valuationRows->avg('average_cost'), 4)
+            : 0.0;
+        $valuationRecon = $this->inventoryValuationReconciliationService->report($actor, $scopedOutletId);
+        $lastValuationUpdate = $valuationRows->max('last_updated_at');
 
         return [
             'totalSuppliers' => Supplier::query()->count(),
@@ -117,6 +127,10 @@ final class ProcurementSummaryService
             'unpostedGrnValue' => $postingMetrics['unpostedGrnValue'],
             'unpostedInvoiceValue' => $postingMetrics['unpostedInvoiceValue'],
             'unpostedPaymentValue' => $postingMetrics['unpostedPaymentValue'],
+            'inventoryValue' => round($inventoryValue, 2),
+            'averageInventoryCost' => $averageInventoryCost,
+            'valuationVariance' => (float) ($valuationRecon['difference'] ?? 0),
+            'lastValuationUpdate' => $lastValuationUpdate?->toIso8601String(),
         ];
     }
 }

@@ -22,6 +22,7 @@ use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Events\OrderLifecycleChanged;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Payments\Events\PaymentStatusChanged;
+use App\Modules\Print\Services\OrderPrintOrchestrationService;
 use App\Modules\Print\Services\PrinterRoutingService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -42,6 +43,7 @@ class OrderService
         private readonly PosAuditLogService $auditLogService,
         private readonly JournalPostingService $journalPostingService,
         private readonly PrinterRoutingService $printerRoutingService,
+        private readonly OrderPrintOrchestrationService $orderPrintOrchestration,
         private readonly MemberTransactionRecorder $memberTransactionRecorder,
         private readonly OrderMemberAttachmentService $orderMemberAttachmentService,
         private readonly AccountingSettingsService $accountingSettingsService,
@@ -201,7 +203,7 @@ class OrderService
                 $paidOrder = $order->fresh(['payments', 'items']);
                 $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
                 $this->postOrderPaymentJournal($paidOrder);
-                $this->printerRoutingService->queueReceiptForOrder($paidOrder, 'order-paid');
+                $this->orderPrintOrchestration->onOrderPaid($user, $paidOrder);
                 $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
             }
 
@@ -461,7 +463,7 @@ class OrderService
             $paidOrder = $updated->fresh(['items', 'payments']);
             $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
             $this->postOrderPaymentJournal($paidOrder);
-            $this->printerRoutingService->queueReceiptForOrder($paidOrder, 'order-paid');
+            $this->orderPrintOrchestration->onOrderPaid($user, $paidOrder);
             $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
         }
         if ($updated !== null) {
@@ -805,44 +807,15 @@ class OrderService
 
     private function calculateCogsForOrders(Collection $orders): float
     {
-        $menuIds = $orders->flatMap(fn (Order $order) => $order->items->pluck('item_id'))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-        if ($menuIds === []) {
+        $orderCodes = $orders->pluck('code')->filter()->values()->all();
+        if ($orderCodes === []) {
             return 0.0;
         }
 
-        $recipes = DB::table('menu_recipes')
-            ->whereIn('menu_item_id', $menuIds)
-            ->get(['menu_item_id', 'inventory_item_id', 'quantity'])
-            ->groupBy('menu_item_id');
-        $ingredientIds = $recipes->flatMap(fn ($rows) => collect($rows)->pluck('inventory_item_id'))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-        $ingredientPrices = DB::table('ingredients')
-            ->whereIn('id', $ingredientIds)
-            ->pluck('price', 'id');
-
-        $totalCogs = 0.0;
-        foreach ($orders as $order) {
-            foreach ($order->items as $item) {
-                $itemRecipes = $recipes->get((string) $item->item_id) ?? $recipes->get((int) $item->item_id);
-                if ($itemRecipes === null) {
-                    continue;
-                }
-                foreach ($itemRecipes as $recipe) {
-                    $unitCost = (float) ($ingredientPrices[$recipe->inventory_item_id] ?? 0);
-                    $requiredQty = (float) $item->qty * (float) $recipe->quantity;
-                    $totalCogs += $requiredQty * $unitCost;
-                }
-            }
-        }
-
-        return $totalCogs;
+        return (float) DB::table('stock_movements')
+            ->where('source_type', 'order_payment')
+            ->whereIn('source_id', $orderCodes)
+            ->sum('total_cost');
     }
 
     private function resolveAccount(

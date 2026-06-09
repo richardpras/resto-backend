@@ -2,7 +2,7 @@
 
 namespace App\Modules\Print\Services;
 
-use App\Models\Modules\Print\Domain\PrinterProfile;
+use App\Jobs\Print\ProcessPrintJob;
 use App\Models\Modules\Print\Domain\PrintJob;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -11,6 +11,7 @@ class PrintQueueProcessingService
 {
     public function __construct(
         private readonly PrintQueueStateService $stateService,
+        private readonly PrintBridgeDispatchService $bridgeDispatch,
     ) {}
 
     public function processJob(int $printJobId, int $outletId): void
@@ -31,6 +32,9 @@ class PrintQueueProcessingService
             if ($job->next_retry_at !== null && $job->next_retry_at->isFuture()) {
                 return;
             }
+            if ((string) $job->recovery_state === 'awaiting_ack' && $job->hardware_command_log_id !== null) {
+                return;
+            }
 
             $job->attempts = (int) $job->attempts + 1;
             $job->locked_at = now();
@@ -43,18 +47,17 @@ class PrintQueueProcessingService
             $this->stateService->emitLifecycle($job->fresh(), 'processing');
 
             try {
-                $this->simulateAgentSubmission($job);
-                $job->status = 'done';
-                $job->last_error = null;
-                $job->failure_context = null;
-                $job->failed_at = null;
-                $job->processed_at = now();
+                $command = $this->bridgeDispatch->dispatch($job->fresh());
+                $job->hardware_command_log_id = (int) $command->id;
+                $job->recovery_state = 'awaiting_ack';
                 $job->locked_at = null;
                 $job->locked_by = null;
-                $job->recovery_state = 'none';
                 $job->save();
-                $this->stateService->appendEvent($job, 'done', 'done');
-                $this->stateService->emitLifecycle($job->fresh(), 'done');
+                $this->stateService->appendEvent($job, 'dispatched', 'pending', [
+                    'hardware_command_log_id' => (int) $command->id,
+                    'attempt' => (int) $job->attempts,
+                ]);
+                $this->stateService->emitLifecycle($job->fresh(), 'dispatched');
             } catch (RuntimeException $exception) {
                 $this->markAttemptFailure($job, $exception->getMessage());
             }
@@ -76,25 +79,32 @@ class PrintQueueProcessingService
         $job->locked_at = null;
         $job->locked_by = null;
         $job->last_error = null;
+        $job->hardware_command_log_id = null;
+        $job->recovery_state = 'none';
         $job->save();
         $this->stateService->appendEvent($job, 'retry_requested', 'pending');
         $this->stateService->emitLifecycle($job->fresh(), 'retry-requested');
+        ProcessPrintJob::dispatch((int) $job->id, $outletId);
 
         return $job;
     }
 
-    private function simulateAgentSubmission(PrintJob $job): void
+    public function markBridgeFailure(int $printJobId, int $outletId, string $error): void
     {
-        if ((bool) data_get($job->printable_snapshot, 'simulate_failure') === true) {
-            throw new RuntimeException('Simulated print delivery failure.');
-        }
+        DB::transaction(function () use ($printJobId, $outletId, $error): void {
+            $job = PrintJob::query()
+                ->whereKey($printJobId)
+                ->where('outlet_id', $outletId)
+                ->lockForUpdate()
+                ->first();
 
-        if ($job->printer_profile_id !== null) {
-            $profile = PrinterProfile::query()->find($job->printer_profile_id);
-            if ($profile !== null && ! $profile->is_active) {
-                throw new RuntimeException('Printer profile is inactive.');
+            if ($job === null || (string) $job->status === 'done') {
+                return;
             }
-        }
+
+            $job->hardware_command_log_id = null;
+            $this->markAttemptFailure($job, $error);
+        });
     }
 
     private function markAttemptFailure(PrintJob $job, string $error): void

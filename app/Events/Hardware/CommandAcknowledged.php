@@ -29,4 +29,19 @@ class CommandAcknowledged extends OutletRealtimeEvent
             'retry_count' => $this->retryCount,
         ];
     }
+
+    public function commandId(): int
+    {
+        return $this->commandId;
+    }
+
+    public function commandType(): string
+    {
+        return $this->commandType;
+    }
+
+    public function spoolStatus(): string
+    {
+        return $this->spoolStatus;
+    }
 }

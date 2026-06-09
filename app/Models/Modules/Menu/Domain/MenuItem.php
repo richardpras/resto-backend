@@ -4,6 +4,7 @@ namespace App\Models\Modules\Menu\Domain;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class MenuItem extends Model
 {
@@ -25,5 +26,15 @@ class MenuItem extends Model
     public function outletMappings(): HasMany
     {
         return $this->hasMany(MenuItemOutlet::class);
+    }
+
+    public function costSetting(): HasOne
+    {
+        return $this->hasOne(MenuRecipeCostSetting::class);
+    }
+
+    public function recipeVersions(): HasMany
+    {
+        return $this->hasMany(RecipeVersion::class);
     }
 }

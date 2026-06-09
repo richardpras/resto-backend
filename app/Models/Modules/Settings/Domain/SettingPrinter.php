@@ -22,6 +22,7 @@ class SettingPrinter extends Model
         'bluetooth_device',
         'outlet_id',
         'assigned_categories',
+        'printer_profile_id',
     ];
 
     protected $casts = [

@@ -9,14 +9,22 @@ use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Settings\Domain\Outlet;
+use App\Jobs\Print\ProcessPrintJob;
 use App\Modules\Print\Services\PrinterRoutingService;
 use App\Modules\Print\Services\PrintQueueProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Tests\TestCase;
 
 class Phase12PrinterRoutingAgentTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Bus::fake([ProcessPrintJob::class]);
+    }
 
     public function test_duplicate_print_protection_is_idempotent_for_same_order_route(): void
     {

@@ -2,6 +2,8 @@
 
 namespace App\Modules\Settings\Services;
 
+use App\Modules\Print\Services\SettingPrinterSyncService;
+
 use App\Models\Modules\Settings\Domain\BankAccount;
 use App\Models\Modules\Settings\Domain\IntegrationSetting;
 use App\Models\Modules\Settings\Domain\MerchantSetting;
@@ -24,6 +26,7 @@ class SettingsDomainService
 
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly SettingPrinterSyncService $settingPrinterSync,
     ) {}
 
     /** @return array<string, mixed> */
@@ -257,8 +260,9 @@ class SettingsDomainService
             'outlet_id' => (int) $data['outletId'],
             'assigned_categories' => $data['assignedCategories'] ?? null,
         ]);
+        $this->settingPrinterSync->syncFromSettingPrinter($p->fresh() ?? $p);
 
-        return $this->printerToCamel($p);
+        return $this->printerToCamel($p->fresh() ?? $p);
     }
 
     /** @param  array<string, mixed>  $data */
@@ -278,8 +282,9 @@ class SettingsDomainService
             'assigned_categories' => $data['assignedCategories'] ?? null,
         ]);
         $p->save();
+        $this->settingPrinterSync->syncFromSettingPrinter($p->fresh() ?? $p);
 
-        return $this->printerToCamel($p->fresh());
+        return $this->printerToCamel($p->fresh() ?? $p);
     }
 
     public function deletePrinter(string $id): void
@@ -287,6 +292,9 @@ class SettingsDomainService
         $p = SettingPrinter::query()->whereKey($id)->first();
         if ($p === null) {
             throw (new ModelNotFoundException)->setModel(SettingPrinter::class, [$id]);
+        }
+        if ($p->printer_profile_id !== null) {
+            $this->settingPrinterSync->deleteRoutesForProfile((int) $p->printer_profile_id);
         }
         $p->delete();
     }

@@ -3,13 +3,23 @@
 namespace Tests\Feature;
 
 use App\Models\Modules\Inventory\Domain\Ingredient;
+use App\Models\Modules\Menu\Domain\RecipeVersion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\InventoryValuationFixture;
 use Tests\TestCase;
 
 class MenuRecipeManagementTest extends TestCase
 {
     use RefreshDatabase;
+    use InventoryValuationFixture;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+        $this->actingAsInventoryUser();
+    }
 
     public function test_can_create_menu_with_recipe_assignments(): void
     {
@@ -54,6 +64,7 @@ class MenuRecipeManagementTest extends TestCase
             'inventory_item_id' => $ingredientA->id,
             'quantity' => 120.00,
         ]);
+        $this->assertSame(1, RecipeVersion::query()->where('status', 'active')->count());
     }
 
     public function test_can_update_menu_and_replace_recipe_assignments(): void
@@ -106,5 +117,6 @@ class MenuRecipeManagementTest extends TestCase
             'quantity' => 80.00,
         ]);
         $this->assertSame(2, DB::table('menu_recipes')->where('menu_item_id', $menuId)->count());
+        $this->assertSame(2, RecipeVersion::query()->where('menu_item_id', $menuId)->count());
     }
 }

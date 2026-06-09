@@ -10,6 +10,9 @@ class RecipeStockDeductionService
 {
     public function __construct(
         private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
+        private readonly InventoryValuationService $inventoryValuationService,
+        private readonly InventoryCostService $inventoryCostService,
+        private readonly OrderItemCostSnapshotService $orderItemCostSnapshotService,
     ) {}
 
     public function deductForPaidOrder(Order $order): void
@@ -58,23 +61,34 @@ class RecipeStockDeductionService
             $numericOutlet = (int) $outletId;
 
             foreach ($requiredByIngredient as $ingredientId => $requiredQty) {
+                $ingredientId = (int) $ingredientId;
+                $unitCost = $this->inventoryValuationService->getAverageCost($ingredientId, $numericOutlet);
+                if ($unitCost <= 0) {
+                    $unitCost = $this->inventoryCostService->resolveUnitCost($ingredientId, $numericOutlet);
+                }
+
                 $this->ingredientOutletStockLedger->apply(
                     $numericOutlet,
-                    (int) $ingredientId,
+                    $ingredientId,
                     'sale',
                     $requiredQty,
                     'order_payment',
                     $locked->code,
                     [
-                        'cost_method' => 'moving_average_ready',
+                        'cost_method' => 'moving_average',
+                        'unit_cost' => $unitCost,
                         'event' => 'cogs_recognition_pending',
                         'order_id' => (int) $locked->id,
                         'order_code' => (string) $locked->code,
                     ]
                 );
+
+                $this->inventoryValuationService->recordConsumption($ingredientId, $numericOutlet, $requiredQty);
             }
 
             $locked->update(['stock_deducted_at' => now()]);
+
+            $this->orderItemCostSnapshotService->snapshotForPaidOrder($locked->fresh(['items']));
         });
     }
 }
