@@ -147,6 +147,7 @@ class HardwareBridgeController extends Controller
             'success' => true,
             'message' => $result['deduplicated'] ? 'Duplicate command suppressed by idempotency key.' : 'Hardware command queued.',
             'data' => [
+                'commandId' => (int) $command->id,
                 'id' => (int) $command->id,
                 'outletId' => (int) $command->outlet_id,
                 'deviceId' => (int) $command->hardware_bridge_device_id,
@@ -232,6 +233,7 @@ class HardwareBridgeController extends Controller
     private function commandPayload($command): array
     {
         return [
+            'commandId' => (int) $command->id,
             'id' => (int) $command->id,
             'outletId' => (int) $command->outlet_id,
             'deviceId' => (int) $command->hardware_bridge_device_id,

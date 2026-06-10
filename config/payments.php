@@ -5,6 +5,8 @@ use App\Modules\Payments\Services\Providers\MidtransPaymentProvider;
 
 return [
     'default_provider' => env('PAYMENT_DEFAULT_PROVIDER', 'midtrans'),
+    /** When true in APP_ENV=production, boot fails if default provider credentials are missing. */
+    'strict_production_boot' => (bool) env('PAYMENT_STRICT_PRODUCTION_BOOT', true),
     /**
      * Optional per-outlet default gateway when the client omits `provider`.
      * Keys are outlet ids (int or string). Example:

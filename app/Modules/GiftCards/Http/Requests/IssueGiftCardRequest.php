@@ -22,6 +22,9 @@ class IssueGiftCardRequest extends FormRequest
             'expiresAt' => ['nullable', 'date'],
             'idempotencyKey' => ['required', 'string', 'max:120'],
             'meta' => ['nullable', 'array'],
+            'paymentMethod' => ['nullable', 'string', 'max:50'],
+            'paymentReference' => ['nullable', 'string', 'max:120'],
+            'cashReceivedAmount' => ['nullable', 'numeric', 'gt:0'],
         ];
     }
 }

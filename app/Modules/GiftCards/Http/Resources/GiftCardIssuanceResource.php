@@ -21,6 +21,7 @@ class GiftCardIssuanceResource extends JsonResource
             'issuedAt' => $this->issued_at?->toIso8601String(),
             'expiresAt' => $this->expires_at?->toIso8601String(),
             'lastRedeemedAt' => $this->last_redeemed_at?->toIso8601String(),
+            'meta' => $this->meta,
             'createdAt' => $this->created_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];

@@ -5,12 +5,14 @@ namespace App\Modules\Menu\Services;
 use App\Models\Modules\Menu\Domain\AutomationAlert;
 use App\Models\Modules\Menu\Domain\AutomationNotification;
 use App\Models\User;
+use App\Modules\Notifications\Services\Adapters\MenuNotificationAdapter;
 use Illuminate\Support\Collection;
 
 final class NotificationDispatchService
 {
     public function __construct(
         private readonly MenuAutomationAuditService $auditService,
+        private readonly MenuNotificationAdapter $menuNotificationAdapter,
     ) {}
 
     /** @param array<int,string> $channels */
@@ -38,6 +40,8 @@ final class NotificationDispatchService
 
     private function dispatchDatabase(AutomationAlert $alert): AutomationNotification
     {
+        $this->menuNotificationAdapter->notifyAutomationAlert($alert);
+
         return AutomationNotification::query()->create([
             'outlet_id' => $alert->outlet_id,
             'automation_alert_id' => $alert->id,
@@ -59,14 +63,11 @@ final class NotificationDispatchService
             'outlet_id' => $alert->outlet_id,
             'automation_alert_id' => $alert->id,
             'channel' => AutomationNotification::CHANNEL_EMAIL,
-            'status' => 'sent',
+            'status' => 'skipped',
             'payload_json' => [
-                'stub' => true,
-                'recipient' => 'manager@outlet.local',
-                'subject' => $alert->title,
-                'body' => $alert->description,
+                'reason' => 'not_configured',
+                'channel' => 'email',
             ],
-            'sent_at' => now(),
         ]);
     }
 
@@ -76,14 +77,11 @@ final class NotificationDispatchService
             'outlet_id' => $alert->outlet_id,
             'automation_alert_id' => $alert->id,
             'channel' => AutomationNotification::CHANNEL_WEBHOOK,
-            'status' => 'sent',
+            'status' => 'skipped',
             'payload_json' => [
-                'stub' => true,
-                'url' => null,
-                'event' => 'automation.alert',
-                'alertId' => (string) $alert->id,
+                'reason' => 'not_configured',
+                'channel' => 'webhook',
             ],
-            'sent_at' => now(),
         ]);
     }
 }

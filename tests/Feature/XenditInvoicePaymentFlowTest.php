@@ -58,6 +58,7 @@ class XenditInvoicePaymentFlowTest extends TestCase
             'code' => 'xdt-'.uniqid(),
         ]);
         $this->assignUserToOutlets($user, [(int) $outlet->id]);
+        $this->enableGatewayQrisForOutlet((int) $outlet->id);
 
         $orderId = $this->createConfirmedOrder((int) $outlet->id, (int) $user->id, 'XDT-FLOW');
         $this->seedAccountingAccounts();
@@ -149,6 +150,24 @@ class XenditInvoicePaymentFlowTest extends TestCase
                 'updated_at' => now(),
             ],
         ]);
+    }
+
+    private function enableGatewayQrisForOutlet(int $outletId): void
+    {
+        DB::table('outlet_payment_method_configs')->upsert([
+            [
+                'outlet_id' => $outletId,
+                'payment_method_code' => 'gateway_qris',
+                'type' => 'gateway_qris',
+                'provider' => 'xendit',
+                'enabled' => true,
+                'display_order' => 10,
+                'is_default' => true,
+                'settings' => json_encode([], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ], ['outlet_id', 'payment_method_code'], ['enabled', 'provider', 'updated_at']);
     }
 
     private function createConfirmedOrder(int $outletId, int $openedByUserId, string $code): int

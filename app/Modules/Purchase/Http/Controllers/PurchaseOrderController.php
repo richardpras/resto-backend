@@ -252,6 +252,16 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
+    public function reject(PurchaseOrder $purchaseOrder): JsonResponse
+    {
+        $updated = $this->purchaseOrderLifecycleService->reject($purchaseOrder, request()->user('api'));
+
+        return response()->json([
+            'message' => 'Purchase order rejected successfully.',
+            'data' => new PurchaseOrderResource($updated),
+        ]);
+    }
+
     public function cancel(PurchaseOrder $purchaseOrder): JsonResponse
     {
         $updated = $this->purchaseOrderLifecycleService->cancel($purchaseOrder, request()->user('api'));

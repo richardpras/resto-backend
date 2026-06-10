@@ -5,6 +5,7 @@ namespace App\Modules\Accounting\Services;
 use App\Models\Modules\Accounting\Domain\AccountingPostingFailure;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\User;
+use App\Modules\Notifications\Services\Adapters\AccountingNotificationAdapter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
@@ -13,6 +14,7 @@ final class AccountingPostingFailureService
 {
     public function __construct(
         private readonly AccountingAuditService $accountingAuditService,
+        private readonly AccountingNotificationAdapter $accountingNotificationAdapter,
     ) {}
 
     /** @param array<string,mixed>|null $payload */
@@ -58,6 +60,8 @@ final class AccountingPostingFailureService
             null,
             ['failureId' => (int) $failure->id, 'errorCode' => $errorCode, 'message' => $errorMessage],
         );
+
+        $this->accountingNotificationAdapter->notifyPostingFailure($failure);
 
         return $failure;
     }

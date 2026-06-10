@@ -3,6 +3,7 @@
 namespace App\Modules\Payments\Providers;
 
 use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
+use App\Modules\Payments\Support\PaymentEnvironment;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -26,6 +27,12 @@ final class XenditInvoiceProvider implements PaymentProviderInterface
     {
         $secret = trim((string) ($this->config['secret_key'] ?? ''));
         if ($secret === '') {
+            if (! PaymentEnvironment::allowsStubMode()) {
+                throw ValidationException::withMessages([
+                    'gateway' => ['Payment provider configuration is invalid.'],
+                ]);
+            }
+
             return $this->stubCreate($payload);
         }
 

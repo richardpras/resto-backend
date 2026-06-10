@@ -33,6 +33,9 @@ class AccountingHealthDashboardTest extends TestCase
                     'openPeriods',
                     'lockedPeriods',
                     'healthScore',
+                    'healthSeverity',
+                    'failureAgingBuckets',
+                    'priorityQueue',
                 ],
             ])
             ->assertJsonPath('data.healthScore', 100);

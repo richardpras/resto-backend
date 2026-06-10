@@ -2,6 +2,9 @@
 
 namespace App\Modules\Payments\Services\Providers;
 
+use App\Modules\Payments\Support\PaymentEnvironment;
+use Illuminate\Validation\ValidationException;
+
 class MidtransPaymentProvider implements PaymentProviderInterface
 {
     /** @param array<string,mixed> $config */
@@ -11,6 +14,12 @@ class MidtransPaymentProvider implements PaymentProviderInterface
 
     public function createTransaction(array $payload): array
     {
+        if (! PaymentEnvironment::allowsStubMode()) {
+            throw ValidationException::withMessages([
+                'gateway' => ['Payment provider configuration is invalid.'],
+            ]);
+        }
+
         $method = strtolower((string) ($payload['paymentMethod'] ?? 'qris'));
         $externalReference = (string) ($payload['externalReference'] ?? ('mid-'.uniqid()));
         $expiry = now()->addMinutes(30)->toISOString();

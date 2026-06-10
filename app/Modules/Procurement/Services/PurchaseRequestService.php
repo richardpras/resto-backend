@@ -7,6 +7,7 @@ use App\Models\Modules\Purchase\Domain\PurchaseOrderItem;
 use App\Models\User;
 use App\Modules\Procurement\Models\PurchaseRequest;
 use App\Modules\Procurement\Models\PurchaseRequestItem;
+use App\Modules\Notifications\Services\ApprovalNotificationService;
 use App\Modules\Purchase\Services\ProcurementMasterService;
 use App\Modules\Purchase\Services\PurchaseAuditService;
 use App\Modules\Purchase\Services\PurchaseScopeService;
@@ -19,6 +20,7 @@ final class PurchaseRequestService
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly PurchaseAuditService $purchaseAuditService,
         private readonly ProcurementMasterService $procurementMasterService,
+        private readonly ApprovalNotificationService $approvalNotificationService,
     ) {}
 
     /** @param array<string,mixed> $data */
@@ -92,6 +94,7 @@ final class PurchaseRequestService
             $this->purchaseAuditService->logPurchaseRequest('submitted', (int) $fresh->id, (int) $fresh->outlet_id, $actor, [
                 'requestNo' => $fresh->request_no,
             ]);
+            $this->approvalNotificationService->purchaseRequestSubmitted($fresh, $actor);
 
             return $fresh;
         });
@@ -114,6 +117,7 @@ final class PurchaseRequestService
                 'requestNo' => $fresh->request_no,
                 'approvedBy' => $actor->id,
             ]);
+            $this->approvalNotificationService->purchaseRequestApproved($fresh, $actor);
 
             return $fresh;
         });
@@ -134,6 +138,7 @@ final class PurchaseRequestService
             $this->purchaseAuditService->logPurchaseRequest('rejected', (int) $fresh->id, (int) $fresh->outlet_id, $actor, [
                 'requestNo' => $fresh->request_no,
             ]);
+            $this->approvalNotificationService->purchaseRequestRejected($fresh, $actor);
 
             return $fresh;
         });

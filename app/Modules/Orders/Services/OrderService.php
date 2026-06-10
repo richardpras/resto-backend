@@ -528,18 +528,21 @@ class OrderService
                 ];
             }
 
-            $totalSales = (float) $orders->sum(fn (Order $order): float => (float) $order->paid_total);
+            $totalCashSales = (float) $orders->sum(fn (Order $order): float => (float) $order->paid_total);
             $totalCogs = $this->calculateCogsForOrders($orders);
-
             $journalOutletId = $this->resolveShiftCloseJournalOutletId($outletId, $orders);
+            $orderIds = $orders->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $giftCardComposition = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class)
+                ->compositionFromOrderIds($orderIds, $journalOutletId, settledOnly: true);
             $batchKey = now()->format('YmdHis').'-'.$journalOutletId;
 
             $journal = $this->journalPostingService->postForShiftClose(
                 (int) ($tenantId ?? 0),
                 $journalOutletId,
-                round($totalSales, 2),
+                round($totalCashSales, 2),
                 round($totalCogs, 2),
                 $batchKey,
+                $giftCardComposition,
             );
 
             if ($journal === null) {
@@ -555,7 +558,7 @@ class OrderService
 
             return [
                 'orderCount' => $orders->count(),
-                'totalSales' => round($totalSales, 2),
+                'totalSales' => round($totalCashSales + $giftCardComposition->total(), 2),
                 'totalCogs' => round($totalCogs, 2),
                 'journalId' => (string) $journal->id,
             ];

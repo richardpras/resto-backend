@@ -7,6 +7,7 @@ use App\Models\Modules\HR\Domain\PayrollRunAudit;
 use App\Models\Modules\HR\Domain\PayrollRunItemV2;
 use App\Models\Modules\HR\Domain\PayrollRunV2;
 use App\Models\User;
+use App\Modules\Notifications\Services\ApprovalNotificationService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,7 @@ class PayrollRunServiceV2
         private readonly PayrollCalculationService $calculation,
         private readonly ReimbursementService $reimbursements,
         private readonly PayrollRunAuditService $audits,
+        private readonly ApprovalNotificationService $approvalNotificationService,
     ) {}
 
     /**
@@ -109,7 +111,12 @@ class PayrollRunServiceV2
             $this->audits->record($run->id, PayrollRunAudit::ACTION_CALCULATED, $user);
         });
 
-        return $run->refresh()->load(['preparationPeriod', 'items.employee']);
+        $fresh = $run->refresh()->load(['preparationPeriod', 'items.employee']);
+        if ($user !== null) {
+            $this->approvalNotificationService->payrollRunPendingApproval($fresh, $user);
+        }
+
+        return $fresh;
     }
 
     public function approve(?User $user, int $runId): PayrollRunV2
@@ -131,7 +138,34 @@ class PayrollRunServiceV2
 
         $this->audits->record($run->id, PayrollRunAudit::ACTION_APPROVED, $user);
 
-        return $run->refresh()->load(['preparationPeriod', 'items.employee']);
+        $fresh = $run->refresh()->load(['preparationPeriod', 'items.employee']);
+        if ($user !== null) {
+            $this->approvalNotificationService->payrollRunApproved($fresh, $user);
+        }
+
+        return $fresh;
+    }
+
+    public function reject(?User $user, int $runId): PayrollRunV2
+    {
+        $run = $this->findAccessible($user, $runId);
+        $run->assertNotClosed();
+
+        if ($run->status !== PayrollRunV2::STATUS_CALCULATED) {
+            throw ValidationException::withMessages([
+                'status' => ['Only calculated runs awaiting approval can be rejected.'],
+            ]);
+        }
+
+        $run->update(['status' => PayrollRunV2::STATUS_DRAFT]);
+        $this->audits->record($run->id, PayrollRunAudit::ACTION_REJECTED, $user);
+
+        $fresh = $run->refresh()->load(['preparationPeriod', 'items.employee']);
+        if ($user !== null) {
+            $this->approvalNotificationService->payrollRunRejected($fresh, $user);
+        }
+
+        return $fresh;
     }
 
     public function finalize(?User $user, int $runId): PayrollRunV2

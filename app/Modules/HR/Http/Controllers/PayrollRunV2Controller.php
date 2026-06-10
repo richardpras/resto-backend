@@ -79,6 +79,17 @@ class PayrollRunV2Controller extends Controller
         ]);
     }
 
+    public function reject(int $run): JsonResponse
+    {
+        $row = $this->runService->reject($this->resolveUser(), $run);
+        $row->item_count = $row->items->count();
+
+        return response()->json([
+            'message' => 'Payroll run rejected.',
+            'data' => new PayrollRunV2Resource($row),
+        ]);
+    }
+
     public function finalize(int $run): JsonResponse
     {
         $row = $this->runService->finalize($this->resolveUser(), $run);

@@ -62,6 +62,10 @@ use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyVoucherController;
 use App\Modules\LoyaltyEngine\Http\Controllers\MemberSegmentController;
 use App\Modules\LoyaltyEngine\Http\Controllers\MemberVoucherController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyNotificationController;
+use App\Modules\Notifications\Http\Controllers\UserNotificationController;
+use App\Modules\System\Http\Controllers\AuditCenterController;
+use App\Modules\System\Http\Controllers\BugReportController;
+use App\Modules\System\Http\Controllers\FailedJobController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyAnalyticsDashboardController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyAutomationController;
 use App\Modules\LoyaltyEngine\Http\Controllers\LoyaltyTierController;
@@ -89,6 +93,7 @@ use App\Modules\Orders\Http\Controllers\QrOrderController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Orders\Http\Controllers\TableQrController;
 use App\Modules\Reservations\Http\Controllers\ReservationController;
+use App\Modules\Payments\Http\Controllers\PaymentHealthController;
 use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
 use App\Modules\Payments\Http\Controllers\XenditSandboxSimulationController;
 use App\Modules\Payments\Http\Controllers\XenditInvoiceWebhookController;
@@ -323,12 +328,43 @@ Route::prefix('v1')->group(function (): void {
 
     Route::apiResource('ingredients', IngredientController::class)
         ->only(['index', 'store', 'update', 'destroy'])
-        ->middleware(['auth:api', 'permission:pos.use']);
-    Route::get('stock-movements', [StockMovementController::class, 'index'])->middleware(['auth:api', 'permission:pos.use']);
-    Route::post('stock-movements', [StockMovementController::class, 'store'])->middleware(['auth:api', 'permission:pos.use']);
-    Route::get('inventory/valuations', [InventoryValuationController::class, 'index'])->middleware(['auth:api', 'permission:pos.use']);
+        ->middleware(['auth:api', 'permission.any:inventory.manage,pos.use']);
+    Route::get('stock-movements', [StockMovementController::class, 'index'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::post('stock-movements', [StockMovementController::class, 'store'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::get('inventory/valuations', [InventoryValuationController::class, 'index'])->middleware(['auth:api', 'permission:inventory.manage']);
     Route::post('inventory/valuations/recalculate', [InventoryValuationController::class, 'recalculate'])->middleware(['auth:api', 'permission:inventory.manage']);
-    Route::get('inventory/valuations/{ingredientId}', [InventoryValuationController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('inventory/valuations/{ingredientId}', [InventoryValuationController::class, 'show'])->middleware(['auth:api', 'permission:inventory.manage']);
+
+    Route::middleware('auth:api')->group(function (): void {
+        Route::get('notifications/unread-count', [UserNotificationController::class, 'unreadCount']);
+        Route::patch('notifications/read-all', [UserNotificationController::class, 'markAllRead']);
+        Route::get('notifications', [UserNotificationController::class, 'index']);
+        Route::patch('notifications/{notification}/read', [UserNotificationController::class, 'markRead'])->whereNumber('notification');
+    });
+
+    Route::prefix('system')->middleware(['auth:api', 'permission:settings.manage'])->group(function (): void {
+        Route::get('failed-jobs', [FailedJobController::class, 'index']);
+        Route::get('failed-jobs/summary', [FailedJobController::class, 'summary']);
+        Route::get('failed-jobs/trends', [FailedJobController::class, 'trends']);
+    });
+
+    Route::prefix('audit-center')->middleware(['auth:api', 'permission:settings.manage'])->group(function (): void {
+        Route::get('/', [AuditCenterController::class, 'index']);
+        Route::get('entity-history', [AuditCenterController::class, 'entityHistory']);
+        Route::get('search', [AuditCenterController::class, 'search']);
+        Route::get('summary', [AuditCenterController::class, 'summary']);
+    });
+
+    Route::post('bug-reports', [BugReportController::class, 'store'])->middleware('auth:api');
+
+    Route::prefix('bug-reports')->middleware(['auth:api', 'permission:settings.manage'])->group(function (): void {
+        Route::get('/', [BugReportController::class, 'index']);
+        Route::get('{bugReport}', [BugReportController::class, 'show'])->whereNumber('bugReport');
+        Route::patch('{bugReport}', [BugReportController::class, 'update'])->whereNumber('bugReport');
+        Route::post('{bugReport}/comments', [BugReportController::class, 'storeComment'])->whereNumber('bugReport');
+        Route::get('{bugReport}/attachments/{attachment}', [BugReportController::class, 'downloadAttachment'])
+            ->whereNumber(['bugReport', 'attachment']);
+    });
 
     Route::apiResource('accounts', AccountController::class)->only(['index', 'store', 'update', 'destroy'])
         ->middleware(['auth:api', 'permission:accounting.manage']);
@@ -343,17 +379,22 @@ Route::prefix('v1')->group(function (): void {
     Route::get('accounting/settings', [AccountingSettingsController::class, 'show'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::patch('accounting/settings', [AccountingSettingsController::class, 'update'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/health', [AccountingHealthController::class, 'show'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::get('accounting/health/trends', [AccountingHealthController::class, 'trends'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/posting-failures', [AccountingPostingFailureController::class, 'index'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::post('accounting/posting-failures/{accountingPostingFailure}/retry', [AccountingPostingFailureController::class, 'retry'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::post('accounting/posting-failures/{accountingPostingFailure}/ignore', [AccountingPostingFailureController::class, 'ignore'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/reconciliation/ap', [AccountingReconciliationController::class, 'accountsPayable'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/reconciliation/procurement', [AccountingReconciliationController::class, 'procurement'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/reconciliation/payroll', [AccountingReconciliationController::class, 'payroll'])->middleware(['auth:api', 'permission:accounting.manage']);
-    Route::get('accounting/reports/cash-flow', [CashFlowReportController::class, 'show'])->middleware(['auth:api', 'permission:reports.view']);
+    Route::get('accounting/reconciliation/gift-cards', [AccountingReconciliationController::class, 'giftCards'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::get('accounting/reports/cash-flow', [CashFlowReportController::class, 'show'])
+        ->middleware(['auth:api', 'permission:accounting.manage', 'permission:reports.view']);
     Route::get('reports/ledger', [ReportController::class, 'ledger'])->middleware(['auth:api', 'permission:reports.view']);
     Route::get('reports/profit-loss', [ReportController::class, 'profitLoss'])->middleware(['auth:api', 'permission:reports.view']);
     Route::get('reports/balance-sheet', [ReportController::class, 'balanceSheet'])->middleware(['auth:api', 'permission:reports.view']);
     Route::get('reports/trial-balance', [ReportController::class, 'trialBalance'])->middleware(['auth:api', 'permission:reports.view']);
+    Route::get('reports/executive-sales', [\App\Modules\Reporting\Http\Controllers\ExecutiveSalesReportController::class, 'show'])
+        ->middleware(['auth:api', 'permission:reports.view']);
 
     Route::middleware('auth:api')->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);
@@ -571,6 +612,8 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('permission.any:payroll.manage');
         Route::patch('payroll-runs-v2/{run}/calculate', [PayrollRunV2Controller::class, 'calculate'])
             ->middleware('permission.any:payroll.manage');
+        Route::patch('payroll-runs-v2/{run}/reject', [PayrollRunV2Controller::class, 'reject'])
+            ->middleware('permission:payroll.manage');
         Route::patch('payroll-runs-v2/{run}/approve', [PayrollRunV2Controller::class, 'approve'])
             ->middleware('permission.any:payroll.manage');
         Route::patch('payroll-runs-v2/{run}/finalize', [PayrollRunV2Controller::class, 'finalize'])
@@ -875,7 +918,7 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('loyalty-analytics/dashboard', [LoyaltyAnalyticsDashboardController::class, 'show'])->middleware('permission:members.manage');
 
-        Route::patch('notifications/{notification}/read', [LoyaltyNotificationController::class, 'markRead'])->middleware('permission:members.manage');
+        Route::patch('member-notifications/{notification}/read', [LoyaltyNotificationController::class, 'markRead'])->middleware('permission:members.manage');
 
         Route::get('loyalty-campaigns', [LoyaltyCampaignController::class, 'index'])->middleware('permission:members.manage');
         Route::post('loyalty-campaigns', [LoyaltyCampaignController::class, 'store'])->middleware('permission:members.manage');
@@ -906,6 +949,10 @@ Route::prefix('v1')->group(function (): void {
         Route::post('pos-sessions/open', [PosSessionController::class, 'open'])->middleware('permission:pos.use');
         Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
         Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
+        Route::get('payments/health', [PaymentHealthController::class, 'show'])->middleware('permission:settings.manage');
+        Route::get('payments/health/trends', [PaymentHealthController::class, 'trends'])->middleware('permission:settings.manage');
+        Route::get('payments/health/reliability', [PaymentHealthController::class, 'reliability'])->middleware('permission:settings.manage');
+        Route::get('payments/incidents', [\App\Modules\Payments\Http\Controllers\PaymentIncidentController::class, 'index'])->middleware('permission:settings.manage');
         Route::post('payment-transactions', [PaymentTransactionController::class, 'store'])->middleware('permission:pos.use');
         Route::post('payments/xendit/simulate-paid/{paymentId}', [XenditSandboxSimulationController::class, 'simulatePaid'])->middleware('permission:pos.use');
         Route::post('payments/xendit/simulate-provider/{paymentId}', [XenditSandboxSimulationController::class, 'simulateProvider'])->middleware('permission:pos.use');
@@ -1043,6 +1090,7 @@ Route::prefix('v1')->group(function (): void {
         Route::delete('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'destroy'])->middleware('permission:purchase.manage');
         Route::patch('purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submit'])->middleware('permission:purchase.manage');
         Route::patch('purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}/reject', [PurchaseOrderController::class, 'reject'])->middleware('permission:purchase.manage');
         Route::patch('purchase-orders/{purchaseOrder}/cancel', [PurchaseOrderController::class, 'cancel'])->middleware('permission:purchase.manage');
         Route::patch('purchase-orders/{purchaseOrder}/close', [PurchaseOrderController::class, 'close'])->middleware('permission:purchase.manage');
         Route::get('purchase-orders/{purchaseOrder}/progress', [PurchaseOrderController::class, 'progress'])->middleware('permission:purchase.manage');

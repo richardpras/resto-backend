@@ -432,6 +432,7 @@ class HardwareBridgeService
         $rows = $query->limit($limit + 1)->get();
         $hasMore = $rows->count() > $limit;
         $commands = $rows->take($limit)->map(fn (HardwareCommandLog $command): array => [
+            'commandId' => (int) $command->id,
             'id' => (int) $command->id,
             'outletId' => (int) $command->outlet_id,
             'deviceId' => (int) $command->hardware_bridge_device_id,

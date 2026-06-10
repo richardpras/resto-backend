@@ -3,6 +3,7 @@
 namespace App\Modules\Accounting\Http\Resources;
 
 use App\Models\Modules\Accounting\Domain\AccountingPostingFailure;
+use App\Modules\Accounting\Services\AccountingHealthIntelligenceService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -11,6 +12,8 @@ class AccountingPostingFailureResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $aging = app(AccountingHealthIntelligenceService::class)->agingForFailure($this->resource);
+
         return [
             'id' => (string) $this->id,
             'sourceType' => $this->source_type,
@@ -24,6 +27,10 @@ class AccountingPostingFailureResource extends JsonResource
             'journalNo' => $this->relationLoaded('journal') ? $this->journal?->journal_no : null,
             'createdAt' => optional($this->created_at)->toISOString(),
             'resolvedAt' => optional($this->resolved_at)->toISOString(),
+            'ageMinutes' => $aging['ageMinutes'],
+            'ageHours' => $aging['ageHours'],
+            'ageDays' => $aging['ageDays'],
+            'agingBucket' => $aging['agingBucket'],
         ];
     }
 }

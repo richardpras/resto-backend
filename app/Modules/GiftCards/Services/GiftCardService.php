@@ -15,6 +15,7 @@ class GiftCardService
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly GiftCardEventLogger $eventLogger,
+        private readonly GiftCardAccountingService $giftCardAccountingService,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -34,8 +35,12 @@ class GiftCardService
             if ($existingLedger instanceof GiftCardLedger) {
                 $issuance = GiftCardIssuance::query()->findOrFail((int) $existingLedger->issuance_id);
 
-                return ['issuance' => $issuance, 'idempotent' => true];
+                return ['issuance' => $issuance->fresh(), 'idempotent' => true];
             }
+
+            $issueMeta = isset($payload['meta']) && is_array($payload['meta']) ? $payload['meta'] : [];
+            $cashReceived = isset($payload['cashReceivedAmount']) ? round((float) $payload['cashReceivedAmount'], 2) : null;
+            $hasPaymentSource = $cashReceived !== null && $cashReceived > 0;
 
             $issuance = GiftCardIssuance::query()->create([
                 'outlet_id' => $outletId,
@@ -48,7 +53,9 @@ class GiftCardService
                 'status' => 'active',
                 'issued_at' => now(),
                 'expires_at' => $payload['expiresAt'] ?? null,
-                'meta' => isset($payload['meta']) && is_array($payload['meta']) ? $payload['meta'] : null,
+                'meta' => array_merge($issueMeta, [
+                    'accountingStatus' => $hasPaymentSource ? 'pending_post' : 'pending_gl',
+                ]),
             ]);
 
             GiftCardLedger::query()->create([
@@ -72,7 +79,22 @@ class GiftCardService
                 ['code' => (string) $issuance->code, 'amount' => (float) $issuance->issued_amount]
             );
 
-            return ['issuance' => $issuance, 'idempotent' => false];
+            if ($hasPaymentSource) {
+                $journal = $this->giftCardAccountingService->postIssueLiability(
+                    $issuance->fresh(),
+                    $cashReceived,
+                    isset($payload['paymentMethod']) ? (string) $payload['paymentMethod'] : null,
+                    isset($payload['paymentReference']) ? (string) $payload['paymentReference'] : null,
+                );
+                $accountingMeta = is_array($issuance->meta) ? $issuance->meta : [];
+                $accountingMeta['accountingStatus'] = $journal !== null ? 'posted' : 'pending_gl';
+                if ($journal !== null) {
+                    $accountingMeta['issueJournalId'] = (int) $journal->id;
+                }
+                $issuance->update(['meta' => $accountingMeta]);
+            }
+
+            return ['issuance' => $issuance->fresh(), 'idempotent' => false];
         });
     }
 
@@ -215,6 +237,10 @@ class GiftCardService
             'expire#'.$issuance->id,
             ['expiredBalance' => $before]
         );
+
+        if ($before > 0) {
+            $this->giftCardAccountingService->postExpiryBreakage($issuance->fresh(), $before);
+        }
 
         return $issuance->fresh();
     }

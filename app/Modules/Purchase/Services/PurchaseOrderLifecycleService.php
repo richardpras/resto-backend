@@ -4,6 +4,7 @@ namespace App\Modules\Purchase\Services;
 
 use App\Models\Modules\Purchase\Domain\PurchaseOrder;
 use App\Models\User;
+use App\Modules\Notifications\Services\ApprovalNotificationService;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -12,6 +13,7 @@ final class PurchaseOrderLifecycleService
     public function __construct(
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly PurchaseAuditService $purchaseAuditService,
+        private readonly ApprovalNotificationService $approvalNotificationService,
     ) {}
 
     public function submit(PurchaseOrder $purchaseOrder, User $actor): PurchaseOrder
@@ -32,6 +34,7 @@ final class PurchaseOrderLifecycleService
             $this->purchaseAuditService->logPurchaseOrderLifecycle('submitted', (int) $fresh->id, (int) $fresh->outlet_id, $actor, [
                 'number' => $fresh->number,
             ]);
+            $this->approvalNotificationService->purchaseOrderSubmitted($fresh, $actor);
 
             return $fresh;
         });
@@ -54,6 +57,29 @@ final class PurchaseOrderLifecycleService
                 'number' => $fresh->number,
                 'approvedBy' => $actor->id,
             ]);
+            $this->approvalNotificationService->purchaseOrderApproved($fresh, $actor);
+
+            return $fresh;
+        });
+    }
+
+    public function reject(PurchaseOrder $purchaseOrder, User $actor): PurchaseOrder
+    {
+        $this->assertOutlet($actor, $purchaseOrder);
+        abort_if($purchaseOrder->status !== 'submitted', Response::HTTP_UNPROCESSABLE_ENTITY, 'Only submitted purchase orders can be rejected.');
+
+        return DB::transaction(function () use ($purchaseOrder, $actor): PurchaseOrder {
+            $purchaseOrder->update([
+                'status' => 'cancelled',
+                'cancelled_at' => now(),
+                'cancelled_by' => $actor->id,
+            ]);
+
+            $fresh = $purchaseOrder->fresh()->load(['items', 'purchaseRequest', 'goodsReceivingNotes']);
+            $this->purchaseAuditService->logPurchaseOrderLifecycle('rejected', (int) $fresh->id, (int) $fresh->outlet_id, $actor, [
+                'number' => $fresh->number,
+            ]);
+            $this->approvalNotificationService->purchaseOrderRejected($fresh, $actor);
 
             return $fresh;
         });

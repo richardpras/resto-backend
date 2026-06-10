@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\System\Services\ProductionCheckService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -48,6 +49,11 @@ Schedule::command('loyalty:process-expiry')
     ->withoutOverlapping()
     ->name('loyalty-process-expiry');
 
+Schedule::command('notifications:sync-staff')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->name('notifications-sync-staff');
+
 Schedule::command('loyalty:process-campaigns')
     ->everyFiveMinutes()
     ->withoutOverlapping()
@@ -62,3 +68,32 @@ Schedule::command('attendance:generate-summaries')
     ->dailyAt('01:00')
     ->withoutOverlapping()
     ->name('attendance-generate-summaries');
+
+Schedule::command('accounting:health-snapshot')
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->name('accounting-health-snapshot');
+
+Schedule::command('payment:health-snapshot')
+    ->dailyAt('02:15')
+    ->withoutOverlapping()
+    ->name('payment-health-snapshot');
+
+Schedule::command('payment:incident-check')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->name('payment-incident-check');
+
+Schedule::command('failed-jobs:snapshot')
+    ->dailyAt('02:30')
+    ->withoutOverlapping()
+    ->name('failed-jobs-snapshot');
+
+Schedule::command('failed-jobs:monitor')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->name('failed-jobs-monitor');
+
+Schedule::call(static function (): void {
+    ProductionCheckService::recordSchedulerHeartbeat();
+})->everyMinute()->name('system-scheduler-heartbeat');

@@ -5,12 +5,14 @@ namespace App\Modules\Accounting\Services;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\User;
+use App\Modules\GiftCards\Services\GiftCardAccountingService;
 
 final class AccountingRefundPostingService
 {
     public function __construct(
         private readonly JournalPostingService $journalPostingService,
         private readonly AccountingAuditService $accountingAuditService,
+        private readonly GiftCardAccountingService $giftCardAccountingService,
     ) {}
 
     public function postRefundForPaymentTransaction(PaymentTransaction $transaction, ?User $actor = null): ?Journal
@@ -38,6 +40,13 @@ final class AccountingRefundPostingService
             $transaction->outlet_id !== null ? (int) $transaction->outlet_id : null,
             $actor,
             ['originalJournalId' => (int) $journal->id, 'reversalJournalId' => (int) $reversal->id],
+        );
+
+        $this->giftCardAccountingService->reverseRedemptionForOrder(
+            (int) $transaction->order_id,
+            $transaction->outlet_id !== null ? (int) $transaction->outlet_id : null,
+            $actor,
+            'refund-payment-transaction-'.$transaction->id,
         );
 
         return $reversal;
@@ -74,6 +83,13 @@ final class AccountingRefundPostingService
             $outletId,
             $actor,
             ['originalJournalId' => (int) $journal->id, 'reversalJournalId' => (int) $reversal->id, 'amount' => $amount],
+        );
+
+        $this->giftCardAccountingService->reverseRedemptionForOrder(
+            $orderId,
+            $outletId,
+            $actor,
+            'refund-order-'.$orderId,
         );
 
         return $reversal;

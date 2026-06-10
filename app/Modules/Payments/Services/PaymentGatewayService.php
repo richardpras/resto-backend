@@ -16,6 +16,7 @@ use App\Modules\Accounting\Services\AccountingRefundPostingService;
 use App\Modules\Accounting\Services\AccountingSettingsService;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\Accounting\Services\RevenuePostingGuardService;
+use App\Modules\GiftCards\Services\GiftCardAccountingService;
 use App\Modules\GiftCards\Services\GiftCardSettlementHookService;
 use App\Modules\Payments\Events\PaymentStatusChanged;
 use App\Modules\Payments\Registry\PaymentGatewayRegistry;
@@ -40,12 +41,14 @@ class PaymentGatewayService
         private readonly JournalPostingService $journalPostingService,
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly GiftCardSettlementHookService $giftCardSettlementHookService,
+        private readonly GiftCardAccountingService $giftCardAccountingService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly GatewayProviderResolutionService $gatewayProviderResolutionService,
         private readonly OutletPaymentMethodConfigService $outletPaymentMethodConfigService,
         private readonly AccountingRefundPostingService $accountingRefundPostingService,
         private readonly AccountingSettingsService $accountingSettingsService,
         private readonly RevenuePostingGuardService $revenuePostingGuard,
+        private readonly PaymentConfigurationHealthService $paymentConfigurationHealthService,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -67,6 +70,7 @@ class PaymentGatewayService
             ? strtolower(trim($rawProvider))
             : null;
         $provider = $this->gatewayProviderResolutionService->resolve($outletId, $requested);
+        $this->paymentConfigurationHealthService->assertHealthyForInitiation($provider, $outletId);
         $idempotencyKey = trim((string) $payload['idempotencyKey']);
         $providerAdapter = $this->resolveProviderAdapter($provider);
 
@@ -117,7 +121,10 @@ class PaymentGatewayService
                 'deeplink_url' => $providerResponse['deeplink_url'] ?? null,
                 'va_number' => $providerResponse['va_number'] ?? null,
                 'expiry_time' => $expiryTime,
-                'payload_snapshot' => $providerResponse['raw'] ?? ($payload['payloadSnapshot'] ?? null),
+                'payload_snapshot' => $this->mergePaymentPayloadSnapshot(
+                    $providerResponse['raw'] ?? null,
+                    $payload['payloadSnapshot'] ?? null,
+                ),
                 'provider_metadata_snapshot' => $providerResponse['provider_metadata'] ?? null,
                 'expired_at' => $payload['expiredAt'] ?? null,
             ]);
@@ -788,39 +795,21 @@ class PaymentGatewayService
             ]);
         }
 
-        $cash = $this->resolveAccount('cash_bank', ['1100'], ['asset'], $outletForJournal);
-        $revenue = $this->resolveAccount('sales_revenue', ['4100'], ['revenue'], $outletForJournal);
-        if ($cash === null || $revenue === null) {
-            throw ValidationException::withMessages([
-                'accounts' => ['Missing active cash or revenue account mapping for payment posting.'],
-            ]);
-        }
+        $snapshot = is_array($transaction->payload_snapshot) ? $transaction->payload_snapshot : [];
+        $settlementIds = isset($snapshot['giftCardSettlementIds']) && is_array($snapshot['giftCardSettlementIds'])
+            ? array_values(array_filter(array_map('intval', $snapshot['giftCardSettlementIds']), static fn (int $id): bool => $id > 0))
+            : [];
+        $giftCardComposition = $this->giftCardAccountingService->compositionFromSettlementIds(
+            $settlementIds,
+            $outletForJournal,
+        );
 
-        $amount = (float) $transaction->amount;
-        $this->journalPostingService->post([
-            'tenant_id' => (int) ($order->tenant_id ?? 0),
-            'outlet_id' => $outletForJournal,
-            'source_type' => 'payment_transaction',
-            'source_id' => (string) $transaction->id,
-            'journal_date' => now()->toDateString(),
-            'description' => 'Auto posting from payment transaction paid transition',
-            'posting_key' => 'payment-transaction-'.$transaction->id,
-            'scope' => 'payment_transaction.'.$transaction->id,
-            'lines' => [
-                [
-                    'account_id' => (int) $cash->id,
-                    'debit' => $amount,
-                    'credit' => 0,
-                    'memo' => 'Payment gateway settlement',
-                ],
-                [
-                    'account_id' => (int) $revenue->id,
-                    'debit' => 0,
-                    'credit' => $amount,
-                    'memo' => 'Revenue recognition',
-                ],
-            ],
-        ]);
+        $this->giftCardAccountingService->postPaymentTransactionJournal(
+            $transaction,
+            (int) ($order->tenant_id ?? 0),
+            $outletForJournal,
+            $giftCardComposition,
+        );
 
         $this->runGiftCardSettlementHook($transaction, $outletForJournal);
     }
@@ -874,6 +863,22 @@ class PaymentGatewayService
         }
 
         return (clone $query)->orderBy('id')->first();
+    }
+
+    /**
+     * @param  mixed  $providerRaw
+     * @param  mixed  $clientSnapshot
+     * @return array<string,mixed>|null
+     */
+    private function mergePaymentPayloadSnapshot(mixed $providerRaw, mixed $clientSnapshot): ?array
+    {
+        $provider = is_array($providerRaw) ? $providerRaw : [];
+        $client = is_array($clientSnapshot) ? $clientSnapshot : [];
+        if ($provider === [] && $client === []) {
+            return null;
+        }
+
+        return array_merge($provider, $client);
     }
 
     private function resolveProviderAdapter(string $provider): PaymentProviderInterface

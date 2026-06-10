@@ -10,6 +10,8 @@ class PayrollRunAudit extends Model
 {
     public const ACTION_CALCULATED = 'calculated';
 
+    public const ACTION_REJECTED = 'rejected';
+
     public const ACTION_APPROVED = 'approved';
 
     public const ACTION_FINALIZED = 'finalized';

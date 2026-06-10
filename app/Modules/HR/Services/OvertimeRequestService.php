@@ -4,6 +4,7 @@ namespace App\Modules\HR\Services;
 
 use App\Models\Modules\HR\Domain\OvertimeRequest;
 use App\Models\User;
+use App\Modules\Notifications\Services\ApprovalNotificationService;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -15,6 +16,7 @@ class OvertimeRequestService
         private readonly EmployeeMasterService $employeeMaster,
         private readonly OvertimeTypeService $overtimeTypes,
         private readonly OvertimeSummaryService $summaries,
+        private readonly ApprovalNotificationService $approvalNotificationService,
     ) {}
 
     /**
@@ -96,7 +98,7 @@ class OvertimeRequestService
         $duration = $this->calculateDuration($startTime, $endTime);
         $this->assertNoOverlappingApproved($employeeId, $date, $startTime, $endTime);
 
-        return OvertimeRequest::query()->create([
+        $request = OvertimeRequest::query()->create([
             'outlet_id' => (int) $employee->outlet_id,
             'employee_id' => $employee->id,
             'overtime_type_id' => $type->id,
@@ -108,6 +110,12 @@ class OvertimeRequestService
             'reason' => $payload['reason'] ?? null,
             'status' => OvertimeRequest::STATUS_PENDING,
         ]);
+
+        if ($user !== null) {
+            $this->approvalNotificationService->overtimeRequestSubmitted($request->load(['employee', 'overtimeType']), $user);
+        }
+
+        return $request;
     }
 
     public function approve(?User $user, int $id): OvertimeRequest
@@ -139,7 +147,12 @@ class OvertimeRequestService
             $request->overtime_date->toDateString(),
         );
 
-        return $request->refresh()->load(['employee', 'overtimeType']);
+        $fresh = $request->refresh()->load(['employee', 'overtimeType']);
+        if ($user !== null) {
+            $this->approvalNotificationService->overtimeRequestApproved($fresh, $user);
+        }
+
+        return $fresh;
     }
 
     public function reject(?User $user, int $id, array $payload): OvertimeRequest
@@ -159,7 +172,12 @@ class OvertimeRequestService
             'rejection_reason' => $payload['rejectionReason'] ?? null,
         ]);
 
-        return $request->refresh()->load(['employee', 'overtimeType']);
+        $fresh = $request->refresh()->load(['employee', 'overtimeType']);
+        if ($user !== null) {
+            $this->approvalNotificationService->overtimeRequestRejected($fresh, $user);
+        }
+
+        return $fresh;
     }
 
     public function cancel(?User $user, int $id): OvertimeRequest

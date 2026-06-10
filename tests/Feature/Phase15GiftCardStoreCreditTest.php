@@ -60,6 +60,7 @@ class Phase15GiftCardStoreCreditTest extends TestCase
     public function test_idempotent_redeem_protection_and_settlement_hook_idempotency(): void
     {
         [$outlet] = $this->actAsAdminWithOutlet();
+        $this->seedSettlementAccountingAccounts();
 
         $this->postJson('/api/v1/gift-cards/issue', [
             'outletId' => (int) $outlet->id,
@@ -178,5 +179,28 @@ class Phase15GiftCardStoreCreditTest extends TestCase
             'status' => 'active',
             'code' => strtolower($prefix).'-'.uniqid(),
         ]);
+    }
+
+    private function seedSettlementAccountingAccounts(): void
+    {
+        foreach ([
+            ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'category' => 'cash_bank'],
+            ['code' => '2135', 'name' => 'Store Credit Liability', 'type' => 'liability', 'category' => 'store_credit_liability'],
+            ['code' => '4100', 'name' => 'Sales', 'type' => 'revenue', 'category' => 'sales_revenue'],
+        ] as $row) {
+            if (DB::table('accounts')->where('code', $row['code'])->exists()) {
+                continue;
+            }
+            DB::table('accounts')->insert([
+                'tenant_id' => 1,
+                'code' => $row['code'],
+                'name' => $row['name'],
+                'type' => $row['type'],
+                'category' => $row['category'],
+                'is_active' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
     }
 }

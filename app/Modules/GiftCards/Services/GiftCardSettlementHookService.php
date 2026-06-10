@@ -12,6 +12,7 @@ class GiftCardSettlementHookService
 {
     public function __construct(
         private readonly GiftCardEventLogger $eventLogger,
+        private readonly GiftCardAccountingService $giftCardAccountingService,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -80,6 +81,12 @@ class GiftCardSettlementHookService
                     'count' => $settlements->count(),
                 ]
             );
+
+            if ($status === 'settled') {
+                foreach ($settlements as $settlement) {
+                    $this->giftCardAccountingService->postSettledRedemptionRevenue($settlement->fresh());
+                }
+            }
 
             return ['idempotent' => false, 'count' => $settlements->count()];
         });

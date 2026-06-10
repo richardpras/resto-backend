@@ -4,6 +4,7 @@ namespace App\Modules\Inventory\Services;
 
 use App\Models\User;
 use App\Modules\Accounting\Services\GlBalanceService;
+use App\Modules\Notifications\Services\Adapters\InventoryNotificationAdapter;
 
 final class InventoryValuationReconciliationService
 {
@@ -11,6 +12,7 @@ final class InventoryValuationReconciliationService
         private readonly InventoryValuationService $valuationService,
         private readonly GlBalanceService $glBalanceService,
         private readonly InventoryValuationAuditService $auditService,
+        private readonly InventoryNotificationAdapter $inventoryNotificationAdapter,
     ) {}
 
     /** @return array<string,mixed> */
@@ -40,6 +42,10 @@ final class InventoryValuationReconciliationService
                     'status' => $status,
                 ],
             );
+
+            if ($outletId !== null && $outletId > 0) {
+                $this->inventoryNotificationAdapter->notifyVarianceDetected($outletId, $difference, $status);
+            }
         }
 
         return [

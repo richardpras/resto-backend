@@ -8,6 +8,7 @@ use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\Modules\Accounting\Domain\JournalPostingKey;
 use App\Models\Modules\Accounting\Domain\AccountingPeriod;
 use App\Models\User;
+use App\Modules\GiftCards\Support\GiftCardRedemptionComposition;
 use App\Modules\Orders\Services\PosAuditLogService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -190,7 +191,10 @@ class JournalPostingService
 
     public function postForOrderPayment(int $orderId, int $tenantId, ?int $outletId, float $sales, float $cogs): ?Journal
     {
-        if ($sales <= 0) {
+        $giftCardComposition = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class)
+            ->compositionFromOrderId($orderId, $outletId);
+        $totalRevenue = round($sales + $giftCardComposition->total(), 2);
+        if ($totalRevenue <= 0) {
             return null;
         }
 
@@ -204,35 +208,14 @@ class JournalPostingService
         }
 
         try {
-            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100'], ['asset'], $outletId);
-            $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100'], ['revenue'], $outletId);
-
-            $lines = [
-                ['account_id' => $cash->id, 'debit' => $sales, 'credit' => 0, 'memo' => 'Payment completion'],
-                ['account_id' => $revenue->id, 'debit' => 0, 'credit' => $sales, 'memo' => 'Revenue recognition'],
-            ];
-            if ($cogs > 0) {
-                $cogsAcc = $this->integrityService->resolveAccount('cogs', ['5100'], ['expense'], $outletId);
-                $inventory = $this->integrityService->resolveAccount('inventory', ['1300'], ['asset'], $outletId);
-                if ($cogsAcc !== null && $inventory !== null) {
-                    $lines[] = ['account_id' => $cogsAcc->id, 'debit' => $cogs, 'credit' => 0, 'memo' => 'COGS recognition'];
-                    $lines[] = ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $cogs, 'memo' => 'Inventory reduction'];
-                }
-            }
-
-            $payload = [
-                'tenant_id' => $tenantId,
-                'outlet_id' => $outletId,
-                'source_type' => 'order_payment',
-                'source_id' => $orderId,
-                'journal_date' => now()->toDateString(),
-                'description' => 'Auto posting from order payment completion',
-                'posting_key' => 'order-payment-'.$orderId,
-                'scope' => 'order_payment.'.$orderId,
-                'lines' => $lines,
-            ];
-
-            return $this->post($payload);
+            return app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class)->postOrderPaymentJournal(
+                $orderId,
+                $tenantId,
+                $outletId,
+                $sales,
+                $giftCardComposition,
+                $cogs,
+            );
         } catch (\Throwable $e) {
             $this->recordAutoPostFailure('order_payment', $orderId, $outletId, $e, [
                 'tenant_id' => $tenantId,
@@ -245,6 +228,7 @@ class JournalPostingService
                 'scope' => 'order_payment.'.$orderId,
                 'sales' => $sales,
                 'cogs' => $cogs,
+                'giftCardTotal' => $giftCardComposition->total(),
             ]);
 
             return null;
@@ -333,23 +317,28 @@ class JournalPostingService
     public function postForShiftClose(
         int $tenantId,
         ?int $outletId,
-        float $totalSales,
+        float $totalCashSales,
         float $totalCogs,
         string $batchKey,
+        ?GiftCardRedemptionComposition $giftCardComposition = null,
     ): ?Journal {
-        if ($totalSales <= 0) {
+        $giftCardComposition ??= new GiftCardRedemptionComposition;
+        $totalRevenue = round($totalCashSales + $giftCardComposition->total(), 2);
+        if ($totalRevenue <= 0) {
             return null;
         }
 
         try {
-            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100', '1001'], ['asset'], $outletId);
-            $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100', '4001'], ['revenue'], $outletId);
+            $salesLines = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class)->buildSalesJournalLines(
+                $totalCashSales,
+                $giftCardComposition,
+                $outletId,
+            );
             $cogsAcc = $this->integrityService->resolveAccountOrFail('cogs', ['5100'], ['expense'], $outletId);
             $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
 
             $lines = [
-                ['account_id' => $cash->id, 'debit' => $totalSales, 'credit' => 0, 'memo' => 'Cash received from paid POS orders'],
-                ['account_id' => $revenue->id, 'debit' => 0, 'credit' => $totalSales, 'memo' => 'Revenue recognized on shift close'],
+                ...$salesLines,
                 ['account_id' => $cogsAcc->id, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS recognized on shift close'],
                 ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction on shift close'],
             ];
@@ -369,7 +358,8 @@ class JournalPostingService
             $this->recordAutoPostFailure('shift_close', (int) crc32($batchKey), $outletId, $e, [
                 'tenant_id' => $tenantId,
                 'outlet_id' => $outletId,
-                'total_sales' => $totalSales,
+                'total_cash_sales' => $totalCashSales,
+                'gift_card_total' => $giftCardComposition->total(),
                 'total_cogs' => $totalCogs,
                 'batch_key' => $batchKey,
             ]);

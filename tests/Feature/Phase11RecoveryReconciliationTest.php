@@ -204,6 +204,8 @@ class Phase11RecoveryReconciliationTest extends TestCase
 
     private function createPaymentTransaction(int $orderId, int $outletId, string $externalReference, string $idempotencyKey): int
     {
+        $this->enableGatewayQrisForOutlet($outletId);
+
         $response = $this->postJson('/api/v1/payment-transactions', [
             'orderId' => $orderId,
             'outletId' => $outletId,
@@ -226,6 +228,24 @@ class Phase11RecoveryReconciliationTest extends TestCase
 
         return $this->withHeaders(['X-Signature' => $signature])
             ->postJson('/api/v1/payment-webhooks/manual', $payload);
+    }
+
+    private function enableGatewayQrisForOutlet(int $outletId): void
+    {
+        DB::table('outlet_payment_method_configs')->upsert([
+            [
+                'outlet_id' => $outletId,
+                'payment_method_code' => 'gateway_qris',
+                'type' => 'gateway_qris',
+                'provider' => 'manual',
+                'enabled' => true,
+                'display_order' => 10,
+                'is_default' => true,
+                'settings' => json_encode([], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ], ['outlet_id', 'payment_method_code'], ['enabled', 'provider', 'updated_at']);
     }
 }
 

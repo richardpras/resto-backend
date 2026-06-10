@@ -5,6 +5,7 @@ namespace App\Modules\HR\Services;
 use App\Models\Modules\HR\Domain\LeaveRequest;
 use App\Models\Modules\HR\Domain\LeaveType;
 use App\Models\User;
+use App\Modules\Notifications\Services\ApprovalNotificationService;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +17,7 @@ class LeaveRequestService
         private readonly EmployeeMasterService $employeeMaster,
         private readonly LeaveTypeService $leaveTypes,
         private readonly LeaveBalanceService $leaveBalances,
+        private readonly ApprovalNotificationService $approvalNotificationService,
     ) {}
 
     /**
@@ -109,7 +111,7 @@ class LeaveRequestService
 
         $this->assertNoOverlappingApprovedLeave($employeeId, $startDate, $endDate);
 
-        return LeaveRequest::query()->create([
+        $request = LeaveRequest::query()->create([
             'outlet_id' => (int) $employee->outlet_id,
             'employee_id' => $employee->id,
             'leave_type_id' => $type->id,
@@ -120,6 +122,12 @@ class LeaveRequestService
             'attachment_path' => $payload['attachmentPath'] ?? null,
             'status' => LeaveRequest::STATUS_PENDING,
         ]);
+
+        if ($user !== null) {
+            $this->approvalNotificationService->leaveRequestSubmitted($request->load(['employee', 'leaveType']), $user);
+        }
+
+        return $request;
     }
 
     public function approve(?User $user, int $id): LeaveRequest
@@ -152,7 +160,12 @@ class LeaveRequestService
             'approved_at' => now(),
         ]);
 
-        return $request->refresh()->load(['employee', 'leaveType']);
+        $fresh = $request->refresh()->load(['employee', 'leaveType']);
+        if ($user !== null) {
+            $this->approvalNotificationService->leaveRequestApproved($fresh, $user);
+        }
+
+        return $fresh;
     }
 
     public function reject(?User $user, int $id, array $payload): LeaveRequest
@@ -172,7 +185,12 @@ class LeaveRequestService
             'rejection_reason' => $payload['rejectionReason'] ?? null,
         ]);
 
-        return $request->refresh()->load(['employee', 'leaveType']);
+        $fresh = $request->refresh()->load(['employee', 'leaveType']);
+        if ($user !== null) {
+            $this->approvalNotificationService->leaveRequestRejected($fresh, $user);
+        }
+
+        return $fresh;
     }
 
     public function cancel(?User $user, int $id): LeaveRequest
