@@ -11,6 +11,7 @@ class SystemSetting extends Model
         'enable_multi_payment',
         'confirm_before_payment',
         'enable_qr_ordering',
+        'customer_app_url',
         'employee_self_service_enabled',
     ];
 

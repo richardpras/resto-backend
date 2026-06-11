@@ -407,6 +407,7 @@ class SettingsDomainService
                 'enableMultiPayment' => (bool) ($s['enableMultiPayment'] ?? true),
                 'confirmBeforePayment' => (bool) ($s['confirmBeforePayment'] ?? true),
                 'enableQROrdering' => (bool) ($s['enableQROrdering'] ?? true),
+                'customerAppUrl' => $s['customerAppUrl'] ?? null,
                 'employeeSelfServiceEnabled' => (bool) ($s['employeeSelfServiceEnabled'] ?? false),
             ];
         }
@@ -416,8 +417,25 @@ class SettingsDomainService
             'enableMultiPayment' => $row->enable_multi_payment,
             'confirmBeforePayment' => $row->confirm_before_payment,
             'enableQROrdering' => $row->enable_qr_ordering,
+            'customerAppUrl' => $row->customer_app_url,
             'employeeSelfServiceEnabled' => (bool) $row->employee_self_service_enabled,
         ];
+    }
+
+    public function putCustomerAppUrl(?string $customerAppUrl): void
+    {
+        $row = SystemSetting::query()->firstOrCreate(
+            ['id' => self::SINGLETON_ID],
+            [
+                'enable_split_bill' => true,
+                'enable_multi_payment' => true,
+                'confirm_before_payment' => true,
+                'enable_qr_ordering' => true,
+                'employee_self_service_enabled' => false,
+            ],
+        );
+        $row->customer_app_url = $customerAppUrl;
+        $row->save();
     }
 
     /** @param  array<string, mixed>  $data */

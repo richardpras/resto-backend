@@ -2,7 +2,9 @@
 
 namespace App\Models\Modules\Menu\Domain;
 
+use App\Models\Modules\Production\Domain\ProductionStation;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -13,10 +15,16 @@ class MenuItem extends Model
         'outlet_id',
         'name',
         'category',
+        'production_station_id',
         'emoji',
         'price',
         'available',
     ];
+
+    public function productionStation(): BelongsTo
+    {
+        return $this->belongsTo(ProductionStation::class, 'production_station_id');
+    }
 
     public function recipes(): HasMany
     {

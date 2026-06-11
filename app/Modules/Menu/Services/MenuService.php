@@ -4,6 +4,7 @@ namespace App\Modules\Menu\Services;
 
 use App\Models\Modules\Menu\Domain\MenuItemOutlet;
 use App\Models\Modules\Inventory\Domain\Ingredient;
+use App\Models\Modules\Production\Domain\ProductionStation;
 use App\Modules\Menu\DTOs\CreateMenuItemData;
 use App\Modules\Menu\DTOs\UpdateMenuItemData;
 use App\Modules\Menu\Repositories\MenuRepositoryInterface;
@@ -30,11 +31,14 @@ class MenuService
     public function create(CreateMenuItemData $data)
     {
         return DB::transaction(function () use ($data) {
+            $this->assertProductionStationForOutlet($data->productionStationId, $data->outletId);
+
             $menuItem = $this->menuRepository->create([
                 'tenant_id' => $data->tenantId,
                 'outlet_id' => $data->outletId,
                 'name' => $data->name,
                 'category' => $data->category,
+                'production_station_id' => $data->productionStationId,
                 'emoji' => $data->emoji,
                 'price' => $data->price,
                 'available' => $data->available,
@@ -55,6 +59,10 @@ class MenuService
                 return null;
             }
 
+            if ($data->updateProductionStationId) {
+                $this->assertProductionStationForOutlet($data->productionStationId, $menuItem->outlet_id !== null ? (int) $menuItem->outlet_id : null);
+            }
+
             $attributes = array_filter([
                 'name' => $data->name,
                 'category' => $data->category,
@@ -62,6 +70,10 @@ class MenuService
                 'price' => $data->price,
                 'available' => $data->available,
             ], static fn ($value) => $value !== null);
+
+            if ($data->updateProductionStationId) {
+                $attributes['production_station_id'] = $data->productionStationId;
+            }
 
             if ($attributes !== []) {
                 $this->menuRepository->update($menuItem, $attributes);
@@ -98,6 +110,20 @@ class MenuService
         );
 
         $this->recipeVersionService->createVersionFromRecipes($menuItemId, $recipes);
+    }
+
+    private function assertProductionStationForOutlet(?int $productionStationId, ?int $outletId): void
+    {
+        if ($productionStationId === null) {
+            return;
+        }
+
+        $station = ProductionStation::query()->find($productionStationId);
+        abort_if($station === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Production station not found.');
+
+        if ($outletId !== null && $outletId > 0 && (int) $station->outlet_id !== $outletId) {
+            abort(Response::HTTP_UNPROCESSABLE_ENTITY, 'Production station must belong to the menu item outlet.');
+        }
     }
 
     private function syncOutletMappings(int $menuItemId, array $menuItemOutlets): void

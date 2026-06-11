@@ -14,6 +14,8 @@ class PrinterRoute extends Model
         'print_type',
         'route_scope',
         'item_id',
+        'production_station_id',
+        'station_code',
         'station',
         'category',
         'priority',
@@ -29,5 +31,10 @@ class PrinterRoute extends Model
     public function profile(): BelongsTo
     {
         return $this->belongsTo(PrinterProfile::class, 'printer_profile_id');
+    }
+
+    public function productionStation(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Modules\Production\Domain\ProductionStation::class, 'production_station_id');
     }
 }

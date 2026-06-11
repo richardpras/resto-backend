@@ -59,9 +59,8 @@ class KitchenTicketItemSyncTest extends TestCase
 
         $start = $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
         $linkedOrderId = (int) $start->json('linkedOrderId');
-        $ticketId = (int) DB::table('kitchen_tickets')->where('order_id', $linkedOrderId)->value('id');
 
-        $this->assertSame(0, DB::table('kitchen_ticket_items')->where('kitchen_ticket_id', $ticketId)->count());
+        $this->assertSame(0, DB::table('kitchen_tickets')->where('order_id', $linkedOrderId)->count());
 
         $this->patchJson('/api/v1/orders/'.$linkedOrderId, [
             'items' => [
@@ -73,6 +72,8 @@ class KitchenTicketItemSyncTest extends TestCase
             'total' => 115500,
         ])->assertOk();
 
+        $ticketId = (int) DB::table('kitchen_tickets')->where('order_id', $linkedOrderId)->value('id');
+        $this->assertGreaterThan(0, $ticketId);
         $this->assertSame(2, DB::table('kitchen_ticket_items')->where('kitchen_ticket_id', $ticketId)->count());
         $this->assertDatabaseHas('kitchen_ticket_items', [
             'kitchen_ticket_id' => $ticketId,
@@ -85,7 +86,7 @@ class KitchenTicketItemSyncTest extends TestCase
             'qty' => 1,
         ]);
 
-        $this->assertSame($ticketId, (int) DB::table('kitchen_tickets')->where('order_id', $linkedOrderId)->value('id'));
+        $this->assertSame(1, DB::table('kitchen_tickets')->where('order_id', $linkedOrderId)->count());
 
         $list = $this->getJson('/api/v1/kitchen/tickets?outletId='.$outlet->id.'&status=queued')->assertOk();
         $list->assertJsonPath('data.0.id', $ticketId)

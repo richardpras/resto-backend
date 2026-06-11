@@ -37,6 +37,17 @@ class MenuItemResource extends JsonResource
             'emoji' => $this->emoji,
             'price' => $displayPrice,
             'available' => (bool) $this->available,
+            'productionStation' => $this->whenLoaded('productionStation', function () {
+                if ($this->productionStation === null) {
+                    return null;
+                }
+
+                return [
+                    'id' => (int) $this->productionStation->id,
+                    'code' => (string) $this->productionStation->code,
+                    'name' => (string) $this->productionStation->name,
+                ];
+            }),
             'recipes' => $this->whenLoaded('recipes', fn () => $this->recipes->map(fn ($recipe) => [
                 'id' => $recipe->id,
                 'inventoryItemId' => (string) $recipe->inventory_item_id,

@@ -22,6 +22,17 @@ class StoreMenuItemRequest extends FormRequest
             'emoji' => ['nullable', 'string', 'max:10'],
             'price' => ['required', 'numeric', 'min:0'],
             'available' => ['sometimes', 'boolean'],
+            'productionStationId' => [
+                'nullable',
+                'integer',
+                'min:1',
+                Rule::exists('production_stations', 'id')->where(function ($query): void {
+                    $outletId = $this->input('outletId');
+                    if (is_numeric($outletId) && (int) $outletId > 0) {
+                        $query->where('outlet_id', (int) $outletId);
+                    }
+                }),
+            ],
             'recipes' => ['sometimes', 'array'],
             'recipes.*.inventoryItemId' => [
                 'required_with:recipes',

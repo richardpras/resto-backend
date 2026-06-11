@@ -13,6 +13,7 @@ readonly class KitchenRealtimeSnapshot
         public int $orderId,
         public string $ticketNo,
         public string $status,
+        public ?array $station,
         public ?string $orderCode,
         public ?string $tableNumber,
         public ?string $serviceMode,
@@ -27,7 +28,7 @@ readonly class KitchenRealtimeSnapshot
 
     public static function fromModel(KitchenTicket $ticket): self
     {
-        $ticket->loadMissing(['items.orderItem', 'order']);
+        $ticket->loadMissing(['items.orderItem', 'order', 'productionStation']);
 
         $order = $ticket->order;
         $tableNumber = null;
@@ -55,12 +56,22 @@ readonly class KitchenRealtimeSnapshot
             ];
         })->values()->all();
 
+        $station = null;
+        if ($ticket->production_station_id !== null) {
+            $station = [
+                'id' => (int) $ticket->production_station_id,
+                'code' => (string) ($ticket->station_code ?? ''),
+                'name' => (string) ($ticket->station_name ?? ''),
+            ];
+        }
+
         return new self(
             id: (int) $ticket->id,
             outletId: (int) $ticket->outlet_id,
             orderId: (int) $ticket->order_id,
             ticketNo: (string) $ticket->ticket_no,
             status: (string) $ticket->status,
+            station: $station,
             orderCode: $order !== null ? (string) $order->code : null,
             tableNumber: $tableNumber,
             serviceMode: $order !== null ? (string) ($order->service_mode ?? '') : null,
@@ -111,6 +122,7 @@ readonly class KitchenRealtimeSnapshot
             'serviceMode' => $this->serviceMode,
             'ticket_no' => $this->ticketNo,
             'ticketNo' => $this->ticketNo,
+            'station' => $this->station,
             'status' => $this->status,
             'queued_at' => $this->queuedAtIso,
             'queuedAt' => $this->queuedAtIso,

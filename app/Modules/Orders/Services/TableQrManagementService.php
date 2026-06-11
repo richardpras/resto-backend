@@ -84,13 +84,7 @@ class TableQrManagementService
 
     public function canonicalUrl(RestaurantTable $table): string
     {
-        $baseUrl = (string) (config('app.frontend_url') ?: config('app.url'));
-        $baseUrl = rtrim($baseUrl, '/');
-        if ($table->qr_public_id) {
-            return $baseUrl.'/qr/'.rawurlencode((string) $table->qr_public_id);
-        }
-
-        return $baseUrl.'/qr-order?outletId='.(int) $table->outlet_id.'&tableId='.(int) $table->id;
+        return app(TableQrService::class)->canonicalUrl($table);
     }
 
     private function newPublicId(int $outletId): string

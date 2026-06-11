@@ -58,7 +58,8 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
 
-php artisan migrate:fresh --seed
+php artisan migrate:fresh
+php artisan demo:seed
 php artisan passport:client --personal --name="Resto API Personal Access Client" --provider=users
 npm install -g ngrok
 ngrok http 8000

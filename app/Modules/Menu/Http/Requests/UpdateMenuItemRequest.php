@@ -20,6 +20,7 @@ class UpdateMenuItemRequest extends FormRequest
             'emoji' => ['sometimes', 'string', 'max:10'],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'available' => ['sometimes', 'boolean'],
+            'productionStationId' => ['nullable', 'integer', 'min:1', Rule::exists('production_stations', 'id')],
             'recipes' => ['sometimes', 'array'],
             'recipes.*.inventoryItemId' => [
                 'required_with:recipes',

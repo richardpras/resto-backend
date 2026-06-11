@@ -24,6 +24,8 @@ use App\Models\Modules\Loyalty\Domain\LoyaltyRewardRedemption;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Menu\Domain\MenuItemOutlet;
 use App\Models\Modules\Menu\Domain\MenuRecipe;
+use App\Models\Modules\Production\Domain\ProductionStation;
+use App\Modules\Production\Services\ProductionStationProvisioner;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderSplit;
@@ -63,10 +65,35 @@ class DemoDatasetSeederService
      */
     public static function outlets(): array
     {
-        return [
-            'A' => ['code' => 'DEMO-CENTRAL', 'name' => 'Resto Nusantara — Central'],
-            'B' => ['code' => 'DEMO-WEST', 'name' => 'Resto Nusantara — West'],
-        ];
+        $specs = [];
+        foreach (\Database\Seeders\Demo\DemoSeederContext::OUTLET_SPECS as $key => $row) {
+            $specs[$key] = ['code' => $row['code'], 'name' => $row['name'], 'domain' => $row['domain']];
+        }
+
+        return $specs;
+    }
+
+    /** @return array<string, array{code: string, name: string, domain?: string}> */
+    private static function filteredOutlets(): array
+    {
+        $all = self::outlets();
+        $filter = \Database\Seeders\Demo\DemoSeederContext::$outletIdFilter;
+        if ($filter === null || $filter <= 0) {
+            return $all;
+        }
+
+        $outlet = Outlet::query()->find($filter);
+        if ($outlet === null) {
+            return $all;
+        }
+
+        foreach ($all as $key => $spec) {
+            if ($spec['code'] === $outlet->code) {
+                return [$key => $spec];
+            }
+        }
+
+        return $all;
     }
 
     public static function baseTime(): CarbonImmutable
@@ -77,7 +104,7 @@ class DemoDatasetSeederService
     public static function seedFoundation(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->updateOrCreate(
                     ['code' => $spec['code']],
                     [
@@ -124,9 +151,9 @@ class DemoDatasetSeederService
                 $roleIds[$name] = $role->id;
             }
 
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
-                $domain = strtolower($key).'.demo.resto.local';
+                $domain = $spec['domain'] ?? strtolower($key).'.demo.resto.local';
                 $users = [
                     ['name' => "Manager {$key}", 'email' => "manager@{$domain}", 'pin' => '1111', 'password' => 'demo123', 'role' => 'Demo Outlet Manager'],
                     ['name' => "Cashier {$key} One", 'email' => "cashier1@{$domain}", 'pin' => '2221', 'password' => 'demo123', 'role' => 'Demo Cashier'],
@@ -157,16 +184,47 @@ class DemoDatasetSeederService
         });
     }
 
+    public static function seedProductionStations(): void
+    {
+        DB::transaction(function (): void {
+            $provisioner = app(ProductionStationProvisioner::class);
+            $outletStationCodes = [
+                'DEMO-SUNSET' => ['kitchen', 'bar', 'cashier', 'dessert'],
+                'DEMO-MOUNTAIN' => ['kitchen', 'bar', 'bakery', 'cashier'],
+            ];
+
+            foreach (self::filteredOutlets() as $spec) {
+                $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
+                $codes = $outletStationCodes[$spec['code']] ?? null;
+                $provisioner->ensureForOutlet($outlet, $codes, self::DEMO_TENANT_ID);
+            }
+        });
+    }
+
     public static function seedMenuAndInventory(): void
     {
+        self::seedProductionStations();
+
         DB::transaction(function (): void {
             $menuBlueprint = [
                 ['sku' => 'FD001', 'name' => 'Nasi Goreng Nusantara', 'category' => 'Food', 'price' => 45000, 'cost' => 21000, 'station' => 'kitchen', 'ingredients' => ['Rice' => 0.3, 'Egg' => 1, 'Chicken' => 0.12, 'Sambal' => 0.03]],
-                ['sku' => 'FD002', 'name' => 'Ayam Bakar Madu', 'category' => 'Food', 'price' => 52000, 'cost' => 24000, 'station' => 'kitchen', 'ingredients' => ['Chicken' => 0.2, 'Honey Sauce' => 0.04, 'Rice' => 0.25]],
+                ['sku' => 'FD002', 'name' => 'Mie Goreng', 'category' => 'Food', 'price' => 42000, 'cost' => 19000, 'station' => 'kitchen', 'ingredients' => ['Rice' => 0.2, 'Egg' => 1, 'Chicken' => 0.1, 'Sambal' => 0.03]],
+                ['sku' => 'FD003', 'name' => 'Ayam Bakar', 'category' => 'Food', 'price' => 52000, 'cost' => 24000, 'station' => 'kitchen', 'ingredients' => ['Chicken' => 0.2, 'Honey Sauce' => 0.04, 'Rice' => 0.25]],
+                ['sku' => 'FD004', 'name' => 'Soto Ayam', 'category' => 'Food', 'price' => 48000, 'cost' => 22000, 'station' => 'kitchen', 'ingredients' => ['Chicken' => 0.15, 'Rice' => 0.2, 'Sambal' => 0.02]],
                 ['sku' => 'BV001', 'name' => 'Es Teh Manis', 'category' => 'Beverage', 'price' => 15000, 'cost' => 4500, 'station' => 'bar', 'ingredients' => ['Tea Leaves' => 0.01, 'Sugar' => 0.02, 'Ice Cube' => 0.15]],
+                ['sku' => 'BV002', 'name' => 'Es Jeruk', 'category' => 'Beverage', 'price' => 18000, 'cost' => 5000, 'station' => 'bar', 'ingredients' => ['Lime' => 0.08, 'Sugar' => 0.02, 'Ice Cube' => 0.15]],
                 ['sku' => 'CF001', 'name' => 'Cappuccino', 'category' => 'Beverage', 'price' => 32000, 'cost' => 12000, 'station' => 'bar', 'ingredients' => ['Coffee Beans' => 0.018, 'Milk' => 0.12, 'Sugar' => 0.01]],
-                ['sku' => 'DS001', 'name' => 'Pisang Goreng Coklat', 'category' => 'Dessert', 'price' => 28000, 'cost' => 11000, 'station' => 'kitchen', 'ingredients' => ['Banana' => 0.2, 'Chocolate Sauce' => 0.03, 'Flour' => 0.1]],
+                ['sku' => 'CF002', 'name' => 'Latte', 'category' => 'Beverage', 'price' => 34000, 'cost' => 12500, 'station' => 'bar', 'ingredients' => ['Coffee Beans' => 0.018, 'Milk' => 0.14, 'Sugar' => 0.01]],
+                ['sku' => 'CF003', 'name' => 'Americano', 'category' => 'Beverage', 'price' => 28000, 'cost' => 9000, 'station' => 'bar', 'ingredients' => ['Coffee Beans' => 0.022, 'Sugar' => 0.01]],
+                ['sku' => 'DS001', 'name' => 'Pisang Goreng', 'category' => 'Dessert', 'price' => 28000, 'cost' => 11000, 'station' => 'dessert', 'ingredients' => ['Banana' => 0.2, 'Chocolate Sauce' => 0.03, 'Flour' => 0.1]],
+                ['sku' => 'DS002', 'name' => 'Brownies', 'category' => 'Dessert', 'price' => 30000, 'cost' => 12000, 'station' => 'dessert', 'ingredients' => ['Flour' => 0.1, 'Sugar' => 0.04, 'Chocolate Sauce' => 0.05]],
+                ['sku' => 'DS003', 'name' => 'Roti Bakar', 'category' => 'Dessert', 'price' => 22000, 'cost' => 8000, 'station' => 'dessert', 'ingredients' => ['Flour' => 0.08, 'Sugar' => 0.02]],
+                ['sku' => 'BK001', 'name' => 'Croissant', 'category' => 'Dessert', 'price' => 25000, 'cost' => 9000, 'station' => 'bakery', 'ingredients' => ['Flour' => 0.12, 'Sugar' => 0.02]],
                 ['sku' => 'BR001', 'name' => 'Mojito Mocktail', 'category' => 'Bar', 'price' => 38000, 'cost' => 13000, 'station' => 'bar', 'ingredients' => ['Soda Water' => 0.2, 'Mint Leaves' => 0.01, 'Lime' => 0.05, 'Sugar' => 0.01]],
+                ['sku' => 'CS001', 'name' => 'Rokok Marlboro', 'category' => 'Retail', 'price' => 35000, 'cost' => 28000, 'station' => 'cashier', 'ingredients' => []],
+                ['sku' => 'CS002', 'name' => 'Snack Kemasan', 'category' => 'Retail', 'price' => 12000, 'cost' => 8000, 'station' => 'cashier', 'ingredients' => []],
+                ['sku' => 'CS003', 'name' => 'Air Mineral Botol', 'category' => 'Retail', 'price' => 8000, 'cost' => 4000, 'station' => 'cashier', 'ingredients' => []],
+                ['sku' => 'CS004', 'name' => 'Gift Card Fisik', 'category' => 'Retail', 'price' => 100000, 'cost' => 0, 'station' => 'cashier', 'ingredients' => []],
             ];
 
             $ingredientStock = [
@@ -188,7 +246,7 @@ class DemoDatasetSeederService
                 'Lime' => [20, 5],
             ];
 
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
                 $ingredientIds = [];
                 foreach ($ingredientStock as $name => $stockPair) {
@@ -203,10 +261,30 @@ class DemoDatasetSeederService
                     );
                 }
 
+                $stationIdsByCode = ProductionStation::query()
+                    ->where('outlet_id', $outlet->id)
+                    ->pluck('id', 'code');
+
                 foreach ($menuBlueprint as $row) {
+                    $stationCode = strtolower((string) ($row['station'] ?? 'kitchen'));
+                    $productionStationId = $stationIdsByCode->get($stationCode);
+                    if ($productionStationId === null && $stationCode === 'dessert') {
+                        $productionStationId = $stationIdsByCode->get('bakery') ?? $stationIdsByCode->get('kitchen');
+                    }
+                    if ($productionStationId === null && $stationCode === 'bakery' && ! $stationIdsByCode->has('bakery')) {
+                        $productionStationId = $stationIdsByCode->get('dessert') ?? $stationIdsByCode->get('kitchen');
+                    }
+
                     $menuItem = MenuItem::query()->updateOrCreate(
                         ['outlet_id' => $outlet->id, 'name' => $row['name']],
-                        ['tenant_id' => self::DEMO_TENANT_ID, 'category' => $row['category'], 'emoji' => '🍽️', 'price' => $row['price'], 'available' => true],
+                        [
+                            'tenant_id' => self::DEMO_TENANT_ID,
+                            'category' => $row['category'],
+                            'production_station_id' => $productionStationId,
+                            'emoji' => '🍽️',
+                            'price' => $row['price'],
+                            'available' => true,
+                        ],
                     );
                     MenuItemOutlet::query()->updateOrCreate(
                         ['menu_item_id' => $menuItem->id, 'outlet_id' => (string) $outlet->id],
@@ -226,21 +304,45 @@ class DemoDatasetSeederService
     public static function seedOutletOps(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
 
-                foreach ([['M1', 'Main Hall', 4], ['M2', 'Main Hall', 4], ['T1', 'Terrace', 2], ['VIP1', 'VIP', 8]] as $index => $table) {
+                foreach ([['M1', 'Main Hall', 4], ['M2', 'Main Hall', 4], ['T1', 'Terrace', 2], ['VIP1', 'VIP', 8]] as $table) {
                     RestaurantTable::query()->updateOrCreate(
                         ['outlet_id' => $outlet->id, 'code' => "{$key}-{$table[0]}"],
                         ['name' => "Table {$table[0]}", 'capacity' => $table[2], 'zone' => $table[1], 'status' => 'active', 'active' => true],
                     );
                 }
 
+                $tablePrefix = $key === 'A' ? 'A' : 'B';
+                $outletSlug = strtolower($key === 'A' ? 'sunset' : 'mountain');
+                for ($n = 1; $n <= 10; $n++) {
+                    $tableCode = $tablePrefix.str_pad((string) $n, 2, '0', STR_PAD_LEFT);
+                    RestaurantTable::query()->updateOrCreate(
+                        ['outlet_id' => $outlet->id, 'code' => $tableCode],
+                        [
+                            'qr_public_id' => "demo-{$outletSlug}-".strtolower($tableCode),
+                            'name' => "Table {$tableCode}",
+                            'capacity' => $n <= 6 ? 4 : 6,
+                            'zone' => $n <= 5 ? 'Main Hall' : 'Terrace',
+                            'status' => 'active',
+                            'active' => true,
+                            'qr_enabled' => true,
+                            'qr_version' => 1,
+                        ],
+                    );
+                }
+
                 $profiles = [
-                    ['code' => "{$key}-CASHIER", 'name' => "Cashier Printer {$key}", 'station' => 'cashier', 'health' => 'healthy', 'queue' => 'idle'],
-                    ['code' => "{$key}-KITCHEN", 'name' => "Kitchen Printer {$key}", 'station' => 'kitchen', 'health' => 'healthy', 'queue' => 'normal'],
-                    ['code' => "{$key}-BAR", 'name' => "Bar Printer {$key}", 'station' => 'bar', 'health' => 'degraded', 'queue' => 'backlog'],
+                    ['code' => "{$key}-CASHIER", 'name' => 'Cashier Receipt Printer', 'station' => 'cashier', 'health' => 'healthy', 'queue' => 'idle'],
+                    ['code' => "{$key}-KITCHEN", 'name' => 'Kitchen Printer', 'station' => 'kitchen', 'health' => 'healthy', 'queue' => 'normal'],
+                    ['code' => "{$key}-BAR", 'name' => 'Bar Printer', 'station' => 'bar', 'health' => 'degraded', 'queue' => 'backlog'],
                 ];
+                if ($key === 'A') {
+                    $profiles[] = ['code' => "{$key}-DESSERT", 'name' => 'Dessert Printer', 'station' => 'dessert', 'health' => 'healthy', 'queue' => 'normal'];
+                } else {
+                    $profiles[] = ['code' => "{$key}-BAKERY", 'name' => 'Bakery Printer', 'station' => 'bakery', 'health' => 'healthy', 'queue' => 'normal'];
+                }
 
                 $profileIds = [];
                 foreach ($profiles as $p) {
@@ -271,17 +373,59 @@ class DemoDatasetSeederService
                     $profileIds[$p['station']] = $profile->id;
                 }
 
-                $routes = [
-                    ['print_type' => 'receipt', 'scope' => 'default', 'station' => 'cashier', 'category' => null, 'priority' => 10],
-                    ['print_type' => 'kitchen', 'scope' => 'category', 'station' => 'kitchen', 'category' => 'Food', 'priority' => 20],
-                    ['print_type' => 'kitchen', 'scope' => 'category', 'station' => 'bar', 'category' => 'Beverage', 'priority' => 20],
-                    ['print_type' => 'kitchen', 'scope' => 'category', 'station' => 'bar', 'category' => 'Bar', 'priority' => 30],
+                $stationIdsByCode = ProductionStation::query()
+                    ->where('outlet_id', $outlet->id)
+                    ->pluck('id', 'code');
+
+                PrinterRoute::query()->updateOrCreate(
+                    ['outlet_id' => $outlet->id, 'print_type' => 'receipt', 'route_scope' => 'default', 'station' => 'cashier', 'category' => null],
+                    ['tenant_id' => null, 'printer_profile_id' => $profileIds['cashier'], 'priority' => 10, 'is_active' => true],
+                );
+
+                $kitchenStationMap = [
+                    'kitchen' => 'kitchen',
+                    'bar' => 'bar',
+                    'dessert' => $key === 'A' ? 'dessert' : null,
+                    'bakery' => $key === 'B' ? 'bakery' : null,
+                ];
+                foreach ($kitchenStationMap as $stationCode => $profileStation) {
+                    if ($profileStation === null) {
+                        continue;
+                    }
+                    $productionStationId = $stationIdsByCode->get($stationCode);
+                    if ($productionStationId === null) {
+                        continue;
+                    }
+                    PrinterRoute::query()->updateOrCreate(
+                        [
+                            'outlet_id' => $outlet->id,
+                            'print_type' => 'kitchen',
+                            'route_scope' => 'production_station',
+                            'production_station_id' => (int) $productionStationId,
+                        ],
+                        [
+                            'tenant_id' => null,
+                            'printer_profile_id' => $profileIds[$profileStation],
+                            'station' => $stationCode,
+                            'station_code' => $stationCode,
+                            'category' => null,
+                            'priority' => 10,
+                            'is_active' => true,
+                            'meta' => ['routeScope' => 'production_station'],
+                        ],
+                    );
+                }
+
+                $legacyRoutes = [
+                    ['print_type' => 'kitchen', 'scope' => 'category', 'station' => 'kitchen', 'category' => 'Food', 'priority' => 100],
+                    ['print_type' => 'kitchen', 'scope' => 'category', 'station' => 'bar', 'category' => 'Beverage', 'priority' => 100],
+                    ['print_type' => 'kitchen', 'scope' => 'category', 'station' => 'bar', 'category' => 'Bar', 'priority' => 110],
                     ['print_type' => 'kitchen', 'scope' => 'fallback', 'station' => 'kitchen', 'category' => null, 'priority' => 999],
                 ];
-                foreach ($routes as $route) {
+                foreach ($legacyRoutes as $route) {
                     PrinterRoute::query()->updateOrCreate(
                         ['outlet_id' => $outlet->id, 'print_type' => $route['print_type'], 'route_scope' => $route['scope'], 'station' => $route['station'], 'category' => $route['category']],
-                        ['tenant_id' => null, 'printer_profile_id' => $profileIds[$route['station']], 'priority' => $route['priority'], 'is_active' => true, 'meta' => ['fallback' => $route['scope'] === 'fallback']],
+                        ['tenant_id' => null, 'printer_profile_id' => $profileIds[$route['station']], 'priority' => $route['priority'], 'is_active' => true, 'meta' => ['fallback' => $route['scope'] === 'fallback', 'legacyCategory' => true]],
                     );
                 }
             }
@@ -291,9 +435,15 @@ class DemoDatasetSeederService
     public static function seedTransactions(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
-                $cashiers = User::query()->where('email', 'like', "cashier%@".strtolower($key).'.demo.resto.local')->get()->values();
+                $domain = $spec['domain'] ?? strtolower($key).'.demo.resto.local';
+                $cashiers = User::query()
+                    ->where(function ($q) use ($domain) {
+                        $q->where('email', 'like', "cashier%@{$domain}");
+                    })
+                    ->get()
+                    ->values();
                 $tables = RestaurantTable::query()->where('outlet_id', $outlet->id)->get()->values();
                 $menuItems = MenuItem::query()->where('outlet_id', $outlet->id)->get()->values();
                 if ($cashiers->count() < 2 || $tables->isEmpty() || $menuItems->isEmpty()) {
@@ -319,11 +469,11 @@ class DemoDatasetSeederService
                 }
 
                 $sessions = PosSession::query()->where('outlet_id', $outlet->id)->orderBy('id')->get()->values();
-                for ($i = 1; $i <= 160; $i++) {
-                    $status = $i <= 110 ? 'completed' : ($i <= 130 ? 'cancelled' : ($i <= 145 ? 'ready' : 'pending'));
+                for ($i = 1; $i <= 250; $i++) {
+                    $status = $i <= 175 ? 'completed' : ($i <= 200 ? 'cancelled' : ($i <= 225 ? 'ready' : 'pending'));
                     $paymentStatus = $status === 'completed' ? 'paid' : ($status === 'cancelled' ? 'unpaid' : 'partial');
                     $serviceMode = $i % 3 === 0 ? 'takeaway' : 'dine_in';
-                    $channel = $i % 5 === 0 ? 'qr' : 'pos';
+                    $channel = $i % 5 === 0 ? 'qr' : ($i % 7 === 0 ? 'customer' : 'pos');
                     $orderedAt = self::baseTime()->addDays(10)->addMinutes($i * 11);
                     $table = $tables[($i - 1) % $tables->count()];
                     $session = $sessions[($i - 1) % $sessions->count()];
@@ -473,7 +623,7 @@ class DemoDatasetSeederService
     public static function seedHardware(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
                 $device = HardwareBridgeDevice::query()->updateOrCreate(
                     ['outlet_id' => $outlet->id, 'device_key' => "bridge-{$key}-main"],
@@ -516,16 +666,17 @@ class DemoDatasetSeederService
     public static function seedCrmAndLoyalty(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
-                $cashier = User::query()->where('email', 'cashier1@'.strtolower($key).'.demo.resto.local')->first();
+                $domain = $spec['domain'] ?? strtolower($key).'.demo.resto.local';
+                $cashier = User::query()->where('email', 'cashier.morning@'.$domain)->first();
                 $tiers = [
                     'BRONZE' => LoyaltyMembershipTier::query()->updateOrCreate(['outlet_id' => $outlet->id, 'code' => 'BRONZE'], ['name' => 'Bronze', 'priority' => 1, 'min_lifetime_spend' => 0, 'min_lifetime_visits' => 0, 'points_multiplier' => 1, 'benefits' => ['welcome voucher'], 'is_active' => true]),
                     'SILVER' => LoyaltyMembershipTier::query()->updateOrCreate(['outlet_id' => $outlet->id, 'code' => 'SILVER'], ['name' => 'Silver', 'priority' => 2, 'min_lifetime_spend' => 2000000, 'min_lifetime_visits' => 8, 'points_multiplier' => 1.1, 'benefits' => ['priority queue'], 'is_active' => true]),
                     'GOLD' => LoyaltyMembershipTier::query()->updateOrCreate(['outlet_id' => $outlet->id, 'code' => 'GOLD'], ['name' => 'Gold', 'priority' => 3, 'min_lifetime_spend' => 5000000, 'min_lifetime_visits' => 20, 'points_multiplier' => 1.25, 'benefits' => ['birthday cake'], 'is_active' => true]),
                 ];
 
-                for ($i = 1; $i <= 34; $i++) {
+                for ($i = 1; $i <= 50; $i++) {
                     $isGuest = $i <= 4;
                     $isInactive = $i % 10 === 0;
                     $lifetimeVisits = max(1, ($i * 3) % 24);
@@ -562,7 +713,7 @@ class DemoDatasetSeederService
     public static function seedReplayAndMonitoring(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
                 $terminal = TerminalDevice::query()->updateOrCreate(
                     ['outlet_id' => $outlet->id, 'device_key' => "terminal-{$key}-01"],
@@ -605,9 +756,10 @@ class DemoDatasetSeederService
     public static function seedGiftCardsAndFiscal(): void
     {
         DB::transaction(function (): void {
-            foreach (self::outlets() as $key => $spec) {
+            foreach (self::filteredOutlets() as $key => $spec) {
                 $outlet = Outlet::query()->where('code', $spec['code'])->firstOrFail();
-                $issuer = User::query()->where('email', 'manager@'.strtolower($key).'.demo.resto.local')->first();
+                $domain = $spec['domain'] ?? strtolower($key).'.demo.resto.local';
+                $issuer = User::query()->where('email', 'manager@'.$domain)->first();
                 $sequence = InvoiceSequence::query()->updateOrCreate(['outlet_id' => $outlet->id, 'series_key' => 'INV'], ['prefix' => "INV-{$key}", 'pad_length' => 6, 'next_value' => 400]);
 
                 for ($i = 1; $i <= 12; $i++) {

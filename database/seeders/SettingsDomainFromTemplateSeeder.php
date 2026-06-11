@@ -79,10 +79,9 @@ class SettingsDomainFromTemplateSeeder extends Seeder
             $codeRaw = $row['code'] ?? null;
             $code = is_string($codeRaw) && trim($codeRaw) !== '' ? trim($codeRaw) : 'OUT-'.$id;
 
-            Outlet::query()->updateOrCreate(
-                ['id' => $id],
+            $outlet = Outlet::query()->updateOrCreate(
+                ['code' => $code],
                 [
-                    'code' => $code,
                     'name' => $name,
                     'address' => isset($row['address']) ? (string) $row['address'] : null,
                     'phone' => isset($row['phone']) ? (string) $row['phone'] : null,
@@ -97,7 +96,7 @@ class SettingsDomainFromTemplateSeeder extends Seeder
             $header = $row['receiptHeader'] ?? null;
             $footer = $row['receiptFooter'] ?? null;
             OutletReceiptSetting::query()->updateOrCreate(
-                ['outlet_id' => $id],
+                ['outlet_id' => $outlet->id],
                 [
                     'receipt_header' => is_string($header) ? $header : null,
                     'receipt_footer' => is_string($footer) ? $footer : null,
@@ -106,6 +105,23 @@ class SettingsDomainFromTemplateSeeder extends Seeder
                 ],
             );
         }
+    }
+
+    private function resolveTemplateOutletId(?int $templateOutletId): ?int
+    {
+        if ($templateOutletId === null || $templateOutletId < 1) {
+            return null;
+        }
+
+        $codeByTemplateId = [1 => 'o-main', 2 => 'o-branch'];
+        $code = $codeByTemplateId[$templateOutletId] ?? null;
+        if ($code !== null) {
+            $resolved = Outlet::query()->where('code', $code)->value('id');
+
+            return $resolved !== null ? (int) $resolved : null;
+        }
+
+        return Outlet::query()->orderBy('id')->skip($templateOutletId - 1)->value('id');
     }
 
     /** @param  list<mixed>  $rows */
@@ -149,7 +165,8 @@ class SettingsDomainFromTemplateSeeder extends Seeder
             $outletIdInt = is_int($rawOutletId)
                 ? $rawOutletId
                 : (is_string($rawOutletId) && ctype_digit($rawOutletId) ? (int) $rawOutletId : null);
-            if ($outletIdInt === null || $outletIdInt < 1) {
+            $resolvedOutletId = $this->resolveTemplateOutletId($outletIdInt);
+            if ($resolvedOutletId === null) {
                 continue;
             }
             SettingPrinter::query()->updateOrCreate(
@@ -160,7 +177,7 @@ class SettingsDomainFromTemplateSeeder extends Seeder
                     'connection' => (string) ($row['connection'] ?? 'lan'),
                     'ip' => isset($row['ip']) ? (string) $row['ip'] : null,
                     'bluetooth_device' => isset($row['bluetoothDevice']) ? (string) $row['bluetoothDevice'] : null,
-                    'outlet_id' => $outletIdInt,
+                    'outlet_id' => $resolvedOutletId,
                     'assigned_categories' => isset($row['assignedCategories']) && is_array($row['assignedCategories'])
                         ? $row['assignedCategories']
                         : null,

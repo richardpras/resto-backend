@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\DemoSeedCommand;
 use App\Console\Commands\ExpirePendingPaymentsCommand;
 use App\Console\Commands\FailedJobMonitorCommand;
 use App\Console\Commands\FailedJobSnapshotCommand;
@@ -18,6 +19,8 @@ use App\Modules\Kitchen\Repositories\EloquentKitchenTicketRepository;
 use App\Modules\Kitchen\Repositories\KitchenTicketRepositoryInterface;
 use App\Modules\Menu\Repositories\EloquentMenuRepository;
 use App\Modules\Menu\Repositories\MenuRepositoryInterface;
+use App\Modules\Production\Repositories\EloquentProductionStationRepository;
+use App\Modules\Production\Repositories\ProductionStationRepositoryInterface;
 use App\Modules\Orders\Repositories\EloquentOrderRepository;
 use App\Modules\Orders\Repositories\EloquentQrOrderRequestRepository;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
@@ -32,6 +35,7 @@ use App\Modules\Print\Listeners\CompletePrintJobOnHardwareCommandAck;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -45,9 +49,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(IngredientRepositoryInterface::class, EloquentIngredientRepository::class);
         $this->app->bind(StockMovementRepositoryInterface::class, EloquentStockMovementRepository::class);
         $this->app->bind(MenuRepositoryInterface::class, EloquentMenuRepository::class);
+        $this->app->bind(ProductionStationRepositoryInterface::class, EloquentProductionStationRepository::class);
         $this->app->bind(KitchenTicketRepositoryInterface::class, EloquentKitchenTicketRepository::class);
         $this->app->bind(PaymentTransactionRepositoryInterface::class, EloquentPaymentTransactionRepository::class);
         $this->commands([
+            DemoSeedCommand::class,
             ReconcileStalePaymentsCommand::class,
             ExpirePendingPaymentsCommand::class,
             SyncStaffNotificationsCommand::class,
@@ -61,6 +67,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $tokenLifetimeMinutes = max(1, (int) config('passport.personal_access_token_expire_minutes', 1440));
+        Passport::personalAccessTokensExpireIn(now()->addMinutes($tokenLifetimeMinutes));
+
         Event::listen(
             OrderLifecycleChanged::class,
             RedeemVoucherOnOrderPaidListener::class,

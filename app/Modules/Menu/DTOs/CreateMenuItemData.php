@@ -12,6 +12,7 @@ readonly class CreateMenuItemData
         public ?string $emoji,
         public float $price,
         public bool $available,
+        public ?int $productionStationId = null,
         public array $recipes = [],
         public array $menuItemOutlets = [],
     ) {}
@@ -26,6 +27,7 @@ readonly class CreateMenuItemData
             emoji: $payload['emoji'] ?? null,
             price: (float) $payload['price'],
             available: (bool) ($payload['available'] ?? true),
+            productionStationId: isset($payload['productionStationId']) ? (int) $payload['productionStationId'] : null,
             recipes: $payload['recipes'] ?? [],
             menuItemOutlets: $payload['menuItemOutlets'] ?? [],
         );

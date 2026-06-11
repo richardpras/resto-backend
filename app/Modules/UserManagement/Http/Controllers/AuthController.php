@@ -28,24 +28,19 @@ class AuthController extends Controller
             ], Response::HTTP_UNAUTHORIZED);
         }
 
-        $tokenResult = $user->createToken('api-access');
-        $tokenModel = $tokenResult->getToken();
+        return $this->tokenResponse('Login successful.', $user->createToken('api-access'), $user);
+    }
 
-        return response()->json([
-            'message' => 'Login successful.',
-            'data' => [
-                'accessToken' => $tokenResult->accessToken,
-                'tokenType' => $tokenResult->tokenType ?? 'Bearer',
-                /** OAuth2-style lifetime in seconds (Passport personal access token). Mobile clients should refresh before expiry. */
-                'expiresIn' => $tokenResult->expiresIn ?? null,
-                'expiresAt' => $tokenModel?->expires_at?->toIso8601String(),
-                'user' => [
-                    'id' => (int) $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                ],
-            ],
-        ]);
+    public function refresh(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $currentToken = $user->token();
+        $tokenResult = $user->createToken('api-access');
+        if ($currentToken !== null) {
+            $currentToken->revoke();
+        }
+
+        return $this->tokenResponse('Token refreshed.', $tokenResult, $user);
     }
 
     public function me(Request $request): JsonResponse
@@ -129,6 +124,29 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Logout successful.',
+        ]);
+    }
+
+    /**
+     * @param  \Laravel\Passport\PersonalAccessTokenResult  $tokenResult
+     */
+    private function tokenResponse(string $message, $tokenResult, User $user): JsonResponse
+    {
+        $tokenModel = $tokenResult->getToken();
+
+        return response()->json([
+            'message' => $message,
+            'data' => [
+                'accessToken' => $tokenResult->accessToken,
+                'tokenType' => $tokenResult->tokenType ?? 'Bearer',
+                'expiresIn' => $tokenResult->expiresIn ?? null,
+                'expiresAt' => $tokenModel?->expires_at?->toIso8601String(),
+                'user' => [
+                    'id' => (int) $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ],
+            ],
         ]);
     }
 }

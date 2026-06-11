@@ -10,6 +10,8 @@ readonly class UpdateMenuItemData
         public ?string $emoji = null,
         public ?float $price = null,
         public ?bool $available = null,
+        public ?int $productionStationId = null,
+        public bool $updateProductionStationId = false,
         public ?array $recipes = null,
         public ?array $menuItemOutlets = null,
     ) {}
@@ -22,6 +24,10 @@ readonly class UpdateMenuItemData
             emoji: isset($payload['emoji']) ? (string) $payload['emoji'] : null,
             price: isset($payload['price']) ? (float) $payload['price'] : null,
             available: isset($payload['available']) ? (bool) $payload['available'] : null,
+            productionStationId: array_key_exists('productionStationId', $payload) && $payload['productionStationId'] !== null
+                ? (int) $payload['productionStationId']
+                : null,
+            updateProductionStationId: array_key_exists('productionStationId', $payload),
             recipes: $payload['recipes'] ?? null,
             menuItemOutlets: $payload['menuItemOutlets'] ?? null,
         );

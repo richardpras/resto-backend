@@ -97,6 +97,7 @@ use App\Modules\Payments\Http\Controllers\PaymentHealthController;
 use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
 use App\Modules\Payments\Http\Controllers\XenditSandboxSimulationController;
 use App\Modules\Payments\Http\Controllers\XenditInvoiceWebhookController;
+use App\Modules\Production\Http\Controllers\ProductionStationController;
 use App\Modules\Print\Http\Controllers\PrinterProfileController;
 use App\Modules\Print\Http\Controllers\PrinterRouteController;
 use App\Modules\Print\Http\Controllers\PrintQueueController;
@@ -398,6 +399,7 @@ Route::prefix('v1')->group(function (): void {
 
     Route::middleware('auth:api')->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);
+        Route::post('auth/refresh', [AuthController::class, 'refresh']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::post('auth/verify-screen-pin', [AuthController::class, 'verifyScreenPin']);
         Route::put('auth/screen-pin', [AuthController::class, 'updateScreenPin']);
@@ -839,6 +841,8 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('system-settings', [SystemSettingsController::class, 'show'])->middleware('permission:settings.view');
         Route::patch('system-settings', [SystemSettingsController::class, 'update'])->middleware('permission:settings.update');
+        Route::get('settings/customer-app-url', [\App\Modules\Settings\Http\Controllers\CustomerAppUrlController::class, 'show'])->middleware('permission:settings.view');
+        Route::patch('settings/customer-app-url', [\App\Modules\Settings\Http\Controllers\CustomerAppUrlController::class, 'update'])->middleware('permission:settings.update');
 
         Route::get('integration', [IntegrationSettingsController::class, 'show'])->middleware('permission:settings.view');
         Route::put('integration', [IntegrationSettingsController::class, 'update'])->middleware('permission:settings.update');
@@ -939,10 +943,14 @@ Route::prefix('v1')->group(function (): void {
         Route::post('orders/{order}/items/{orderItem}/recovery/settlement/record', [OrderItemRecoverySettlementController::class, 'record'])->middleware('permission:orders.recovery.approve');
 
         Route::get('tables', [TableMasterController::class, 'index'])->middleware('permission:tables.view');
+        Route::get('tables/qr/export', [TableQrController::class, 'export'])->middleware('permission:tables.manage');
         Route::post('tables', [TableMasterController::class, 'store'])->middleware('permission:tables.manage');
         Route::patch('tables/{table}', [TableMasterController::class, 'update'])->middleware('permission:tables.manage');
         Route::delete('tables/{table}', [TableMasterController::class, 'destroy'])->middleware('permission:tables.manage');
+        Route::get('tables/{table}/qr', [TableQrController::class, 'show'])->middleware('permission:tables.view');
+        Route::get('tables/{table}/qr/image', [TableQrController::class, 'image'])->middleware('permission:tables.view');
         Route::post('tables/{table}/qr/generate', [TableQrController::class, 'generate'])->middleware('permission:tables.manage');
+        Route::post('tables/{table}/qr/regenerate', [TableQrController::class, 'regenerate'])->middleware('permission:tables.manage');
         Route::post('tables/{table}/qr/rotate', [TableQrController::class, 'rotate'])->middleware('permission:tables.manage');
         Route::post('tables/{table}/qr/enable', [TableQrController::class, 'enable'])->middleware('permission:tables.manage');
         Route::post('tables/{table}/qr/disable', [TableQrController::class, 'disable'])->middleware('permission:tables.manage');
@@ -1001,6 +1009,10 @@ Route::prefix('v1')->group(function (): void {
         Route::get('dashboard/summary', [DashboardSummaryController::class, 'index'])->middleware('permission:pos.use');
         Route::get('kitchen/tickets', [KitchenTicketController::class, 'index'])->middleware('permission.any:kitchen.use,pos.use');
         Route::patch('kitchen/tickets/{ticket}/status', [KitchenTicketController::class, 'updateStatus'])->middleware('permission.any:kitchen.use,pos.use');
+        Route::get('production-stations', [ProductionStationController::class, 'index'])->middleware('permission:settings.manage');
+        Route::post('production-stations', [ProductionStationController::class, 'store'])->middleware('permission:settings.manage');
+        Route::put('production-stations/{productionStation}', [ProductionStationController::class, 'update'])->middleware('permission:settings.manage');
+        Route::patch('production-stations/{productionStation}/status', [ProductionStationController::class, 'updateStatus'])->middleware('permission:settings.manage');
         Route::get('print/profiles', [PrinterProfileController::class, 'index'])->middleware('permission:settings.view');
         Route::post('print/profiles', [PrinterProfileController::class, 'store'])->middleware('permission:settings.update');
         Route::patch('print/profiles/{profile}', [PrinterProfileController::class, 'update'])->middleware('permission:settings.update');

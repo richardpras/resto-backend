@@ -7,6 +7,7 @@ use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
+use App\Models\Modules\Production\Domain\ProductionStation;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -15,12 +16,13 @@ class PrinterRoutingService
 {
     public function __construct(
         private readonly PrintQueueStateService $stateService,
+        private readonly PrinterStationResolver $stationResolver,
     ) {}
 
     public function queueKitchenTicketsForOrder(Order $order): void
     {
         $order->loadMissing('items');
-        $items = $this->withCategoryForOrderItems($order);
+        $items = $this->withRoutingContextForOrderItems($order);
         $outletId = (int) ($order->outlet_id ?? 0);
         if ($outletId < 1) {
             return;
@@ -35,24 +37,41 @@ class PrinterRoutingService
 
         $groups = [];
         foreach ($items as $item) {
-            $resolved = $this->resolveKitchenRouteForItem($routes, $item);
+            $stationResolution = $this->stationResolver->resolveForOrderItemRow($item, $outletId);
+            if ($stationResolution['skip']) {
+                continue;
+            }
+
+            $resolved = $this->resolveKitchenRouteForItem($routes, $item, $stationResolution);
             $route = $resolved['route'];
+            $station = $stationResolution['station'];
+            $stationCode = $resolved['stationCode'] ?? $stationResolution['resolvedStationCode'];
+            $stationId = $station?->id;
+
             $groupKey = implode('|', [
                 (string) ($route?->id ?? 'fallback'),
-                (string) $resolved['resolvedStation'],
-                (string) $resolved['sourceCategory'],
+                (string) ($route?->printer_profile_id ?? 'none'),
+                (string) ($stationId ?? 'none'),
+                (string) ($stationCode ?? 'none'),
                 (string) $resolved['resolutionLayer'],
             ]);
+
             if (! isset($groups[$groupKey])) {
                 $groups[$groupKey] = [
                     'route' => $route,
                     'items' => [],
                     'meta' => [
                         'resolution_layer' => $resolved['resolutionLayer'],
-                        'resolved_station' => $resolved['resolvedStation'],
-                        'source_category' => $resolved['sourceCategory'],
+                        'resolved_station' => $stationCode,
+                        'source_category' => $stationResolution['category'],
                         'resolved_printer_profile_id' => $route?->printer_profile_id,
                         'matched_route_id' => $route?->id,
+                        'production_station_id' => $stationId,
+                        'productionStationId' => $stationId,
+                        'station_code' => $stationCode,
+                        'stationCode' => $stationCode,
+                        'station_name' => $station?->name,
+                        'stationName' => $station?->name,
                     ],
                 ];
             }
@@ -66,6 +85,9 @@ class PrinterRoutingService
             $routeResolutionMeta = $group['meta'];
             /** @var array<int,array<string,mixed>> $groupItems */
             $groupItems = $group['items'];
+            $stationCode = is_string($routeResolutionMeta['stationCode'] ?? null)
+                ? (string) $routeResolutionMeta['stationCode']
+                : 'legacy';
 
             $this->enqueuePrintJob(
                 outletId: $outletId,
@@ -75,13 +97,13 @@ class PrinterRoutingService
                 route: $route,
                 printableSnapshot: [
                     'order_id' => (int) $order->id,
-                    'station' => $routeResolutionMeta['resolved_station'],
+                    'station' => $routeResolutionMeta['stationCode'] ?? $routeResolutionMeta['resolved_station'] ?? null,
                     'category' => $routeResolutionMeta['source_category'],
                     'resolved_printer_profile_id' => $routeResolutionMeta['resolved_printer_profile_id'],
                     'route_resolution' => $routeResolutionMeta,
                     'items' => array_values($groupItems),
                 ],
-                idempotencyKey: 'order-confirmed-'.(int) $order->id,
+                idempotencyKey: 'order-confirmed-'.(int) $order->id.'-'.$stationCode,
                 routeResolutionMeta: $routeResolutionMeta,
             );
         }
@@ -165,14 +187,7 @@ class PrinterRoutingService
                         'type' => $type,
                     ],
                     'printable_snapshot' => $printableSnapshot,
-                    'route_snapshot' => $route !== null ? array_merge([
-                        'route_id' => (int) $route->id,
-                        'route_scope' => (string) ($route->route_scope ?? 'default'),
-                        'item_id' => $route->item_id !== null ? (int) $route->item_id : null,
-                        'station' => $route->station,
-                        'category' => $route->category,
-                        'priority' => (int) $route->priority,
-                    ], $routeResolutionMeta ?? []) : $routeResolutionMeta,
+                    'route_snapshot' => $this->buildRouteSnapshot($route, $routeResolutionMeta),
                     'status' => 'pending',
                     'attempts' => 0,
                     'queued_at' => now(),
@@ -200,52 +215,43 @@ class PrinterRoutingService
         return $job;
     }
 
-    private function withCategoryForOrderItems(Order $order): Collection
+    private function withRoutingContextForOrderItems(Order $order): Collection
     {
         $itemIds = $order->items->pluck('item_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
-        $categoryById = MenuItem::query()
+        $menuItems = MenuItem::query()
             ->whereIn('id', $itemIds)
-            ->pluck('category', 'id');
+            ->get(['id', 'category', 'production_station_id'])
+            ->keyBy('id');
 
-        return $order->items->map(function ($item) use ($categoryById): array {
+        return $order->items->map(function ($item) use ($menuItems): array {
+            $menuItem = $menuItems->get((int) $item->item_id);
+
             return [
                 'order_item_id' => (int) $item->id,
                 'item_id' => (int) $item->item_id,
                 'name' => (string) $item->name,
                 'qty' => (float) $item->qty,
                 'notes' => $item->notes,
-                'category' => (string) ($categoryById[(int) $item->item_id] ?? 'uncategorized'),
+                'category' => (string) ($menuItem?->category ?? 'uncategorized'),
+                'production_station_id' => $menuItem?->production_station_id !== null
+                    ? (int) $menuItem->production_station_id
+                    : null,
             ];
         });
-    }
-
-    private function applyRouteFilter(Collection $items, PrinterRoute $route): Collection
-    {
-        return $items->filter(function (array $item) use ($route): bool {
-            if ($route->category !== null && $route->category !== '' && $item['category'] !== $route->category) {
-                return false;
-            }
-            if ($route->station !== null && $route->station !== '') {
-                $station = $item['category'] === 'uncategorized' ? 'default' : strtolower((string) $item['category']);
-                if ($station !== strtolower((string) $route->station)) {
-                    return false;
-                }
-            }
-
-            return true;
-        })->values();
     }
 
     /**
      * @param  Collection<int,PrinterRoute>  $routes
      * @param  array<string,mixed>  $item
-     * @return array{route:?PrinterRoute,resolutionLayer:string,resolvedStation:?string,sourceCategory:string}
+     * @param  array{skip:bool,station:?ProductionStation,category:string,resolvedStationCode:?string}  $stationResolution
+     * @return array{route:?PrinterRoute,resolutionLayer:string,stationCode:?string}
      */
-    private function resolveKitchenRouteForItem(Collection $routes, array $item): array
+    private function resolveKitchenRouteForItem(Collection $routes, array $item, array $stationResolution): array
     {
-        $itemCategory = (string) ($item['category'] ?? 'uncategorized');
+        $itemCategory = (string) $stationResolution['category'];
         $itemId = (int) ($item['item_id'] ?? 0);
-        $resolvedStation = $this->resolveStationForCategory($itemCategory);
+        $productionStationId = $item['production_station_id'] ?? $stationResolution['station']?->id;
+        $resolvedStationCode = $stationResolution['resolvedStationCode'];
 
         $matchers = [
             'item_override' => function (PrinterRoute $route) use ($itemId): bool {
@@ -254,19 +260,43 @@ class PrinterRoutingService
 
                 return ($scope === 'item' || $routeItemId > 0) && $routeItemId === $itemId;
             },
+            'production_station' => function (PrinterRoute $route) use ($productionStationId): bool {
+                if ($productionStationId === null) {
+                    return false;
+                }
+
+                return $route->production_station_id !== null
+                    && (int) $route->production_station_id === (int) $productionStationId;
+            },
+            'station_mapping' => function (PrinterRoute $route) use ($resolvedStationCode): bool {
+                if ($resolvedStationCode === null || $resolvedStationCode === '') {
+                    return false;
+                }
+                $routeCode = $route->station_code ?? $route->station;
+                if ($routeCode === null || $routeCode === '') {
+                    return false;
+                }
+
+                return strcasecmp((string) $routeCode, (string) $resolvedStationCode) === 0;
+            },
             'category_mapping' => fn (PrinterRoute $route): bool => $route->category !== null && $route->category !== '' && strcasecmp((string) $route->category, $itemCategory) === 0,
-            'station_mapping' => fn (PrinterRoute $route): bool => $route->station !== null && $route->station !== '' && $resolvedStation !== null && strcasecmp((string) $route->station, $resolvedStation) === 0,
-            'outlet_default' => fn (PrinterRoute $route): bool => ($route->category === null || $route->category === '') && ($route->station === null || $route->station === ''),
+            'outlet_default' => fn (PrinterRoute $route): bool => ($route->category === null || $route->category === '')
+                && ($route->station === null || $route->station === '')
+                && $route->production_station_id === null
+                && ($route->station_code === null || $route->station_code === ''),
+            'outlet_fallback' => fn (PrinterRoute $route): bool => false,
         ];
 
         foreach ($matchers as $layer => $matcher) {
+            if ($layer === 'outlet_fallback') {
+                break;
+            }
             $matched = $routes->filter($matcher)->sortBy('priority')->first();
             if ($matched instanceof PrinterRoute) {
                 return [
                     'route' => $matched,
                     'resolutionLayer' => $layer,
-                    'resolvedStation' => $resolvedStation,
-                    'sourceCategory' => $itemCategory,
+                    'stationCode' => $resolvedStationCode,
                 ];
             }
         }
@@ -274,18 +304,31 @@ class PrinterRoutingService
         return [
             'route' => null,
             'resolutionLayer' => 'outlet_fallback',
-            'resolvedStation' => $resolvedStation,
-            'sourceCategory' => $itemCategory,
+            'stationCode' => $resolvedStationCode,
         ];
     }
 
-    private function resolveStationForCategory(string $category): ?string
+    /**
+     * @param  ?array<string,mixed>  $routeResolutionMeta
+     * @return ?array<string,mixed>
+     */
+    private function buildRouteSnapshot(?PrinterRoute $route, ?array $routeResolutionMeta): ?array
     {
-        $map = config('print.category_station_map', []);
-        if (is_array($map) && isset($map[$category]) && is_string($map[$category])) {
-            return strtolower((string) $map[$category]);
+        $base = $route !== null ? [
+            'route_id' => (int) $route->id,
+            'route_scope' => (string) ($route->route_scope ?? 'default'),
+            'item_id' => $route->item_id !== null ? (int) $route->item_id : null,
+            'station' => $route->station,
+            'category' => $route->category,
+            'priority' => (int) $route->priority,
+            'production_station_id' => $route->production_station_id,
+            'station_code' => $route->station_code,
+        ] : [];
+
+        if ($routeResolutionMeta === null) {
+            return $route !== null ? $base : null;
         }
 
-        return $category === 'uncategorized' ? 'default' : strtolower($category);
+        return array_merge($base, $routeResolutionMeta);
     }
 }

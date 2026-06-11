@@ -45,4 +45,19 @@ return [
 
     'connection' => env('PASSPORT_CONNECTION'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Personal Access Token Lifetime (minutes)
+    |--------------------------------------------------------------------------
+    |
+    | Staff ERP/POS bearer tokens (Passport personal access tokens). Defaults to
+    | 24 hours. `SANCTUM_EXPIRATION_MINUTES` is accepted as a legacy alias.
+    |
+    */
+
+    'personal_access_token_expire_minutes' => (int) env(
+        'PASSPORT_PERSONAL_ACCESS_TOKEN_EXPIRE_MINUTES',
+        env('SANCTUM_EXPIRATION_MINUTES', 1440),
+    ),
+
 ];

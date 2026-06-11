@@ -6,6 +6,7 @@ use App\Models\Modules\Hardware\Domain\HardwareBridgeDevice;
 use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
+use App\Models\Modules\Production\Domain\ProductionStation;
 use Illuminate\Support\Collection;
 
 class PrinterManagementService
@@ -99,6 +100,7 @@ class PrinterManagementService
     {
         return PrinterRoute::query()
             ->where('outlet_id', $outletId)
+            ->with('productionStation')
             ->orderBy('print_type')
             ->orderBy('priority')
             ->get();
@@ -112,10 +114,28 @@ class PrinterManagementService
         $routeScope = (string) ($payload['routeScope'] ?? 'default');
         $category = $payload['sourceCategory'] ?? $payload['category'] ?? null;
         $itemId = $payload['itemId'] ?? null;
+        $productionStationId = isset($payload['productionStationId']) ? (int) $payload['productionStationId'] : null;
+        $station = $payload['station'] ?? null;
+        $stationCode = $payload['stationCode'] ?? null;
+
+        if ($productionStationId !== null && $productionStationId > 0) {
+            $productionStation = ProductionStation::query()->find($productionStationId);
+            if ($productionStation instanceof ProductionStation) {
+                $stationCode = strtolower((string) $productionStation->code);
+                $station = $station ?? $stationCode;
+                if ($routeScope === 'default') {
+                    $routeScope = 'production_station';
+                }
+            }
+        }
+
         $meta = is_array($payload['meta'] ?? null) ? $payload['meta'] : [];
         $meta['routeScope'] = $routeScope;
         if ($itemId !== null) {
             $meta['itemId'] = (int) $itemId;
+        }
+        if ($productionStationId !== null && $productionStationId > 0) {
+            $meta['productionStationId'] = $productionStationId;
         }
 
         /** @var PrinterRoute $route */
@@ -126,18 +146,20 @@ class PrinterManagementService
                 'print_type' => (string) $payload['printType'],
                 'route_scope' => $routeScope,
                 'item_id' => $itemId !== null ? (int) $itemId : null,
-                'station' => $payload['station'] ?? null,
+                'production_station_id' => $productionStationId !== null && $productionStationId > 0 ? $productionStationId : null,
+                'station' => $station,
                 'category' => $category,
             ],
             [
                 'tenant_id' => 1,
+                'station_code' => is_string($stationCode) && $stationCode !== '' ? strtolower($stationCode) : null,
                 'priority' => (int) ($payload['priority'] ?? 100),
                 'is_active' => (bool) ($payload['isActive'] ?? true),
                 'meta' => $meta === [] ? null : $meta,
             ]
         );
 
-        return $route;
+        return $route->load('productionStation');
     }
 
     public function deleteRoute(int $id): void

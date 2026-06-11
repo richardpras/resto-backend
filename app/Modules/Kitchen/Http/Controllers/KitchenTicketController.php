@@ -24,6 +24,8 @@ class KitchenTicketController extends Controller
         $tickets = $this->service->listTickets($user, [
             'outlet_id' => $request->validated('outletId'),
             'status' => $request->validated('status'),
+            'station_id' => $request->validated('stationId'),
+            'station_code' => $request->validated('stationCode'),
             'per_page' => $request->validated('perPage', 20),
         ]);
 
