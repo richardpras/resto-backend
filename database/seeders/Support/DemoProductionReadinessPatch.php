@@ -28,6 +28,7 @@ final class DemoProductionReadinessPatch
     {
         self::patchDemoOwnerIdentity();
         self::seedCustomerAppUrl();
+        self::seedInventoryConsumptionPolicy();
         self::seedOutletPaymentMethodConfigs();
         self::assignProductionStationsToActiveMenuItems();
         self::seedStationRoutingShowcase();
@@ -57,6 +58,18 @@ final class DemoProductionReadinessPatch
             $row->customer_app_url = rtrim($url, '/');
             $row->save();
         }
+    }
+
+    private static function seedInventoryConsumptionPolicy(): void
+    {
+        SystemSetting::query()->updateOrCreate(
+            ['id' => 1],
+            [
+                'stock_enforcement_mode' => 'deferred',
+                'enforce_stock_on_sale' => false,
+                'allow_negative_stock' => true,
+            ],
+        );
     }
 
     private static function seedOutletPaymentMethodConfigs(): void

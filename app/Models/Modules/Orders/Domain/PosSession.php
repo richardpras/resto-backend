@@ -14,6 +14,8 @@ class PosSession extends Model
         'opened_by_user_id',
         'closed_by_user_id',
         'status',
+        'session_type',
+        'source_order_code',
         'opening_cash',
         'closing_cash',
         'cash_variance',

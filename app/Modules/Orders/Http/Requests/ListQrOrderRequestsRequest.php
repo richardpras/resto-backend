@@ -15,7 +15,8 @@ class ListQrOrderRequestsRequest extends FormRequest
     {
         return [
             'outletId' => ['nullable', 'integer', 'min:1'],
-            'status' => ['nullable', 'in:pending_cashier_confirmation,confirmed,rejected,expired'],
+            'status' => ['nullable', 'in:pending_cashier_confirmation,under_review,confirmed,rejected,expired'],
+            'search' => ['nullable', 'string', 'max:120'],
             'perPage' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }

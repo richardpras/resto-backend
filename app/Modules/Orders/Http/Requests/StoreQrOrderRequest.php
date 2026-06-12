@@ -19,6 +19,8 @@ class StoreQrOrderRequest extends FormRequest
             'customerName' => ['required', 'string', 'max:255'],
             'expiresInMinutes' => ['nullable', 'integer', 'min:1', 'max:120'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],
+            'appendToRequestCode' => ['sometimes', 'string', 'max:32'],
+            'forceNew' => ['sometimes', 'boolean'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.menuItemId' => ['required', 'integer', 'min:1'],
             'items.*.qty' => ['required', 'numeric', 'gt:0'],

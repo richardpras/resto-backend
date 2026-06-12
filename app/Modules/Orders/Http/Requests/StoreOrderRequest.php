@@ -40,6 +40,7 @@ class StoreOrderRequest extends FormRequest
             'serviceMode' => ['nullable', 'in:dine_in,takeaway'],
             'orderChannel' => ['nullable', 'in:dine_in,takeaway,qr'],
             'posSessionId' => ['nullable', 'integer', 'min:1'],
+            'qrOrderRequestId' => ['nullable', 'integer', 'min:1'],
             'createdAt' => ['nullable', 'date'],
             'confirmedAt' => ['nullable', 'date'],
             'splitBill' => ['nullable', 'array'],
@@ -47,6 +48,7 @@ class StoreOrderRequest extends FormRequest
             'payments.*.method' => ['required', 'string', 'max:50'],
             'payments.*.amount' => ['required', 'numeric', 'gt:0'],
             'payments.*.paidAt' => ['nullable', 'date'],
+            'idempotencyKey' => ['sometimes', 'string', 'max:120'],
         ];
     }
 }

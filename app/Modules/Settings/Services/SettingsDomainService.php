@@ -407,19 +407,19 @@ class SettingsDomainService
                 'enableMultiPayment' => (bool) ($s['enableMultiPayment'] ?? true),
                 'confirmBeforePayment' => (bool) ($s['confirmBeforePayment'] ?? true),
                 'enableQROrdering' => (bool) ($s['enableQROrdering'] ?? true),
+                'enableCallCashier' => (bool) ($s['enableCallCashier'] ?? true),
+                'enforceStockOnSale' => (bool) ($s['enforceStockOnSale'] ?? true),
+                'stockEnforcementMode' => (string) ($s['stockEnforcementMode'] ?? 'deferred'),
+                'allowNegativeStock' => (bool) ($s['allowNegativeStock'] ?? true),
                 'customerAppUrl' => $s['customerAppUrl'] ?? null,
                 'employeeSelfServiceEnabled' => (bool) ($s['employeeSelfServiceEnabled'] ?? false),
             ];
         }
 
-        return [
-            'enableSplitBill' => $row->enable_split_bill,
-            'enableMultiPayment' => $row->enable_multi_payment,
-            'confirmBeforePayment' => $row->confirm_before_payment,
-            'enableQROrdering' => $row->enable_qr_ordering,
-            'customerAppUrl' => $row->customer_app_url,
-            'employeeSelfServiceEnabled' => (bool) $row->employee_self_service_enabled,
-        ];
+        return array_merge(
+            $this->mapSystemRow($row),
+            ['customerAppUrl' => $row->customer_app_url],
+        );
     }
 
     public function putCustomerAppUrl(?string $customerAppUrl): void
@@ -431,6 +431,9 @@ class SettingsDomainService
                 'enable_multi_payment' => true,
                 'confirm_before_payment' => true,
                 'enable_qr_ordering' => true,
+                'enable_call_cashier' => true,
+                'enforce_stock_on_sale' => true,
+                'stock_enforcement_mode' => 'deferred',
                 'employee_self_service_enabled' => false,
             ],
         );
@@ -441,6 +444,8 @@ class SettingsDomainService
     /** @param  array<string, mixed>  $data */
     public function putSystem(array $data): array
     {
+        $mode = $this->resolveStockEnforcementMode($data);
+
         $row = SystemSetting::query()->updateOrCreate(
             ['id' => self::SINGLETON_ID],
             [
@@ -448,8 +453,34 @@ class SettingsDomainService
                 'enable_multi_payment' => $data['enableMultiPayment'],
                 'confirm_before_payment' => $data['confirmBeforePayment'],
                 'enable_qr_ordering' => $data['enableQROrdering'],
+                'enable_call_cashier' => (bool) ($data['enableCallCashier'] ?? true),
+                'stock_enforcement_mode' => $mode,
+                'enforce_stock_on_sale' => $mode === 'strict',
+                'allow_negative_stock' => (bool) ($data['allowNegativeStock'] ?? true),
                 'employee_self_service_enabled' => (bool) ($data['employeeSelfServiceEnabled'] ?? false),
             ],
+        );
+
+        return $this->mapSystemRow($row);
+    }
+
+    /** @param  array<string, mixed>  $data */
+    private function resolveStockEnforcementMode(array $data): string
+    {
+        if (isset($data['stockEnforcementMode']) && is_string($data['stockEnforcementMode'])) {
+            return \App\Modules\Inventory\Support\StockEnforcementMode::normalize($data['stockEnforcementMode']);
+        }
+
+        return \App\Modules\Inventory\Support\StockEnforcementMode::fromLegacyBoolean(
+            (bool) ($data['enforceStockOnSale'] ?? true),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function mapSystemRow(SystemSetting $row): array
+    {
+        $mode = \App\Modules\Inventory\Support\StockEnforcementMode::normalize(
+            (string) ($row->stock_enforcement_mode ?? 'deferred'),
         );
 
         return [
@@ -457,6 +488,10 @@ class SettingsDomainService
             'enableMultiPayment' => $row->enable_multi_payment,
             'confirmBeforePayment' => $row->confirm_before_payment,
             'enableQROrdering' => $row->enable_qr_ordering,
+            'enableCallCashier' => (bool) ($row->enable_call_cashier ?? true),
+            'enforceStockOnSale' => $mode === 'strict',
+            'stockEnforcementMode' => $mode,
+            'allowNegativeStock' => (bool) ($row->allow_negative_stock ?? true),
             'employeeSelfServiceEnabled' => (bool) $row->employee_self_service_enabled,
         ];
     }

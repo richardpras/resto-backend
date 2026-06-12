@@ -246,6 +246,7 @@ class SettingsDomainFromTemplateSeeder extends Seeder
                 'enable_multi_payment' => filter_var($s['enableMultiPayment'] ?? true, FILTER_VALIDATE_BOOLEAN),
                 'confirm_before_payment' => filter_var($s['confirmBeforePayment'] ?? true, FILTER_VALIDATE_BOOLEAN),
                 'enable_qr_ordering' => filter_var($s['enableQROrdering'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'enable_call_cashier' => filter_var($s['enableCallCashier'] ?? true, FILTER_VALIDATE_BOOLEAN),
             ],
         );
     }

@@ -16,6 +16,7 @@ class CallQrOrderCashierRequest extends FormRequest
         return [
             'outletId' => ['required', 'integer', 'min:1'],
             'tableId' => ['required', 'integer', 'min:1'],
+            'reason' => ['nullable', 'string', 'in:need_assistance,request_bill,order_question,other'],
         ];
     }
 }

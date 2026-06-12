@@ -29,6 +29,8 @@ readonly class CreateOrderData
         public ?string $serviceMode = null,
         public ?string $orderChannel = null,
         public ?int $posSessionId = null,
+        public ?int $qrOrderRequestId = null,
+        public ?string $idempotencyKey = null,
     ) {}
 
     public static function fromArray(array $payload): self
@@ -62,6 +64,10 @@ readonly class CreateOrderData
                 ? (string) $payload['orderChannel']
                 : null,
             posSessionId: isset($payload['posSessionId']) ? (int) $payload['posSessionId'] : null,
+            qrOrderRequestId: isset($payload['qrOrderRequestId']) ? (int) $payload['qrOrderRequestId'] : null,
+            idempotencyKey: isset($payload['idempotencyKey']) && is_string($payload['idempotencyKey'])
+                ? trim($payload['idempotencyKey'])
+                : null,
         );
     }
 }

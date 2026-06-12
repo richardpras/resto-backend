@@ -25,6 +25,10 @@ class SystemSettingsController extends Controller
             'enableMultiPayment' => ['required', 'boolean'],
             'confirmBeforePayment' => ['required', 'boolean'],
             'enableQROrdering' => ['required', 'boolean'],
+            'enableCallCashier' => ['sometimes', 'boolean'],
+            'enforceStockOnSale' => ['sometimes', 'boolean'],
+            'stockEnforcementMode' => ['sometimes', 'string', 'in:strict,warning,deferred'],
+            'allowNegativeStock' => ['sometimes', 'boolean'],
             'employeeSelfServiceEnabled' => ['sometimes', 'boolean'],
         ]);
 

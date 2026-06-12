@@ -9,16 +9,23 @@ use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
 use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Orders\Domain\PosEventLog;
 use App\Models\Modules\Orders\Domain\PosSession;
+use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\User;
 use App\Modules\Accounting\Services\AccountingSettingsService;
 use App\Modules\Accounting\Services\AccountingVoidPostingService;
 use App\Modules\Accounting\Services\JournalPostingService;
+use App\Modules\Inventory\Services\InventoryConsumptionPostingService;
+use App\Modules\Inventory\Services\InventoryConsumptionQueueService;
+use App\Modules\Inventory\Services\InventorySalePolicyService;
+use App\Modules\Inventory\Services\OrderItemCostSnapshotService;
+use App\Modules\Inventory\Services\OrderStockValidationService;
 use App\Modules\Inventory\Services\RecipeStockDeductionService;
 use App\Modules\Kitchen\Services\KitchenTicketService;
 use App\Modules\Members\Services\MemberTransactionRecorder;
 use App\Modules\Members\Services\OrderMemberAttachmentService;
 use App\Modules\Orders\DTOs\CreateOrderData;
+use App\Modules\Orders\DTOs\OrderCreateResult;
 use App\Modules\Orders\Events\OrderLifecycleChanged;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 use App\Modules\Payments\Events\PaymentStatusChanged;
@@ -48,7 +55,85 @@ class OrderService
         private readonly OrderMemberAttachmentService $orderMemberAttachmentService,
         private readonly AccountingSettingsService $accountingSettingsService,
         private readonly AccountingVoidPostingService $accountingVoidPostingService,
+        private readonly PosIdempotencyService $posIdempotencyService,
+        private readonly OrderStockValidationService $orderStockValidationService,
+        private readonly InventorySalePolicyService $inventorySalePolicyService,
+        private readonly InventoryConsumptionQueueService $inventoryConsumptionQueueService,
+        private readonly InventoryConsumptionPostingService $inventoryConsumptionPostingService,
+        private readonly OrderItemCostSnapshotService $orderItemCostSnapshotService,
+        private readonly PosOrderCreateGuardService $posOrderCreateGuardService,
+        private readonly PosCheckoutIntegrityService $posCheckoutIntegrityService,
     ) {}
+
+    /** @var array<string, mixed>|null */
+    private ?array $lastCreateMeta = null;
+
+    public function createOrder(CreateOrderData $data, ?User $user = null): OrderCreateResult
+    {
+        if ($user !== null && $data->outletId !== null) {
+            $this->assertOutletAllowed($user, (int) $data->outletId);
+        }
+
+        $explicitServiceMode = $data->serviceMode !== null;
+        $serviceMode = $this->resolveServiceMode($data);
+        $orderChannel = $this->resolveOrderChannel($data, $serviceMode);
+        $posSessionId = $this->resolvePosSessionId($data, $serviceMode, $explicitServiceMode);
+
+        if ($explicitServiceMode && $serviceMode === 'dine_in' && $data->tableId === null) {
+            throw ValidationException::withMessages([
+                'tableId' => ['Dine-in orders require a table.'],
+            ]);
+        }
+
+        $idempotencyPayload = [
+            'outletId' => $data->outletId,
+            'paymentStatus' => $data->paymentStatus,
+            'total' => $data->total,
+            'itemCount' => count($data->items),
+            'qrOrderRequestId' => $data->qrOrderRequestId,
+            'tableId' => $data->tableId,
+        ];
+
+        $idempotencyKey = $data->idempotencyKey;
+        $this->lastCreateMeta = null;
+
+        $order = $this->posIdempotencyService->runWithStoredResult(
+            'orders.create',
+            $idempotencyKey,
+            $idempotencyPayload,
+            fn (Order $order): array => ['orderId' => (int) $order->id],
+            fn () => $this->persistCreateOrder($data, $serviceMode, $orderChannel, $posSessionId, $user),
+            function (array $stored) use ($user, $idempotencyKey, $data): ?Order {
+                $orderId = (int) ($stored['orderId'] ?? 0);
+                if ($orderId < 1) {
+                    return null;
+                }
+
+                $existing = $this->orderRepository->findWithRelations($orderId);
+                if ($existing !== null) {
+                    $this->posCheckoutIntegrityService->recordIdempotencyHit(
+                        $orderId,
+                        $data->outletId !== null ? (int) $data->outletId : null,
+                        $user,
+                        $idempotencyKey,
+                    );
+                }
+
+                return $existing;
+            },
+        );
+
+        if ($this->lastCreateMeta !== null) {
+            return new OrderCreateResult($order, $this->lastCreateMeta, created: false);
+        }
+
+        return new OrderCreateResult($order, null, true);
+    }
+
+    public function create(CreateOrderData $data, ?User $user = null): Order
+    {
+        return $this->createOrder($data, $user)->order;
+    }
 
     /**
      * @param  array<string,mixed>  $filters
@@ -115,24 +200,29 @@ class OrderService
             ->get();
     }
 
-    public function create(CreateOrderData $data, ?User $user = null)
-    {
-        if ($user !== null && $data->outletId !== null) {
-            $this->assertOutletAllowed($user, (int) $data->outletId);
-        }
+    private function persistCreateOrder(
+        CreateOrderData $data,
+        ?string $serviceMode,
+        ?string $orderChannel,
+        ?int $posSessionId,
+        ?User $user,
+    ): Order {
+        return DB::transaction(function () use ($data, $serviceMode, $orderChannel, $posSessionId, $user): Order {
+            $resume = $this->posOrderCreateGuardService->resolveResumableOrder($data, $user);
+            if ($resume !== null) {
+                $existing = $resume['order'];
+                $this->lastCreateMeta = [
+                    'action' => 'resume_existing_order',
+                    'existingOrderId' => (int) $existing->id,
+                    'existingOrderCode' => (string) $existing->code,
+                    'reason' => (string) $resume['reason'],
+                ];
 
-        $explicitServiceMode = $data->serviceMode !== null;
-        $serviceMode = $this->resolveServiceMode($data);
-        $orderChannel = $this->resolveOrderChannel($data, $serviceMode);
-        $posSessionId = $this->resolvePosSessionId($data, $serviceMode, $explicitServiceMode);
+                return $existing;
+            }
 
-        if ($explicitServiceMode && $serviceMode === 'dine_in' && $data->tableId === null) {
-            throw ValidationException::withMessages([
-                'tableId' => ['Dine-in orders require a table.'],
-            ]);
-        }
+            $this->lastCreateMeta = null;
 
-        return DB::transaction(function () use ($data, $serviceMode, $orderChannel, $posSessionId, $user) {
             $normalizedPayments = $this->normalizePayments($data->payments);
             $paidTotal = collect($normalizedPayments)->sum(fn (array $payment): float => (float) $payment['amount']);
             if ($paidTotal > ((float) $data->total + 0.00001)) {
@@ -142,6 +232,10 @@ class OrderService
             }
             $paymentStatus = $paidTotal >= $data->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
             $status = $paymentStatus === 'paid' && $data->status !== 'cancelled' ? 'completed' : $data->status;
+
+            if ($paymentStatus === 'paid' && $data->outletId !== null && (int) $data->outletId > 0) {
+                $this->orderStockValidationService->assertForSaleItems((int) $data->outletId, $data->items);
+            }
 
             [$floorTableId, $floorTableName] = $this->resolveFloorTableForOrder($data);
             $member = $this->orderMemberAttachmentService->resolveMemberForOrderCreate(
@@ -156,6 +250,7 @@ class OrderService
                 'pos_session_id' => $posSessionId,
                 'code' => $data->code,
                 'source' => $data->source,
+                ...$this->resolveCreateSourceFields($data),
                 'order_channel' => $orderChannel,
                 'service_mode' => $serviceMode,
                 'order_type' => $data->orderType,
@@ -201,10 +296,11 @@ class OrderService
 
             if ($paymentStatus === 'paid') {
                 $paidOrder = $order->fresh(['payments', 'items']);
-                $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
-                $this->postOrderPaymentJournal($paidOrder);
-                $this->orderPrintOrchestration->onOrderPaid($user, $paidOrder);
-                $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
+                $this->finalizePaidOrder($paidOrder, $user);
+            }
+
+            if ($data->qrOrderRequestId !== null) {
+                app(QrOrderPosIntegrationService::class)->attachOrderFromPos($user, (int) $data->qrOrderRequestId, $order->fresh(['items']));
             }
 
             $this->auditLogService->log(
@@ -227,14 +323,6 @@ class OrderService
 
             return $this->orderRepository->findWithRelations($order->id);
         });
-    }
-
-    /**
-     * Phase 2 lifecycle alias — explicit outlet-scoped order creation.
-     */
-    public function createOrder(User $user, CreateOrderData $data): ?Order
-    {
-        return $this->create($data, $user);
     }
 
     /**
@@ -458,14 +546,38 @@ class OrderService
         }
 
         $before = $this->orderRepository->findScoped($id, $this->outletAccessResolver->allowedOutletIds($user));
-        $updated = $this->paymentAllocationService->addPayments($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt);
-        if ($updated !== null && $before !== null && (string) $before->payment_status !== 'paid' && (string) $updated->payment_status === 'paid') {
-            $paidOrder = $updated->fresh(['items', 'payments']);
-            $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
-            $this->postOrderPaymentJournal($paidOrder);
-            $this->orderPrintOrchestration->onOrderPaid($user, $paidOrder);
-            $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
+        if ($before !== null) {
+            $before->loadMissing(['items', 'payments']);
         }
+        $updated = DB::transaction(function () use ($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt, $before): ?Order {
+            if ($before !== null && (string) $before->payment_status !== 'paid') {
+                $normalized = $this->normalizePayments($payments);
+                $projectedPaid = (float) $before->payments
+                    ->filter(fn ($payment): bool => (string) ($payment->status ?? 'paid') !== 'void')
+                    ->sum('amount') + collect($normalized)->sum(fn (array $payment): float => (float) $payment['amount']);
+                if ($projectedPaid + 0.00001 >= (float) $before->total && $before->outlet_id !== null) {
+                    $before->loadMissing('items');
+                    $this->orderStockValidationService->assertForSaleItems(
+                        (int) $before->outlet_id,
+                        $before->items->map(fn ($item): array => [
+                            'id' => $item->item_id,
+                            'name' => $item->name,
+                            'qty' => (float) $item->qty,
+                        ])->values()->all(),
+                        $before,
+                    );
+                }
+            }
+
+            $updated = $this->paymentAllocationService->addPayments($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt);
+            if ($updated !== null && $before !== null && (string) $before->payment_status !== 'paid' && (string) $updated->payment_status === 'paid') {
+                $paidOrder = $updated->fresh(['items', 'payments']);
+                $this->finalizePaidOrder($paidOrder, $user);
+                app(QrOrderPosIntegrationService::class)->syncPaidStatusFromOrder($user, $paidOrder);
+            }
+
+            return $updated;
+        });
         if ($updated !== null) {
             event(new OrderLifecycleChanged(
                 outletId: (int) ($updated->outlet_id ?? 0),
@@ -498,71 +610,44 @@ class OrderService
         ?string $cogsAccountCode = null,
         ?string $inventoryAccountCode = null
     ): array {
-        if ($this->accountingSettingsService->isRealtimeMode($tenantId, $outletId)) {
+        if ($outletId === null || $outletId < 1) {
             return [
                 'orderCount' => 0,
                 'totalSales' => 0.0,
                 'totalCogs' => 0.0,
                 'journalId' => null,
-                'skipped' => true,
-                'reason' => 'Revenue posting mode is realtime; shift close revenue posting skipped.',
+                'inventoryConsumption' => ['processed' => 0, 'reviewRequired' => 0, 'failed' => 0, 'totalCogs' => 0.0],
             ];
         }
 
-        return DB::transaction(function () use ($tenantId, $outletId, $cashAccountCode, $revenueAccountCode, $cogsAccountCode, $inventoryAccountCode): array {
-            $orders = Order::query()
-                ->where('payment_status', 'paid')
-                ->where('is_posted', false)
-                ->when($tenantId !== null && $tenantId > 0, fn ($query) => $query->where('tenant_id', $tenantId))
-                ->when($outletId !== null && $outletId > 0, fn ($query) => $query->where('outlet_id', $outletId))
-                ->lockForUpdate()
-                ->with('items:id,order_id,item_id,qty')
-                ->get(['id', 'code', 'tenant_id', 'outlet_id', 'total', 'paid_total']);
+        return app(\App\Modules\ShiftClose\Services\ShiftCloseEngineService::class)->run(
+            $tenantId,
+            $outletId,
+            null,
+            true,
+            false,
+        );
+    }
 
-            if ($orders->isEmpty()) {
+    /** @return array{source_type: string, source_id: int|null, source_code: string|null} */
+    private function resolveCreateSourceFields(CreateOrderData $data): array
+    {
+        if ($data->qrOrderRequestId !== null) {
+            $request = QrOrderRequest::query()->find((int) $data->qrOrderRequestId);
+            if ($request !== null) {
                 return [
-                    'orderCount' => 0,
-                    'totalSales' => 0.0,
-                    'totalCogs' => 0.0,
-                    'journalId' => null,
+                    'source_type' => 'qr_order',
+                    'source_id' => (int) $request->id,
+                    'source_code' => (string) $request->request_code,
                 ];
             }
+        }
 
-            $totalCashSales = (float) $orders->sum(fn (Order $order): float => (float) $order->paid_total);
-            $totalCogs = $this->calculateCogsForOrders($orders);
-            $journalOutletId = $this->resolveShiftCloseJournalOutletId($outletId, $orders);
-            $orderIds = $orders->pluck('id')->map(fn ($id): int => (int) $id)->all();
-            $giftCardComposition = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class)
-                ->compositionFromOrderIds($orderIds, $journalOutletId, settledOnly: true);
-            $batchKey = now()->format('YmdHis').'-'.$journalOutletId;
-
-            $journal = $this->journalPostingService->postForShiftClose(
-                (int) ($tenantId ?? 0),
-                $journalOutletId,
-                round($totalCashSales, 2),
-                round($totalCogs, 2),
-                $batchKey,
-                $giftCardComposition,
-            );
-
-            if ($journal === null) {
-                throw ValidationException::withMessages([
-                    'accounts' => ['Shift close posting failed. Check accounting health for missing mappings or period lock.'],
-                ]);
-            }
-
-            Order::query()
-                ->whereIn('id', $orders->pluck('id')->all())
-                ->where('is_posted', false)
-                ->update(['is_posted' => true]);
-
-            return [
-                'orderCount' => $orders->count(),
-                'totalSales' => round($totalCashSales + $giftCardComposition->total(), 2),
-                'totalCogs' => round($totalCogs, 2),
-                'journalId' => (string) $journal->id,
-            ];
-        });
+        return [
+            'source_type' => 'direct_pos',
+            'source_id' => null,
+            'source_code' => null,
+        ];
     }
 
     private function assertOutletAllowed(User $user, int $outletId): void
@@ -853,6 +938,30 @@ class OrderService
         }
 
         return $query->orderBy('id')->first();
+    }
+
+    private function finalizePaidOrder(Order $paidOrder, ?User $user): void
+    {
+        $outletId = $paidOrder->outlet_id !== null ? (int) $paidOrder->outlet_id : null;
+        if ($this->inventorySalePolicyService->defersConsumption($outletId)) {
+            $this->inventoryConsumptionQueueService->enqueueForPaidOrder($paidOrder);
+            $this->orderItemCostSnapshotService->snapshotForPaidOrder($paidOrder, $user);
+        } else {
+            $this->recipeStockDeductionService->deductForPaidOrder($paidOrder);
+        }
+
+        $this->postOrderPaymentJournal($paidOrder);
+        $this->orderPrintOrchestration->onOrderPaid($user, $paidOrder);
+        $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
+    }
+
+    public function postDeferredInventoryConsumption(?User $user, int $outletId): array
+    {
+        if ($user !== null) {
+            $this->assertOutletAllowed($user, $outletId);
+        }
+
+        return $this->inventoryConsumptionPostingService->processOutlet($outletId, 'manual');
     }
 
     private function postOrderPaymentJournal(Order $order): void

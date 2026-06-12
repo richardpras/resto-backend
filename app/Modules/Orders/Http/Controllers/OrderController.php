@@ -70,15 +70,20 @@ class OrderController extends Controller
 
     public function store(StoreOrderRequest $request): JsonResponse
     {
-        $order = $this->orderService->create(
+        $result = $this->orderService->createOrder(
             CreateOrderData::fromArray($request->validated()),
             $this->resolveAuthenticatedUser($request),
         );
 
+        $message = $result->meta !== null
+            ? 'Existing open bill resumed.'
+            : 'Order created successfully.';
+
         return response()->json([
-            'message' => 'Order created successfully.',
-            'data' => new OrderResource($order),
-        ], Response::HTTP_CREATED);
+            'message' => $message,
+            'data' => new OrderResource($result->order),
+            'meta' => $result->meta,
+        ], $result->httpStatus());
     }
 
     public function show(Request $request, int $order): JsonResponse
@@ -232,13 +237,15 @@ class OrderController extends Controller
 
     public function closeShift(ShiftClosePostingRequest $request): JsonResponse
     {
-        $result = $this->orderService->closeShiftAndPostJournal(
-            $request->validated('tenantId'),
-            $request->validated('outletId'),
-            $request->validated('cashAccountCode'),
-            $request->validated('revenueAccountCode'),
-            $request->validated('cogsAccountCode'),
-            $request->validated('inventoryAccountCode')
+        $user = $this->resolveAuthenticatedUser($request);
+        $outletId = (int) $request->validated('outletId');
+
+        $result = app(\App\Modules\ShiftClose\Services\ShiftCloseEngineService::class)->run(
+            $request->validated('tenantId') !== null ? (int) $request->validated('tenantId') : null,
+            $outletId,
+            $user,
+            true,
+            false,
         );
 
         return response()->json([

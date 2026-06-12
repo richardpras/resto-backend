@@ -16,8 +16,10 @@ final class InventoryNotificationAdapter
 
     public const TYPE_VARIANCE_DETECTED = 'inventory_variance_detected';
 
+    public const TYPE_POSTING_FAILED = 'inventory_posting_failed';
+
     /** @var list<string> */
-    private const RECIPIENT_PERMISSIONS = ['inventory.manage', 'purchase.manage'];
+    private const RECIPIENT_PERMISSIONS = ['inventory.manage', 'purchase.manage', 'settings.manage', 'accounting.manage'];
 
     public function __construct(
         private readonly NotificationService $notificationService,
@@ -65,6 +67,47 @@ final class InventoryNotificationAdapter
             $message,
             $actionUrl,
             $metadata,
+        );
+    }
+
+    public function notifyPostingFailed(int $outletId, int $orderId, string $orderCode, string $reason): void
+    {
+        if ($outletId < 1) {
+            return;
+        }
+
+        $this->fanOutToRecipients(
+            $outletId,
+            UserNotification::SEVERITY_HIGH,
+            self::TYPE_POSTING_FAILED,
+            'inventory-posting-failed-'.$orderId,
+            'Inventory posting failed: '.$orderCode,
+            $reason,
+            '/inventory?tab=posting',
+            ['orderId' => $orderId, 'orderCode' => $orderCode],
+        );
+    }
+
+    public function notifyPostingVariance(
+        int $outletId,
+        int $incidentId,
+        string $orderCode,
+        string $itemName,
+        float $variance,
+    ): void {
+        if ($outletId < 1 || $variance <= 0) {
+            return;
+        }
+
+        $this->fanOutToRecipients(
+            $outletId,
+            UserNotification::SEVERITY_WARNING,
+            self::TYPE_VARIANCE_DETECTED,
+            'inventory-posting-variance-'.$incidentId,
+            'Inventory variance on posting: '.$orderCode,
+            sprintf('%s variance %.2f on order %s.', $itemName, $variance, $orderCode),
+            '/inventory?tab=posting',
+            ['orderCode' => $orderCode, 'variance' => $variance, 'incidentId' => $incidentId],
         );
     }
 

@@ -7,6 +7,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Modules\Orders\Http\Resources\RestaurantTableResource;
 use App\Modules\Orders\Http\Resources\TableQrResolveResource;
+use App\Modules\Orders\Services\QrTableActiveOrderService;
 use App\Modules\Orders\Services\TableQrManagementService;
 use App\Modules\Orders\Services\TableQrPdfService;
 use App\Modules\Orders\Services\TableQrService;
@@ -23,6 +24,7 @@ class TableQrController extends Controller
         private readonly TableQrService $tableQrService,
         private readonly TableQrPdfService $tableQrPdfService,
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly QrTableActiveOrderService $activeOrderService,
     ) {}
 
     public function generate(Request $request, RestaurantTable $table): JsonResponse
@@ -122,9 +124,36 @@ class TableQrController extends Controller
         }
 
         $table = $this->tableQrManagementService->resolveByPublicId($qrPublicId);
+        $activeSession = $this->activeOrderService->resolveForTable($table);
+
+        $resource = new TableQrResolveResource($table, $this->tableQrManagementService);
 
         return response()->json([
-            'data' => new TableQrResolveResource($table, $this->tableQrManagementService),
+            'data' => array_merge(
+                $resource->toArray(request()),
+                ['activeSession' => $activeSession],
+            ),
+        ]);
+    }
+
+    public function activeSession(string $qrPublicId): JsonResponse
+    {
+        $failure = $this->resolveFailure($qrPublicId);
+        if ($failure !== null) {
+            return response()->json($failure['body'], $failure['status']);
+        }
+
+        try {
+            $session = $this->activeOrderService->resolveByPublicId($qrPublicId);
+        } catch (ModelNotFoundException) {
+            return response()->json([
+                'message' => 'Table not found.',
+                'code' => 'table_unavailable',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->json([
+            'data' => $session,
         ]);
     }
 

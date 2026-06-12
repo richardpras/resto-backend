@@ -2,6 +2,7 @@
 
 namespace App\Modules\Orders\Http\Resources;
 
+use App\Modules\Orders\Services\OrderSourceLinkService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -9,6 +10,9 @@ class QrOrderRequestResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        /** @var OrderSourceLinkService $sourceLinkService */
+        $sourceLinkService = app(OrderSourceLinkService::class);
+
         $estimatedTotal = $this->whenLoaded('items', function () {
             return (float) $this->items->sum(function ($item): float {
                 $price = $item->relationLoaded('menuItem') && $item->menuItem !== null
@@ -37,6 +41,7 @@ class QrOrderRequestResource extends JsonResource
             'rejectedAt' => $this->rejected_at?->toISOString(),
             'rejectionReason' => $this->rejection_reason,
             'orderId' => $this->order_id !== null ? (string) $this->order_id : null,
+            'linkedOrder' => $sourceLinkService->buildLinkedOrder($this->resource),
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($item) => [
                 'id' => (string) $item->id,
                 'menuItemId' => (int) $item->menu_item_id,
@@ -50,9 +55,11 @@ class QrOrderRequestResource extends JsonResource
     private function statusLabel(string $status): string
     {
         return match ($status) {
-            'pending_cashier_confirmation' => 'Awaiting Cashier',
+            'pending_cashier_confirmation' => 'Submitted',
+            'under_review' => 'Under Review',
             'confirmed' => 'Confirmed',
-            'rejected' => 'Rejected',
+            'paid' => 'Paid',
+            'rejected' => 'Cancelled',
             'expired' => 'Expired',
             default => $status,
         };

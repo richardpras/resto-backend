@@ -57,6 +57,7 @@ class MonitoringMetricsService
             'paymentRate' => $this->paymentRate($scopedOutletIds, $dateFrom, $dateTo),
             'stalePayments' => $this->stalePayments($scopedOutletIds, $dateFrom, $dateTo),
             'qrQueue' => $this->qrQueue($scopedOutletIds, $dateFrom, $dateTo),
+            'customerOrdering' => $this->customerOrdering($scopedOutletIds, $dateFrom, $dateTo),
             'active_waiter_calls' => $this->activeWaiterCalls($scopedOutletIds, $dateFrom, $dateTo),
             'average_waiter_response_time' => $this->averageWaiterResponseTime($scopedOutletIds, $dateFrom, $dateTo),
             'called_but_unhandled' => $this->calledButUnhandled($scopedOutletIds, $dateFrom, $dateTo),
@@ -153,6 +154,27 @@ class MonitoringMetricsService
         return [
             'pendingConfirmation' => (int) (clone $base)->where('status', 'pending_cashier_confirmation')->count(),
             'expired' => (int) (clone $base)->where('status', 'expired')->count(),
+        ];
+    }
+
+    /**
+     * @param  list<int>  $outletIds
+     */
+    private function customerOrdering(array $outletIds, ?Carbon $dateFrom, ?Carbon $dateTo): array
+    {
+        $base = DB::table('qr_order_requests')
+            ->whereIn('outlet_id', $outletIds);
+        $this->applyDateRange($base, 'created_at', $dateFrom, $dateTo);
+
+        return [
+            'pendingQrOrders' => (int) (clone $base)->whereIn('status', ['pending_cashier_confirmation', 'under_review'])->count(),
+            'adjustedAwaitingApproval' => (int) (clone $base)->where('customer_approval_status', 'pending_approval')->count(),
+            'callCashierVolume' => (int) DB::table('qr_order_requests')
+                ->whereIn('outlet_id', $outletIds)
+                ->where('cashier_call_count', '>', 0)
+                ->when($dateFrom !== null, fn ($query) => $query->where('cashier_called_at', '>=', $dateFrom))
+                ->when($dateTo !== null, fn ($query) => $query->where('cashier_called_at', '<=', $dateTo))
+                ->sum('cashier_call_count'),
         ];
     }
 

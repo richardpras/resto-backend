@@ -5,7 +5,7 @@ namespace Database\Seeders\Demo;
 use Illuminate\Database\Seeder;
 
 /**
- * DEMO-DATA-SEEDER-01 + DEMO-DATA-SEEDER-02 — full business lifecycle demo environment.
+ * DEMO-DATA-SEEDER-01 + 02 + 03 — full business lifecycle demo environment.
  */
 class DemoDataSeeder extends Seeder
 {
@@ -20,6 +20,7 @@ class DemoDataSeeder extends Seeder
             DemoReservationsSeeder::class,
             DemoMonitoringSeeder::class,
             DemoProductionReadinessSeeder::class,
+            DemoProductionDemoPatch03Seeder::class,
         ]);
     }
 }

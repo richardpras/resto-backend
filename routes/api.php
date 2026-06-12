@@ -47,6 +47,7 @@ use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Hardware\Http\Controllers\HardwareBridgeController;
 use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\InventoryValuationController;
+use App\Modules\Inventory\Http\Controllers\InventoryConsumptionController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Kitchen\Http\Controllers\KitchenTicketController;
 use App\Modules\GiftCards\Http\Controllers\GiftCardController;
@@ -90,6 +91,7 @@ use App\Modules\Orders\Http\Controllers\OrderItemRecoveryController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoverySettlementController;
 use App\Modules\Orders\Http\Controllers\PosSessionController;
 use App\Modules\Orders\Http\Controllers\QrOrderController;
+use App\Modules\Orders\Http\Controllers\QrOrderPublicController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Orders\Http\Controllers\TableQrController;
 use App\Modules\Reservations\Http\Controllers\ReservationController;
@@ -153,6 +155,9 @@ Route::prefix('v1')->group(function (): void {
     });
     Route::post('qr-orders', [QrOrderController::class, 'store']);
     Route::post('qr-orders/{qrOrderRequest}/call-cashier', [QrOrderController::class, 'callCashier']);
+    Route::get('public/qr-orders/{orderCode}', [QrOrderPublicController::class, 'show']);
+    Route::post('public/qr-orders/{orderCode}/approve-adjustments', [QrOrderPublicController::class, 'approveAdjustments']);
+    Route::get('public/qr/tables/{qrPublicId}/active-session', [TableQrController::class, 'activeSession']);
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
     Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
 
@@ -166,12 +171,20 @@ Route::prefix('v1')->group(function (): void {
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('pos/checkout-integrity-health', [\App\Modules\Orders\Http\Controllers\PosCheckoutIntegrityController::class, 'health'])->middleware(['auth:api', 'permission.any:pos.use,settings.manage']);
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments'])->middleware('auth:api');
     Route::get('orders/{order}/events', [OrderController::class, 'listEvents'])->middleware('auth:api');
-        Route::get('open-bills/table', [OpenBillController::class, 'byTable'])->middleware('permission:pos.use');
+        Route::get('open-bills/table', [OpenBillController::class, 'byTable'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('payment-webhooks/{provider}', [PaymentTransactionController::class, 'webhook']);
     Route::post('payments/webhooks/xendit', [XenditInvoiceWebhookController::class, 'store']);
     Route::post('orders/shift-close', [OrderController::class, 'closeShift'])->middleware(['auth:api', 'permission:finance.shift_close']);
+    Route::prefix('shift-close')->middleware(['auth:api', 'permission:finance.shift_close'])->group(function (): void {
+        Route::get('preflight', [\App\Modules\ShiftClose\Http\Controllers\ShiftCloseController::class, 'preflight']);
+        Route::get('readiness', [\App\Modules\ShiftClose\Http\Controllers\ShiftCloseController::class, 'readiness']);
+        Route::get('history', [\App\Modules\ShiftClose\Http\Controllers\ShiftCloseController::class, 'history']);
+        Route::get('{id}/report', [\App\Modules\ShiftClose\Http\Controllers\ShiftCloseController::class, 'report']);
+        Route::post('run', [\App\Modules\ShiftClose\Http\Controllers\ShiftCloseController::class, 'run']);
+    });
     Route::apiResource('menu-items', MenuItemController::class)
         ->only(['index', 'store', 'show', 'update'])
         ->middleware(['auth:api', 'permission:pos.use']);
@@ -335,6 +348,9 @@ Route::prefix('v1')->group(function (): void {
     Route::get('inventory/valuations', [InventoryValuationController::class, 'index'])->middleware(['auth:api', 'permission:inventory.manage']);
     Route::post('inventory/valuations/recalculate', [InventoryValuationController::class, 'recalculate'])->middleware(['auth:api', 'permission:inventory.manage']);
     Route::get('inventory/valuations/{ingredientId}', [InventoryValuationController::class, 'show'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::get('inventory/posting-health', [InventoryConsumptionController::class, 'health'])->middleware(['auth:api', 'permission.any:inventory.manage,settings.manage']);
+    Route::get('inventory/consumption/queue', [InventoryConsumptionController::class, 'index'])->middleware(['auth:api', 'permission.any:inventory.manage,settings.manage']);
+    Route::post('inventory/consumption/post', [InventoryConsumptionController::class, 'post'])->middleware(['auth:api', 'permission:inventory.manage']);
 
     Route::middleware('auth:api')->group(function (): void {
         Route::get('notifications/unread-count', [UserNotificationController::class, 'unreadCount']);
@@ -1032,9 +1048,18 @@ Route::prefix('v1')->group(function (): void {
         Route::get('print/documents/{history}/pdf', [ReceiptDocumentController::class, 'pdf'])->middleware('permission:pos.use');
         Route::post('print/documents/{history}/reprint', [ReceiptDocumentController::class, 'reprint'])->middleware('permission:pos.use');
         Route::post('print/documents/{history}/defer', [ReceiptDocumentController::class, 'markDeferred'])->middleware('permission:pos.use');
-        Route::get('qr-orders', [QrOrderController::class, 'index'])->middleware('permission:pos.use');
-        Route::post('qr-orders/{qrOrderRequest}/confirm', [QrOrderController::class, 'confirm'])->middleware('permission:pos.use');
-        Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission:pos.use');
+        Route::get('qr-orders', [QrOrderController::class, 'index'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::get('qr-orders/customer-health', [QrOrderController::class, 'customerHealth'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::get('qr-orders/search', [QrOrderController::class, 'search'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::post('qr-orders/scan', [QrOrderController::class, 'scan'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::get('qr-orders/{qrOrderRequest}/review', [QrOrderController::class, 'review'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/open-in-pos', [QrOrderController::class, 'openInPos'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::get('qr-orders/{qrOrderRequest}/history', [QrOrderController::class, 'history'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::patch('qr-orders/{qrOrderRequest}/adjust', [QrOrderController::class, 'adjust'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/confirm', [QrOrderController::class, 'confirm'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/confirm-and-pay', [QrOrderController::class, 'confirmAndPay'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::post('qr-orders/{qrOrderRequest}/mark-served', [QrOrderController::class, 'markServed'])->middleware('permission.any:cashier.manage,pos.use,qr_orders.view');
         Route::post('reservations', [ReservationController::class, 'store'])->middleware('permission:pos.use');
         Route::get('reservations', [ReservationController::class, 'index'])->middleware('permission:pos.use');
         Route::get('reservations/dashboard', [ReservationController::class, 'dashboard'])->middleware('permission:pos.use');

@@ -368,6 +368,46 @@ class JournalPostingService
         }
     }
 
+    public function postForDeferredInventoryConsumption(
+        int $tenantId,
+        ?int $outletId,
+        float $totalCogs,
+        string $batchKey,
+    ): ?Journal {
+        if ($totalCogs <= 0) {
+            return null;
+        }
+
+        try {
+            $cogsAcc = $this->integrityService->resolveAccountOrFail('cogs', ['5100'], ['expense'], $outletId);
+            $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
+
+            return $this->post([
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'inventory_consumption_posting',
+                'source_id' => abs(crc32($batchKey)),
+                'journal_date' => now()->toDateString(),
+                'description' => 'Deferred inventory consumption posting',
+                'posting_key' => 'inventory-consumption-'.$batchKey,
+                'scope' => 'inventory_consumption.'.$outletId,
+                'lines' => [
+                    ['account_id' => $cogsAcc->id, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS from deferred consumption'],
+                    ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction from deferred consumption'],
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            $this->recordAutoPostFailure('inventory_consumption_posting', (int) crc32($batchKey), $outletId, $e, [
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'total_cogs' => $totalCogs,
+                'batch_key' => $batchKey,
+            ]);
+
+            return null;
+        }
+    }
+
     /** @param array<string,mixed>|null $payload */
     private function recordAutoPostFailure(string $sourceType, int $sourceId, ?int $outletId, \Throwable $e, ?array $payload): void
     {

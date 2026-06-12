@@ -28,6 +28,7 @@ class PaymentAllocationService
         private readonly PosAuditLogService $auditLogService,
         private readonly OptimisticConcurrencyService $optimisticConcurrencyService,
         private readonly AccountingVoidPostingService $accountingVoidPostingService,
+        private readonly PosCheckoutIntegrityService $posCheckoutIntegrityService,
     ) {}
 
     /**
@@ -36,10 +37,11 @@ class PaymentAllocationService
     public function addPayments(User $user, int $orderId, array $payments, ?string $idempotencyKey = null, ?string $expectedUpdatedAt = null): ?Order
     {
         return DB::transaction(function () use ($user, $orderId, $payments, $idempotencyKey, $expectedUpdatedAt): ?Order {
-            return $this->idempotencyService->run(
+            return $this->idempotencyService->runWithStoredResult(
                 'orders.payments.add.'.$orderId,
                 $idempotencyKey,
                 ['payments' => $payments, 'expectedUpdatedAt' => $expectedUpdatedAt],
+                fn (?Order $order): array => ['orderId' => $order !== null ? (int) $order->id : 0],
                 function () use ($user, $orderId, $payments, $expectedUpdatedAt): ?Order {
                     $order = $this->findScopedOrderForUpdate($user, $orderId);
                     if ($order === null) {
@@ -67,7 +69,31 @@ class PaymentAllocationService
                     }
 
                     return $fresh;
-                }
+                },
+                function (array $stored) use ($user, $orderId, $idempotencyKey): ?Order {
+                    $storedOrderId = (int) ($stored['orderId'] ?? 0);
+                    if ($storedOrderId < 1) {
+                        return null;
+                    }
+
+                    $order = $this->orderRepository->findWithRelations($storedOrderId);
+                    if ($order !== null) {
+                        $this->posCheckoutIntegrityService->recordIdempotencyHit(
+                            $storedOrderId,
+                            $order->outlet_id !== null ? (int) $order->outlet_id : null,
+                            $user,
+                            $idempotencyKey,
+                        );
+                        $this->posCheckoutIntegrityService->recordRetryDetected(
+                            $storedOrderId,
+                            $order->outlet_id !== null ? (int) $order->outlet_id : null,
+                            $user,
+                            'orders.payments.add',
+                        );
+                    }
+
+                    return $order;
+                },
             );
         });
     }

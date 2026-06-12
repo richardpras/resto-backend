@@ -108,6 +108,81 @@ class Phase11InventoryIntegrityTest extends TestCase
         ]);
     }
 
+    public function test_add_payments_rolls_back_when_stock_is_insufficient(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet('P11II Pay-Stock-Rollback');
+        $this->seedFullAccounts((int) $outlet->id);
+        [$ingA, , $menuId] = $this->seedRecipeContext((int) $outlet->id, 10.0, 1.0, 0, 50);
+        $orderId = $this->createConfirmedOrder((int) $outlet->id, (int) $user->id, 'P11II-STOCK-FAIL', $menuId, qty: 1, unitPrice: 30);
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 30]],
+        ])->assertStatus(422);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'payment_status' => 'unpaid',
+            'paid_total' => 0,
+        ]);
+        $this->assertDatabaseMissing('payments', ['order_id' => $orderId]);
+        $this->assertDatabaseMissing('stock_movements', [
+            'source_type' => 'order_payment',
+            'source_id' => 'P11II-STOCK-FAIL',
+        ]);
+        $this->assertDatabaseHas('inventory_stocks', [
+            'ingredient_id' => (int) $ingA->id,
+            'outlet_id' => (int) $outlet->id,
+            'stock' => 0,
+        ]);
+    }
+
+    public function test_create_paid_order_rolls_back_when_stock_is_insufficient(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet('P11II Create-Stock-Rollback');
+        $this->seedFullAccounts((int) $outlet->id);
+        [, , $menuId] = $this->seedRecipeContext((int) $outlet->id, 5.0, 1.0, 0, 50);
+
+        $table = RestaurantTable::query()->create([
+            'outlet_id' => (int) $outlet->id,
+            'name' => 'P11II-T-'.uniqid(),
+            'capacity' => 4,
+            'status' => 'active',
+        ]);
+        $session = PosSession::query()->create([
+            'outlet_id' => (int) $outlet->id,
+            'opened_by_user_id' => (int) $user->id,
+            'status' => 'open',
+            'opening_cash' => 100000,
+            'opened_at' => now(),
+        ]);
+
+        $this->postJson('/api/v1/orders', [
+            'tenantId' => 1,
+            'outletId' => (int) $outlet->id,
+            'code' => 'P11II-CREATE-FAIL',
+            'source' => 'pos',
+            'orderType' => 'Takeaway',
+            'status' => 'confirmed',
+            'paymentStatus' => 'paid',
+            'serviceMode' => 'takeaway',
+            'orderChannel' => 'pos',
+            'posSessionId' => (int) $session->id,
+            'items' => [
+                ['id' => (string) $menuId, 'name' => 'P11II Menu', 'qty' => 1, 'price' => 30],
+            ],
+            'subtotal' => 30,
+            'tax' => 0,
+            'total' => 30,
+            'payments' => [['method' => 'cash', 'amount' => 30]],
+        ])->assertStatus(422);
+
+        $this->assertDatabaseMissing('orders', ['code' => 'P11II-CREATE-FAIL']);
+        $this->assertDatabaseMissing('stock_movements', [
+            'source_type' => 'order_payment',
+            'source_id' => 'P11II-CREATE-FAIL',
+        ]);
+    }
+
     public function test_negative_stock_drift_blocked_under_repeated_deduction_attempts(): void
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet('P11II No-Negative');

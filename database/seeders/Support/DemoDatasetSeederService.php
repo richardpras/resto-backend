@@ -593,29 +593,65 @@ class DemoDatasetSeederService
                 }
 
                 $qrTables = $tables->take(2);
-                for ($q = 1; $q <= 12; $q++) {
+                $lifecycleSpecs = [
+                    ['suffix' => 'PENDING', 'status' => 'pending_cashier_confirmation', 'kitchen' => null, 'served' => false],
+                    ['suffix' => 'ADJUSTED', 'status' => 'under_review', 'kitchen' => null, 'served' => false, 'adjusted' => true],
+                    ['suffix' => 'CONFIRMED', 'status' => 'confirmed', 'kitchen' => 'queued', 'served' => false],
+                    ['suffix' => 'COOKING', 'status' => 'confirmed', 'kitchen' => 'cooking', 'served' => false],
+                    ['suffix' => 'READY', 'status' => 'confirmed', 'kitchen' => 'ready', 'served' => false],
+                    ['suffix' => 'SERVED', 'status' => 'confirmed', 'kitchen' => 'served', 'served' => true],
+                    ['suffix' => 'COMPLETED', 'status' => 'paid', 'kitchen' => 'completed', 'served' => true],
+                ];
+                foreach ($lifecycleSpecs as $index => $life) {
+                    $q = $index + 1;
                     $qrOrder = Order::query()->where('outlet_id', $outlet->id)->where('order_channel', 'qr')->skip($q - 1)->first();
                     if ($qrOrder === null) {
                         continue;
                     }
-                    $qrStatus = $q <= 6 ? 'pending_cashier_confirmation' : ($q <= 9 ? 'confirmed' : 'expired');
-                    QrOrderRequest::query()->updateOrCreate(
-                        ['request_code' => "{$spec['code']}-QR-{$q}"],
+                    $qrStatus = (string) $life['status'];
+                    $reviewDraft = ! empty($life['adjusted'])
+                        ? ['items' => [], 'adjustments' => [['type' => 'changed', 'original' => ['qty' => 2], 'updated' => ['qty' => 1], 'reason' => 'Sold Out']]]
+                        : null;
+                    $qrRequest = QrOrderRequest::query()->updateOrCreate(
+                        ['request_code' => "{$spec['code']}-QR-{$life['suffix']}"],
                         [
                             'outlet_id' => $outlet->id,
                             'table_id' => $qrTables[($q - 1) % max(1, $qrTables->count())]->id,
-                            'customer_name' => "QR Guest {$q}",
+                            'customer_name' => "QR Guest {$life['suffix']}",
                             'status' => $qrStatus,
-                            'expires_at' => now()->addMinutes(15),
-                            'confirmed_at' => $qrStatus === 'confirmed' ? now()->subMinutes(20) : null,
-                            'order_id' => $qrOrder->id,
-                            'confirmed_by_user_id' => $qrStatus === 'confirmed' ? $cashiers[0]->id : null,
+                            'expires_at' => now()->addMinutes(30),
+                            'confirmed_at' => in_array($qrStatus, ['confirmed', 'paid'], true) ? now()->subMinutes(20) : null,
+                            'order_id' => in_array($qrStatus, ['under_review', 'confirmed', 'paid'], true) ? $qrOrder->id : null,
+                            'opened_in_pos_at' => in_array($qrStatus, ['under_review', 'confirmed', 'paid'], true) ? now()->subMinutes(10) : null,
+                            'confirmed_by_user_id' => in_array($qrStatus, ['confirmed', 'paid'], true) ? $cashiers[0]->id : null,
+                            'review_draft' => $reviewDraft,
+                            'customer_served_at' => ! empty($life['served']) ? now()->subMinutes(5) : null,
                             'rejected_at' => null,
                             'rejected_by_user_id' => null,
                             'rejection_reason' => null,
                         ],
                     );
+                    if (in_array($qrStatus, ['under_review', 'confirmed', 'paid'], true)) {
+                        $kitchen = $life['kitchen'] ?? 'queued';
+                        $qrOrder->update([
+                            'source_type' => 'qr_order',
+                            'source_id' => (int) $qrRequest->id,
+                            'source_code' => (string) $qrRequest->request_code,
+                            'payment_status' => $qrStatus === 'paid' ? 'paid' : 'unpaid',
+                            'kitchen_status' => $kitchen,
+                            'status' => $qrStatus === 'paid' ? 'completed' : 'confirmed',
+                        ]);
+                    }
                 }
+
+                Order::query()
+                    ->where('outlet_id', $outlet->id)
+                    ->whereNull('source_type')
+                    ->update([
+                        'source_type' => 'direct_pos',
+                        'source_id' => null,
+                        'source_code' => null,
+                    ]);
             }
         });
     }

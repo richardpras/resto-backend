@@ -37,8 +37,10 @@ class PosTransitionValidator
     public function assertQrRequestStatusTransition(string $from, string $to): void
     {
         $this->assertAllowed($from, $to, [
-            'pending_cashier_confirmation' => ['confirmed', 'rejected', 'expired'],
-            'confirmed' => [],
+            'pending_cashier_confirmation' => ['under_review', 'confirmed', 'paid', 'rejected', 'expired'],
+            'under_review' => ['confirmed', 'paid', 'rejected', 'expired'],
+            'confirmed' => ['paid'],
+            'paid' => [],
             'rejected' => [],
             'expired' => [],
         ], 'status');

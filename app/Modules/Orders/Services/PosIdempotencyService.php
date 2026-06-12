@@ -10,8 +10,8 @@ class PosIdempotencyService
 {
     /**
      * @template T
-     * @param array<string,mixed> $payload
-     * @param \Closure():T $callback
+     * @param  array<string,mixed>  $payload
+     * @param  \Closure():T  $callback
      * @return T
      */
     public function run(string $scope, ?string $idempotencyKey, array $payload, \Closure $callback): mixed
@@ -49,5 +49,64 @@ class PosIdempotencyService
         ]);
 
         return $result;
+    }
+
+    /**
+     * @template T
+     * @param  array<string,mixed>  $payload
+     * @param  \Closure(T):array<string,mixed>  $responsePayload
+     * @param  \Closure():T  $callback
+     * @return T
+     */
+    public function runWithStoredResult(
+        string $scope,
+        ?string $idempotencyKey,
+        array $payload,
+        \Closure $responsePayload,
+        \Closure $callback,
+        ?\Closure $replay = null,
+    ): mixed {
+        if (! is_string($idempotencyKey) || trim($idempotencyKey) === '') {
+            return $callback();
+        }
+
+        return DB::transaction(function () use ($scope, $idempotencyKey, $payload, $responsePayload, $callback, $replay): mixed {
+            $normalizedKey = trim($idempotencyKey);
+            $requestHash = hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}');
+
+            $existing = PosIdempotencyKey::query()
+                ->where('scope', $scope)
+                ->where('idempotency_key', $normalizedKey)
+                ->lockForUpdate()
+                ->first();
+
+            if ($existing !== null) {
+                if ((string) $existing->request_hash !== $requestHash) {
+                    throw ValidationException::withMessages([
+                        'idempotencyKey' => ['Idempotency key already used with a different payload.'],
+                    ]);
+                }
+
+                if (is_array($existing->response_payload) && $replay !== null) {
+                    return $replay($existing->response_payload);
+                }
+
+                throw ValidationException::withMessages([
+                    'idempotencyKey' => ['Duplicate request detected.'],
+                ]);
+            }
+
+            $result = $callback();
+
+            PosIdempotencyKey::query()->create([
+                'scope' => $scope,
+                'idempotency_key' => $normalizedKey,
+                'request_hash' => $requestHash,
+                'response_payload' => $responsePayload($result),
+                'processed_at' => now(),
+            ]);
+
+            return $result;
+        });
     }
 }

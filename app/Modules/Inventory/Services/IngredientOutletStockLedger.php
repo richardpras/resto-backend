@@ -22,6 +22,7 @@ final class IngredientOutletStockLedger
         string $sourceType,
         ?string $sourceId = null,
         ?array $ledgerPayload = null,
+        bool $enforceNonNegative = true,
     ): StockMovement {
         abort_if($outletId < 1, Response::HTTP_UNPROCESSABLE_ENTITY, 'outlet_id is required for stock movements.');
         abort_if($quantity <= 0, Response::HTTP_UNPROCESSABLE_ENTITY, 'quantity must be positive.');
@@ -33,7 +34,7 @@ final class IngredientOutletStockLedger
         };
         abort_if($sign === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Invalid movement type.');
 
-        return DB::transaction(function () use ($outletId, $ingredientId, $type, $quantity, $sign, $sourceType, $sourceId, $ledgerPayload): StockMovement {
+        return DB::transaction(function () use ($outletId, $ingredientId, $type, $quantity, $sign, $sourceType, $sourceId, $ledgerPayload, $enforceNonNegative): StockMovement {
             /** @var Ingredient $ingredient */
             $ingredient = Ingredient::query()->lockForUpdate()->findOrFail($ingredientId);
             abort_if(
@@ -79,11 +80,13 @@ final class IngredientOutletStockLedger
             }
 
             $nextStock = (float) $bucket->stock + ($sign * $quantity);
-            abort_if(
-                $nextStock < 0,
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-                'Insufficient stock for this outlet.'
-            );
+            if ($enforceNonNegative) {
+                abort_if(
+                    $nextStock < 0,
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                    'Insufficient stock for this outlet.'
+                );
+            }
 
             $bucket->update(['stock' => $nextStock]);
             $unitCost = isset($ledgerPayload['unit_cost']) ? (float) $ledgerPayload['unit_cost'] : (float) ($ingredient->price ?? 0);

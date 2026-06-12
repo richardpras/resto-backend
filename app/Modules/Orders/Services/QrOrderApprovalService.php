@@ -2,13 +2,13 @@
 
 namespace App\Modules\Orders\Services;
 
-use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Models\User;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Events\QrOrderDecisionChanged;
 use App\Modules\Orders\Repositories\QrOrderRequestRepositoryInterface;
+use App\Modules\Settings\Services\QrOrderingSettingsService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +24,10 @@ class QrOrderApprovalService
         private readonly PosTransitionValidator $transitionValidator,
         private readonly PosIdempotencyService $idempotencyService,
         private readonly PosAuditLogService $auditLogService,
+        private readonly QrOrderReviewService $qrOrderReviewService,
+        private readonly QrOrderCustomerAuditService $customerAuditService,
+        private readonly QrOrderNotificationAdapter $notificationAdapter,
+        private readonly QrOrderingSettingsService $qrOrderingSettingsService,
     ) {}
 
     public function confirm(
@@ -59,9 +63,18 @@ class QrOrderApprovalService
                             'request' => ['Rejected request cannot be confirmed.'],
                         ]);
                     }
-                    if ((string) $request->status !== 'pending_cashier_confirmation') {
+                    if (! in_array((string) $request->status, ['pending_cashier_confirmation', 'under_review'], true)) {
                         throw ValidationException::withMessages([
-                            'request' => ['Only pending cashier confirmations can be confirmed.'],
+                            'request' => ['Only pending QR orders can be confirmed.'],
+                        ]);
+                    }
+
+                    if (
+                        $this->qrOrderingSettingsService->requireCustomerApprovalForAdjustments()
+                        && (string) ($request->customer_approval_status ?? '') === 'pending_approval'
+                    ) {
+                        throw ValidationException::withMessages([
+                            'request' => ['Customer approval is required before confirming adjusted items.'],
                         ]);
                     }
 
@@ -76,41 +89,23 @@ class QrOrderApprovalService
                         ]);
                     }
 
-                    $requestItems = $request->relationLoaded('items') ? $request->items : $request->items()->get();
-                    $menuItems = MenuItem::query()
-                        ->whereIn('id', $requestItems->pluck('menu_item_id')->all())
-                        ->get()
-                        ->keyBy('id');
-
-                    $orderItems = [];
-                    foreach ($requestItems as $requestItem) {
-                        $menuItem = $menuItems->get((int) $requestItem->menu_item_id);
-                        if ($menuItem === null) {
-                            throw ValidationException::withMessages([
-                                'items' => ['Menu item not found for one or more request items.'],
-                            ]);
-                        }
-                        if ($menuItem->outlet_id !== null && (int) $menuItem->outlet_id !== (int) $request->outlet_id) {
-                            throw ValidationException::withMessages([
-                                'items' => ['Menu item does not belong to request outlet.'],
-                            ]);
-                        }
-
-                        $orderItems[] = [
-                            'id' => (string) $menuItem->id,
-                            'name' => (string) $menuItem->name,
-                            'qty' => (float) $requestItem->qty,
-                            'price' => (float) $menuItem->price,
-                            'notes' => $requestItem->notes,
-                        ];
+                    $orderItems = $this->qrOrderReviewService->resolveOrderItemsFromRequest($request);
+                    if ($orderItems === []) {
+                        throw ValidationException::withMessages([
+                            'items' => ['No order items available to confirm.'],
+                        ]);
                     }
 
-                    $subtotal = collect($orderItems)->sum(fn (array $item): float => (float) $item['qty'] * (float) $item['price']);
+                    $financials = $this->qrOrderReviewService->resolveFinancialTotals($request, $orderItems);
+                    $subtotal = $financials['subtotal'];
+                    $discountAmount = $financials['discount'];
+                    $total = $financials['total'];
+
                     $orderPayments = [];
                     if ($mode === 'pay_and_confirm') {
-                        $orderPayments = $payments !== [] ? $payments : [['method' => 'cash', 'amount' => $subtotal]];
+                        $orderPayments = $payments !== [] ? $payments : [['method' => 'cash', 'amount' => $total]];
                         $paidSum = collect($orderPayments)->sum(fn (array $payment): float => (float) ($payment['amount'] ?? 0));
-                        if (abs($paidSum - $subtotal) > 0.01) {
+                        if (abs($paidSum - $total) > 0.01) {
                             throw ValidationException::withMessages([
                                 'payments' => ['Payments must equal order total for pay and confirm.'],
                             ]);
@@ -130,8 +125,8 @@ class QrOrderApprovalService
                             payments: $orderPayments,
                             subtotal: $subtotal,
                             tax: 0,
-                            total: $subtotal,
-                            discountAmount: 0,
+                            total: $total,
+                            discountAmount: $discountAmount,
                             customerName: $request->customer_name,
                             customerPhone: null,
                             tableId: (int) $request->table_id,
@@ -157,6 +152,14 @@ class QrOrderApprovalService
 
                     $resolved = $this->resolveScoped($user, $requestId, false);
                     $this->auditLogService->log(
+                        'qr_order.confirmed',
+                        'qr_order_request',
+                        (int) $resolved->id,
+                        (int) $resolved->outlet_id,
+                        $user,
+                        ['orderId' => (int) ($resolved->order_id ?? 0), 'mode' => $mode]
+                    );
+                    $this->auditLogService->log(
                         'qr.request.confirmed',
                         'qr_order_request',
                         (int) $resolved->id,
@@ -164,6 +167,23 @@ class QrOrderApprovalService
                         $user,
                         ['orderId' => (int) ($resolved->order_id ?? 0), 'mode' => $mode]
                     );
+                    if ($mode === 'pay_and_confirm') {
+                        $this->auditLogService->log(
+                            'qr_order.paid',
+                            'qr_order_request',
+                            (int) $resolved->id,
+                            (int) $resolved->outlet_id,
+                            $user,
+                            ['orderId' => (int) ($resolved->order_id ?? 0)]
+                        );
+                    }
+                    $this->customerAuditService->log('customer_order.confirmed', $resolved, $user, [
+                        'orderId' => (int) ($resolved->order_id ?? 0),
+                    ]);
+                    $this->customerAuditService->log('customer_order.sent_to_kitchen', $resolved, $user, [
+                        'orderId' => (int) ($resolved->order_id ?? 0),
+                    ]);
+                    $this->notificationAdapter->qrOrderConfirmed($resolved);
                     event(new QrOrderDecisionChanged(
                         outletId: (int) $resolved->outlet_id,
                         requestId: (int) $resolved->id,
@@ -216,6 +236,14 @@ class QrOrderApprovalService
                     $resolved = $this->resolveScoped($user, $requestId, false);
                     $this->auditLogService->log(
                         'qr.request.rejected',
+                        'qr_order_request',
+                        (int) $resolved->id,
+                        (int) $resolved->outlet_id,
+                        $user,
+                        ['reason' => $reason]
+                    );
+                    $this->auditLogService->log(
+                        'qr_order.cancelled',
                         'qr_order_request',
                         (int) $resolved->id,
                         (int) $resolved->outlet_id,

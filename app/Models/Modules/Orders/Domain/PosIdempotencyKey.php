@@ -12,10 +12,12 @@ class PosIdempotencyKey extends Model
         'scope',
         'idempotency_key',
         'request_hash',
+        'response_payload',
         'processed_at',
     ];
 
     protected $casts = [
+        'response_payload' => 'array',
         'processed_at' => 'datetime',
     ];
 }

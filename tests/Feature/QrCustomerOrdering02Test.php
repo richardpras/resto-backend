@@ -210,12 +210,17 @@ class QrCustomerOrdering02Test extends TestCase
         ]);
     }
 
-    public function test_pending_request_prevents_duplicate_submission_for_same_table(): void
+    public function test_additional_order_allowed_for_same_table(): void
     {
         [$outlet, $table, $menuItem] = $this->seedQrSetup();
-        $this->createQrRequest($outlet->id, $table->id, $menuItem->id);
+        $firstCode = $this->postJson('/api/v1/qr-orders', [
+            'outletId' => $outlet->id,
+            'tableId' => $table->id,
+            'customerName' => 'Guest QR 1',
+            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
+        ])->assertCreated()->json('data.requestCode');
 
-        $duplicate = $this->postJson('/api/v1/qr-orders', [
+        $second = $this->postJson('/api/v1/qr-orders', [
             'outletId' => $outlet->id,
             'tableId' => $table->id,
             'customerName' => 'Guest QR 2',
@@ -224,8 +229,9 @@ class QrCustomerOrdering02Test extends TestCase
             ],
         ]);
 
-        $duplicate->assertUnprocessable();
-        $duplicate->assertJsonValidationErrors(['tableId']);
+        $second->assertCreated();
+        $this->assertNotSame($firstCode, $second->json('data.requestCode'));
+        $this->assertDatabaseCount('qr_order_requests', 2);
     }
 
     public function test_customer_name_is_required_on_submit(): void

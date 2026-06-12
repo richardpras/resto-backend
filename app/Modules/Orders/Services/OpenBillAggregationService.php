@@ -12,6 +12,7 @@ class OpenBillAggregationService
 {
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly OrderSourceLinkService $orderSourceLinkService,
     ) {}
 
     /**
@@ -86,6 +87,7 @@ class OpenBillAggregationService
             'id' => (int) $order->id,
             'code' => (string) $order->code,
             'source' => (string) $order->source,
+            'orderSource' => $this->orderSourceLinkService->buildOrderSource($order),
             'orderChannel' => $order->order_channel,
             'status' => (string) $order->status,
             'paymentStatus' => (string) $order->payment_status,

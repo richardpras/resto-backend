@@ -2,13 +2,14 @@
 
 namespace App\Modules\Orders\Services;
 
+use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Models\Modules\Orders\Domain\QrOrderRequestItem;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\User;
-use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Modules\Orders\Events\QrOrderCashierCalled;
 use App\Modules\Orders\Events\QrOrderRequestSubmitted;
 use App\Modules\Orders\Repositories\QrOrderRequestRepositoryInterface;
+use App\Modules\Settings\Services\QrOrderingSettingsService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -21,41 +22,26 @@ class QrOrderRequestService
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly QrOrderExpiryService $qrOrderExpiryService,
         private readonly PosAuditLogService $auditLogService,
+        private readonly QrOrderCustomerAuditService $customerAuditService,
+        private readonly QrOrderNotificationAdapter $notificationAdapter,
         private readonly PosIdempotencyService $idempotencyService,
+        private readonly QrOrderingSettingsService $qrOrderingSettingsService,
     ) {}
 
     public function create(array $payload)
     {
+        $appendCode = isset($payload['appendToRequestCode']) ? strtoupper(trim((string) $payload['appendToRequestCode'])) : null;
+        if ($appendCode !== null && $appendCode !== '') {
+            return $this->appendItems($payload, $appendCode);
+        }
+
         return DB::transaction(function () use ($payload) {
             return $this->idempotencyService->run(
                 'qr-orders.create.'.((int) $payload['outletId']).'.'.((int) $payload['tableId']),
                 $payload['idempotencyKey'] ?? null,
                 $payload,
                 function () use ($payload) {
-                    $table = RestaurantTable::query()
-                        ->whereKey((int) $payload['tableId'])
-                        ->where('outlet_id', (int) $payload['outletId'])
-                        ->where('status', 'active')
-                        ->first();
-
-                    if ($table === null) {
-                        throw ValidationException::withMessages([
-                            'tableId' => ['Table not found for this outlet or table is inactive.'],
-                        ]);
-                    }
-
-                    $activePending = QrOrderRequest::query()
-                        ->where('outlet_id', (int) $payload['outletId'])
-                        ->where('table_id', (int) $payload['tableId'])
-                        ->where('status', 'pending_cashier_confirmation')
-                        ->where('expires_at', '>', now())
-                        ->lockForUpdate()
-                        ->exists();
-                    if ($activePending) {
-                        throw ValidationException::withMessages([
-                            'tableId' => ['A request for this table is already awaiting cashier confirmation.'],
-                        ]);
-                    }
+                    $table = $this->resolveActiveTable((int) $payload['outletId'], (int) $payload['tableId']);
 
                     $request = $this->qrOrderRequestRepository->create([
                         'outlet_id' => (int) $payload['outletId'],
@@ -66,14 +52,7 @@ class QrOrderRequestService
                         'expires_at' => now()->addMinutes((int) ($payload['expiresInMinutes'] ?? 20)),
                     ]);
 
-                    foreach ($payload['items'] as $item) {
-                        QrOrderRequestItem::query()->create([
-                            'qr_order_request_id' => $request->id,
-                            'menu_item_id' => (int) $item['menuItemId'],
-                            'qty' => (float) $item['qty'],
-                            'notes' => $item['notes'] ?? null,
-                        ]);
-                    }
+                    $this->persistItems($request, $payload['items']);
 
                     $resolved = $this->qrOrderRequestRepository->findScoped((int) $request->id, [(int) $request->outlet_id]);
                     if ($resolved !== null) {
@@ -84,6 +63,7 @@ class QrOrderRequestService
                             (int) $resolved->outlet_id,
                             null
                         );
+                        $this->customerAuditService->log('customer_order.created', $resolved);
                         event(new QrOrderRequestSubmitted(
                             outletId: (int) $resolved->outlet_id,
                             requestId: (int) $resolved->id,
@@ -98,6 +78,76 @@ class QrOrderRequestService
                     return $resolved;
                 }
             );
+        });
+    }
+
+    /** @param array<string, mixed> $payload */
+    public function appendItems(array $payload, string $requestCode): QrOrderRequest
+    {
+        return DB::transaction(function () use ($payload, $requestCode): QrOrderRequest {
+            $request = QrOrderRequest::query()
+                ->where('request_code', strtoupper(trim($requestCode)))
+                ->where('outlet_id', (int) $payload['outletId'])
+                ->where('table_id', (int) $payload['tableId'])
+                ->lockForUpdate()
+                ->first();
+
+            if ($request === null) {
+                throw ValidationException::withMessages([
+                    'appendToRequestCode' => ['Active QR order not found for append.'],
+                ]);
+            }
+
+            $request = $this->qrOrderExpiryService->markExpiredIfNeeded($request);
+            if (in_array((string) $request->status, ['rejected', 'expired'], true)) {
+                throw ValidationException::withMessages([
+                    'appendToRequestCode' => ['Cannot append items to a closed QR order.'],
+                ]);
+            }
+
+            if (in_array((string) $request->status, ['confirmed', 'paid'], true)) {
+                throw ValidationException::withMessages([
+                    'appendToRequestCode' => ['Order is already confirmed. Ask staff to add items in POS.'],
+                ]);
+            }
+
+            foreach ($payload['items'] as $item) {
+                $menuItemId = (int) $item['menuItemId'];
+                $existing = QrOrderRequestItem::query()
+                    ->where('qr_order_request_id', $request->id)
+                    ->where('menu_item_id', $menuItemId)
+                    ->where('notes', $item['notes'] ?? null)
+                    ->first();
+
+                if ($existing !== null) {
+                    $existing->update([
+                        'qty' => (float) $existing->qty + (float) $item['qty'],
+                    ]);
+                    continue;
+                }
+
+                QrOrderRequestItem::query()->create([
+                    'qr_order_request_id' => $request->id,
+                    'menu_item_id' => $menuItemId,
+                    'qty' => (float) $item['qty'],
+                    'notes' => $item['notes'] ?? null,
+                ]);
+            }
+
+            $request->update([
+                'expires_at' => now()->addMinutes((int) ($payload['expiresInMinutes'] ?? 20)),
+            ]);
+
+            $resolved = $this->qrOrderRequestRepository->findScoped((int) $request->id, [(int) $request->outlet_id]);
+            if ($resolved === null) {
+                throw ValidationException::withMessages([
+                    'appendToRequestCode' => ['Failed to reload QR order after append.'],
+                ]);
+            }
+
+            $this->customerAuditService->log('customer_order.created', $resolved, null, ['appended' => true]);
+
+            return $resolved;
         });
     }
 
@@ -116,9 +166,17 @@ class QrOrderRequestService
         return $this->qrOrderRequestRepository->paginateScoped($perPage, $allowed, $filters);
     }
 
-    public function callCashier(int $requestId, int $outletId, int $tableId): QrOrderRequest
+    public function callCashier(int $requestId, int $outletId, int $tableId, ?string $reason = null): QrOrderRequest
     {
-        return DB::transaction(function () use ($requestId, $outletId, $tableId): QrOrderRequest {
+        if (! $this->qrOrderingSettingsService->enableCallCashier()) {
+            throw ValidationException::withMessages([
+                'callCashier' => ['Call Cashier is disabled for this outlet.'],
+            ]);
+        }
+
+        $normalizedReason = $this->normalizeCallReason($reason);
+
+        return DB::transaction(function () use ($requestId, $outletId, $tableId, $normalizedReason): QrOrderRequest {
             $request = QrOrderRequest::query()
                 ->whereKey($requestId)
                 ->where('outlet_id', $outletId)
@@ -132,9 +190,9 @@ class QrOrderRequestService
                 ]);
             }
 
-            if ((string) $request->status !== 'pending_cashier_confirmation') {
+            if (! in_array((string) $request->status, ['pending_cashier_confirmation', 'under_review'], true)) {
                 throw ValidationException::withMessages([
-                    'request' => ['Only awaiting-cashier requests can call the cashier.'],
+                    'request' => ['Only active pre-confirm requests can call the cashier.'],
                 ]);
             }
 
@@ -143,6 +201,7 @@ class QrOrderRequestService
             $request->update([
                 'cashier_called_at' => $calledAt,
                 'cashier_call_count' => $callCount,
+                'last_cashier_call_reason' => $normalizedReason,
             ]);
 
             $resolved = QrOrderRequest::query()
@@ -156,8 +215,13 @@ class QrOrderRequestService
                 (int) $resolved->id,
                 (int) $resolved->outlet_id,
                 null,
-                ['callCount' => $callCount]
+                ['callCount' => $callCount, 'reason' => $normalizedReason]
             );
+            $this->customerAuditService->log('customer_order.call_cashier', $resolved, null, [
+                'reason' => $normalizedReason,
+                'callCount' => $callCount,
+            ]);
+            $this->notificationAdapter->customerCallCashier($resolved, $normalizedReason);
 
             event(new QrOrderCashierCalled(
                 outletId: (int) $resolved->outlet_id,
@@ -172,6 +236,44 @@ class QrOrderRequestService
 
             return $resolved;
         });
+    }
+
+    /** @param list<array<string, mixed>> $items */
+    private function persistItems(QrOrderRequest $request, array $items): void
+    {
+        foreach ($items as $item) {
+            QrOrderRequestItem::query()->create([
+                'qr_order_request_id' => $request->id,
+                'menu_item_id' => (int) $item['menuItemId'],
+                'qty' => (float) $item['qty'],
+                'notes' => $item['notes'] ?? null,
+            ]);
+        }
+    }
+
+    private function resolveActiveTable(int $outletId, int $tableId): RestaurantTable
+    {
+        $table = RestaurantTable::query()
+            ->whereKey($tableId)
+            ->where('outlet_id', $outletId)
+            ->where('status', 'active')
+            ->first();
+
+        if ($table === null) {
+            throw ValidationException::withMessages([
+                'tableId' => ['Table not found for this outlet or table is inactive.'],
+            ]);
+        }
+
+        return $table;
+    }
+
+    private function normalizeCallReason(?string $reason): string
+    {
+        $value = strtolower(trim((string) $reason));
+        $allowed = ['need_assistance', 'request_bill', 'order_question', 'other'];
+
+        return in_array($value, $allowed, true) ? $value : 'other';
     }
 
     private function generateRequestCode(): string

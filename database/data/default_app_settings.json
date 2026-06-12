@@ -95,7 +95,8 @@
     "enableSplitBill": true,
     "enableMultiPayment": true,
     "confirmBeforePayment": true,
-    "enableQROrdering": true
+    "enableQROrdering": true,
+    "enableCallCashier": true
   },
   "integration": {
     "paymentGatewayKey": "",

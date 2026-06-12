@@ -17,7 +17,7 @@ class GetOpenBillByTableRequest extends FormRequest
         $allowedOutletIds = $this->allowedOutletIds();
         $mustBeAllowedOutlet = static function (string $attribute, mixed $value, \Closure $fail) use ($allowedOutletIds): void {
             if (! in_array((int) $value, $allowedOutletIds, true)) {
-                $fail('The selected '.$attribute.' is invalid.');
+                $fail('You do not have access to this outlet.');
             }
         };
 

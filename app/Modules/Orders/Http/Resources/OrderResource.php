@@ -2,6 +2,7 @@
 
 namespace App\Modules\Orders\Http\Resources;
 
+use App\Modules\Orders\Services\OrderSourceLinkService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -9,12 +10,16 @@ class OrderResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        /** @var OrderSourceLinkService $sourceLinkService */
+        $sourceLinkService = app(OrderSourceLinkService::class);
+
         return [
             'id' => (string) $this->id,
             'outletId' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
             'posSessionId' => $this->pos_session_id !== null ? (int) $this->pos_session_id : null,
             'code' => $this->code,
             'source' => $this->source,
+            'orderSource' => $sourceLinkService->buildOrderSource($this->resource),
             'orderChannel' => $this->order_channel,
             'serviceMode' => $this->service_mode,
             'orderType' => $this->order_type,

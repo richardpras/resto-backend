@@ -36,7 +36,11 @@ class EloquentOrderRepository implements OrderRepositoryInterface
             ->when(is_string($source) && $source !== '', fn ($query) => $query->where('source', $source))
             ->when(is_string($search) && trim($search) !== '', function ($query) use ($search): void {
                 $term = '%'.str_replace(['%', '_'], ['\\%', '\\_'], trim($search)).'%';
-                $query->where('code', 'like', $term);
+                $query->where(function ($inner) use ($term): void {
+                    $inner->where('code', 'like', $term)
+                        ->orWhere('source_code', 'like', $term)
+                        ->orWhere('table_name', 'like', $term);
+                });
             })
             ->when($dateFrom !== null && $dateFrom !== '', fn ($query) => $query->whereDate('created_at', '>=', $dateFrom))
             ->when($dateTo !== null && $dateTo !== '', fn ($query) => $query->whereDate('created_at', '<=', $dateTo))

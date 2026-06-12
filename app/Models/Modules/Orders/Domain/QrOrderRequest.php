@@ -25,6 +25,16 @@ class QrOrderRequest extends Model
         'order_id',
         'cashier_called_at',
         'cashier_call_count',
+        'last_cashier_call_reason',
+        'reviewed_at',
+        'reviewed_by_user_id',
+        'review_draft',
+        'adjustment_log',
+        'customer_approval_status',
+        'customer_served_at',
+        'opened_in_pos_at',
+        'opened_in_pos_by_user_id',
+        'original_items_snapshot',
     ];
 
     protected $casts = [
@@ -33,6 +43,12 @@ class QrOrderRequest extends Model
         'rejected_at' => 'datetime',
         'cashier_called_at' => 'datetime',
         'cashier_call_count' => 'integer',
+        'reviewed_at' => 'datetime',
+        'review_draft' => 'array',
+        'adjustment_log' => 'array',
+        'customer_served_at' => 'datetime',
+        'opened_in_pos_at' => 'datetime',
+        'original_items_snapshot' => 'array',
     ];
 
     public function items(): HasMany
@@ -58,5 +74,10 @@ class QrOrderRequest extends Model
     public function rejectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rejected_by_user_id');
+    }
+
+    public function reviewedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by_user_id');
     }
 }
