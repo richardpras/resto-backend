@@ -161,6 +161,7 @@ Route::prefix('v1')->group(function (): void {
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
     Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
 
+    Route::get('orders/next-code', [OrderController::class, 'nextCode'])->middleware(['auth:api', 'permission:pos.use']);
     Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}', [OrderController::class, 'update'])->middleware(['auth:api', 'permission:pos.use']);

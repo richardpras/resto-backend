@@ -31,7 +31,7 @@ class QrOrderPublicLookupTest extends TestCase
         $response->assertJsonPath('data.tableName', (string) $table->name);
         $response->assertJsonPath('data.outletName', (string) $outlet->name);
         $response->assertJsonPath('data.customerStatus', 'pending_review');
-        $response->assertJsonPath('data.customerStatusLabel', 'Menunggu review kasir');
+        $response->assertJsonPath('data.customerStatusLabel', 'Waiting for cashier review');
         $response->assertJsonPath('data.items.0.name', (string) $menuItem->name);
         $response->assertJsonPath('data.items.0.quantity', 2);
         $response->assertJsonPath('data.items.0.unitPrice', 25000);

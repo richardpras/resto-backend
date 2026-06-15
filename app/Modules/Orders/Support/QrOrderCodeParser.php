@@ -15,7 +15,7 @@ class QrOrderCodeParser
             return null;
         }
 
-        if (preg_match('/\/qr\/order\/([^/?#]+)/i', $trimmed, $matches) === 1) {
+        if (preg_match('~\/qr\/order\/([^?#]+)~i', $trimmed, $matches) === 1) {
             $fromUrl = $this->normalizePublicLookupCode(urldecode($matches[1]));
             if ($fromUrl !== null) {
                 return $fromUrl;

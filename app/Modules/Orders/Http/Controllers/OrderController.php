@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Http\Requests\AddOrderPaymentsRequest;
 use App\Modules\Orders\Http\Requests\ListOrdersRequest;
+use App\Modules\Orders\Http\Requests\NextOrderCodeRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderSplitRequest;
 use App\Modules\Orders\Http\Requests\ShiftClosePostingRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderRequest;
@@ -18,6 +19,7 @@ use App\Modules\Orders\Http\Resources\OrderPaymentResource;
 use App\Modules\Orders\Http\Resources\OrderSplitResource;
 use App\Modules\Orders\Http\Resources\PosEventLogResource;
 use App\Modules\Orders\Services\PaymentAllocationService;
+use App\Modules\Orders\Services\OrderCodeAllocationService;
 use App\Modules\Orders\Services\OrderService;
 use App\Modules\Orders\Services\SplitBillService;
 use Illuminate\Http\JsonResponse;
@@ -30,7 +32,21 @@ class OrderController extends Controller
         private readonly OrderService $orderService,
         private readonly SplitBillService $splitBillService,
         private readonly PaymentAllocationService $paymentAllocationService,
+        private readonly OrderCodeAllocationService $orderCodeAllocationService,
     ) {}
+
+    public function nextCode(NextOrderCodeRequest $request): JsonResponse
+    {
+        $user = $this->resolveAuthenticatedUser($request);
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        $outletId = (int) $request->validated('outletId');
+        $this->orderService->assertOutletAllowedForUser($user, $outletId);
+
+        return response()->json([
+            'data' => $this->orderCodeAllocationService->preview($outletId),
+        ]);
+    }
 
     public function index(ListOrdersRequest $request): JsonResponse
     {
@@ -158,7 +174,10 @@ class OrderController extends Controller
             $request->validated('cashAccountCode'),
             $request->validated('revenueAccountCode'),
             $request->validated('idempotencyKey') ?? $request->header('Idempotency-Key'),
-            $request->validated('expectedUpdatedAt')
+            $request->validated('expectedUpdatedAt'),
+            isset($request->validated()['qrOrderRequestId'])
+                ? (int) $request->validated('qrOrderRequestId')
+                : null,
         );
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'Order not found');
 

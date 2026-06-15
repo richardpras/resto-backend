@@ -16,7 +16,7 @@ class StoreOrderRequest extends FormRequest
         return [
             'tenantId' => ['nullable', 'integer', 'min:1'],
             'outletId' => ['nullable', 'integer', 'min:1'],
-            'code' => ['required', 'string', 'max:50'],
+            'code' => ['required', 'string', 'max:50', 'regex:/^(AUTO|[A-Za-z0-9._-]+)$/'],
             'source' => ['required', 'in:pos,qr'],
             'orderType' => ['required', 'string', 'max:50'],
             'status' => ['required', 'in:pending,confirmed,cooking,ready,completed,cancelled'],

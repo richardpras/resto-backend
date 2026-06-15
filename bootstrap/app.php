@@ -14,6 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(static fn (): string => '/login');
 
+        $middleware->api(prepend: [
+            \App\Http\Middleware\SetApiLocale::class,
+        ]);
+
         $middleware->alias([
             'permission' => \App\Http\Middleware\EnsurePermission::class,
             'permission.any' => \App\Http\Middleware\EnsureAnyPermission::class,

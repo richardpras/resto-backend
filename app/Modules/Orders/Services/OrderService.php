@@ -63,6 +63,7 @@ class OrderService
         private readonly OrderItemCostSnapshotService $orderItemCostSnapshotService,
         private readonly PosOrderCreateGuardService $posOrderCreateGuardService,
         private readonly PosCheckoutIntegrityService $posCheckoutIntegrityService,
+        private readonly OrderCodeAllocationService $orderCodeAllocationService,
     ) {}
 
     /** @var array<string, mixed>|null */
@@ -218,10 +219,27 @@ class OrderService
                     'reason' => (string) $resume['reason'],
                 ];
 
+                if ($data->qrOrderRequestId !== null) {
+                    app(QrOrderPosIntegrationService::class)->ensureLinkedFromPos(
+                        $user,
+                        (int) $data->qrOrderRequestId,
+                        $existing->loadMissing(['items']),
+                    );
+                }
+
                 return $existing;
             }
 
             $this->lastCreateMeta = null;
+
+            $orderCode = $data->code;
+            if (
+                $data->outletId !== null
+                && (int) $data->outletId > 0
+                && $this->orderCodeAllocationService->shouldAllocateServerCode($orderCode)
+            ) {
+                $orderCode = $this->orderCodeAllocationService->allocate((int) $data->outletId);
+            }
 
             $normalizedPayments = $this->normalizePayments($data->payments);
             $paidTotal = collect($normalizedPayments)->sum(fn (array $payment): float => (float) $payment['amount']);
@@ -248,7 +266,7 @@ class OrderService
                 'tenant_id' => $data->tenantId,
                 'outlet_id' => $data->outletId,
                 'pos_session_id' => $posSessionId,
-                'code' => $data->code,
+                'code' => $orderCode,
                 'source' => $data->source,
                 ...$this->resolveCreateSourceFields($data),
                 'order_channel' => $orderChannel,
@@ -539,7 +557,8 @@ class OrderService
         ?string $cashAccountCode = null,
         ?string $revenueAccountCode = null,
         ?string $idempotencyKey = null,
-        ?string $expectedUpdatedAt = null
+        ?string $expectedUpdatedAt = null,
+        ?int $qrOrderRequestId = null,
     ) {
         if ($user === null) {
             throw new AuthorizationException('Unauthenticated payment mutation is not allowed.');
@@ -549,7 +568,7 @@ class OrderService
         if ($before !== null) {
             $before->loadMissing(['items', 'payments']);
         }
-        $updated = DB::transaction(function () use ($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt, $before): ?Order {
+        $updated = DB::transaction(function () use ($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt, $before, $qrOrderRequestId): ?Order {
             if ($before !== null && (string) $before->payment_status !== 'paid') {
                 $normalized = $this->normalizePayments($payments);
                 $projectedPaid = (float) $before->payments
@@ -574,6 +593,14 @@ class OrderService
                 $paidOrder = $updated->fresh(['items', 'payments']);
                 $this->finalizePaidOrder($paidOrder, $user);
                 app(QrOrderPosIntegrationService::class)->syncPaidStatusFromOrder($user, $paidOrder);
+            }
+
+            if ($qrOrderRequestId !== null && $updated !== null) {
+                app(QrOrderPosIntegrationService::class)->ensureLinkedFromPos(
+                    $user,
+                    $qrOrderRequestId,
+                    $updated->fresh(['items']),
+                );
             }
 
             return $updated;
@@ -658,6 +685,11 @@ class OrderService
                 'outletId' => ['The selected outletId is invalid.'],
             ]);
         }
+    }
+
+    public function assertOutletAllowedForUser(User $user, int $outletId): void
+    {
+        $this->assertOutletAllowed($user, $outletId);
     }
 
     private function resolveServiceMode(CreateOrderData $data): ?string

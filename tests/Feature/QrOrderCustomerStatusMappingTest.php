@@ -30,7 +30,7 @@ class QrOrderCustomerStatusMappingTest extends TestCase
     public function test_pending_maps_to_pending_review_label(): void
     {
         $request = $this->makeRequest('pending_cashier_confirmation');
-        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request);
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
 
         $this->assertSame('pending_review', $mapped['customerStatus']);
         $this->assertSame('Menunggu review kasir', $mapped['customerStatusLabel']);
@@ -40,17 +40,76 @@ class QrOrderCustomerStatusMappingTest extends TestCase
     public function test_rejected_maps_to_cancelled(): void
     {
         $request = $this->makeRequest('rejected');
-        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request);
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
 
         $this->assertSame('cancelled', $mapped['customerStatus']);
         $this->assertSame('Dibatalkan', $mapped['customerStatusLabel']);
         $this->assertTrue($mapped['isTerminal']);
     }
 
+    public function test_confirmed_order_kitchen_preparing_maps_to_cooking(): void
+    {
+        $request = $this->makeRequest('confirmed', 'preparing');
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('cooking', $mapped['customerStatus']);
+        $this->assertSame('Sedang dimasak', $mapped['customerStatusLabel']);
+        $this->assertSame(2, $mapped['timelineStep']);
+    }
+
+    public function test_confirmed_order_kitchen_in_progress_maps_to_cooking(): void
+    {
+        $request = $this->makeRequest('confirmed', 'in_progress');
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('cooking', $mapped['customerStatus']);
+        $this->assertSame('Sedang dimasak', $mapped['customerStatusLabel']);
+        $this->assertSame(2, $mapped['timelineStep']);
+    }
+
+    public function test_confirmed_with_adjustment_log_still_follows_kitchen_status(): void
+    {
+        [$outlet, $table, $menuItem] = $this->seedSetup();
+        $request = QrOrderRequest::query()->create([
+            'outlet_id' => $outlet->id,
+            'table_id' => $table->id,
+            'request_code' => 'QRO-'.strtoupper(uniqid()),
+            'customer_name' => 'Guest',
+            'status' => 'confirmed',
+            'adjustment_log' => [[
+                'at' => now()->toIso8601String(),
+                'byUserId' => 1,
+                'summary' => [['type' => 'modified', 'name' => 'Menu']],
+            ]],
+            'expires_at' => now()->addMinutes(20),
+        ]);
+
+        $order = Order::query()->create([
+            'outlet_id' => $outlet->id,
+            'code' => 'ORD-'.uniqid(),
+            'source' => 'qr',
+            'order_channel' => 'qr',
+            'service_mode' => 'dine_in',
+            'order_type' => 'Dine In',
+            'status' => 'confirmed',
+            'payment_status' => 'unpaid',
+            'kitchen_status' => 'cooking',
+            'subtotal' => 25000,
+            'tax' => 0,
+            'total' => 25000,
+            'table_id' => $table->id,
+        ]);
+        $request->update(['order_id' => $order->id, 'confirmed_at' => now()]);
+
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request->fresh(['order.items']), 'id');
+
+        $this->assertSame('cooking', $mapped['customerStatus']);
+    }
+
     public function test_confirmed_order_kitchen_ready_maps_to_ready(): void
     {
         $request = $this->makeRequest('confirmed', 'ready');
-        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request);
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
 
         $this->assertSame('ready', $mapped['customerStatus']);
         $this->assertSame('Siap diantar', $mapped['customerStatusLabel']);
@@ -60,7 +119,7 @@ class QrOrderCustomerStatusMappingTest extends TestCase
     public function test_confirmed_order_served_maps_to_terminal_served(): void
     {
         $request = $this->makeRequest('confirmed', 'served');
-        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request);
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
 
         $this->assertSame('served', $mapped['customerStatus']);
         $this->assertSame('Sudah diantar', $mapped['customerStatusLabel']);
@@ -95,7 +154,7 @@ class QrOrderCustomerStatusMappingTest extends TestCase
         $orderId = (int) QrOrderRequest::query()->findOrFail($requestId)->order_id;
         Order::query()->whereKey($orderId)->update(['kitchen_status' => 'preparing']);
 
-        $this->getJson('/api/v1/public/qr-orders/'.$requestCode)
+        $this->getJson('/api/v1/public/qr-orders/'.$requestCode, ['Accept-Language' => 'id'])
             ->assertOk()
             ->assertJsonPath('data.customerStatus', 'cooking')
             ->assertJsonPath('data.customerStatusLabel', 'Sedang dimasak');

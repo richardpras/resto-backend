@@ -30,6 +30,7 @@ class AddOrderPaymentsRequest extends FormRequest
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],
             'cashAccountCode' => ['nullable', 'string', 'max:50'],
             'revenueAccountCode' => ['nullable', 'string', 'max:50'],
+            'qrOrderRequestId' => ['nullable', 'integer', 'min:1'],
         ];
     }
 }

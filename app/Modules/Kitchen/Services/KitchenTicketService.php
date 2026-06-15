@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Modules\Kitchen\Events\KitchenTicketTransitioned;
 use App\Modules\Kitchen\Repositories\KitchenTicketRepositoryInterface;
 use App\Modules\Kitchen\Support\KitchenRealtimeSnapshot;
+use App\Modules\Kitchen\Support\KitchenStatusNormalizer;
 use App\Modules\Orders\Services\PosAuditLogService;
 use App\Modules\Orders\Services\PosIdempotencyService;
 use App\Modules\Orders\Services\PosTransitionValidator;
@@ -95,7 +96,9 @@ class KitchenTicketService
                     KitchenTicketItem::query()
                         ->where('kitchen_ticket_id', $ticket->id)
                         ->update(['status' => $status]);
-                    Order::query()->whereKey($ticket->order_id)->update(['kitchen_status' => $status]);
+                    Order::query()->whereKey($ticket->order_id)->update([
+                        'kitchen_status' => KitchenStatusNormalizer::forOrder($status),
+                    ]);
                     $this->auditLogService->log(
                         'kitchen.ticket.status.updated',
                         'kitchen_ticket',

@@ -98,6 +98,61 @@ class QrOrderPosIntegrationTest extends TestCase
         );
     }
 
+    public function test_add_payments_links_qr_request_when_open_bill_reused(): void
+    {
+        [$outlet, $table, $menuItem, $requestId] = $this->seedPendingRequest();
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
+
+        $this->postJson("/api/v1/qr-orders/{$requestId}/open-in-pos")->assertOk();
+
+        $session = PosSession::query()->create([
+            'outlet_id' => $outlet->id,
+            'opened_by_user_id' => $user->id,
+            'status' => 'open',
+            'opening_cash' => 0,
+            'opened_at' => now(),
+        ]);
+
+        $create = $this->postJson('/api/v1/orders', [
+            'outletId' => $outlet->id,
+            'code' => 'AUTO',
+            'source' => 'pos',
+            'orderType' => 'Dine-in',
+            'status' => 'confirmed',
+            'paymentStatus' => 'unpaid',
+            'items' => [[
+                'id' => (string) $menuItem->id,
+                'name' => $menuItem->name,
+                'qty' => 1,
+                'price' => 25000,
+            ]],
+            'subtotal' => 25000,
+            'tax' => 0,
+            'total' => 25000,
+            'payments' => [],
+            'tableId' => $table->id,
+            'serviceMode' => 'dine_in',
+            'orderChannel' => 'qr',
+            'posSessionId' => $session->id,
+            'qrOrderRequestId' => $requestId,
+            'confirmedAt' => now()->toISOString(),
+        ])->assertCreated();
+
+        $orderId = (int) $create->json('data.id');
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 25000]],
+            'qrOrderRequestId' => $requestId,
+        ])->assertOk();
+
+        $this->assertDatabaseHas('qr_order_requests', [
+            'id' => $requestId,
+            'status' => 'paid',
+            'order_id' => $orderId,
+        ]);
+    }
+
     public function test_list_supports_under_review_status_filter(): void
     {
         [$outlet, , , $requestId, $code] = $this->seedPendingRequest();

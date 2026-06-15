@@ -90,6 +90,22 @@ class Phase4KdsLifecycleTest extends TestCase
         ]);
     }
 
+    public function test_in_progress_ticket_normalizes_order_kitchen_status_to_cooking(): void
+    {
+        [, $outlet] = $this->actAsAdminWithOutlet();
+        $orderId = $this->createConfirmedOrder($outlet->id, 'P4-KDS-COOKING');
+        $ticketId = (int) DB::table('kitchen_tickets')->where('order_id', $orderId)->value('id');
+
+        $this->patchJson('/api/v1/kitchen/tickets/'.$ticketId.'/status', [
+            'status' => 'in_progress',
+        ])->assertOk()->assertJsonPath('data.status', 'in_progress');
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'kitchen_status' => 'cooking',
+        ]);
+    }
+
     public function test_non_owner_cannot_mutate_other_outlet_ticket(): void
     {
         $user = $this->actingAsUserManagementApiAdministrator();

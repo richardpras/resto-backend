@@ -129,14 +129,20 @@ class QrOrderPosIntegrationService
 
     public function attachOrderFromPos(?User $user, int $qrOrderRequestId, Order $order): void
     {
+        $this->ensureLinkedFromPos($user, $qrOrderRequestId, $order);
+    }
+
+    public function ensureLinkedFromPos(?User $user, int $qrOrderRequestId, Order $order): void
+    {
         DB::transaction(function () use ($user, $qrOrderRequestId, $order): void {
             $request = QrOrderRequest::query()->whereKey($qrOrderRequestId)->lockForUpdate()->first();
             if ($request === null) {
                 throw (new ModelNotFoundException())->setModel(QrOrderRequest::class, [(string) $qrOrderRequestId]);
             }
 
-            if ((string) $request->status === 'confirmed' && (int) ($request->order_id ?? 0) === (int) $order->id) {
+            if ((int) ($request->order_id ?? 0) === (int) $order->id) {
                 $this->ensureOrderSourceLink($order, $request);
+                $this->syncLinkedRequestWithOrder($user, $request, $order);
 
                 return;
             }
@@ -164,6 +170,8 @@ class QrOrderPosIntegrationService
                 'confirmed_by_user_id' => $user !== null ? (int) $user->id : null,
                 'decision_mode' => 'confirm_only',
                 'original_items_snapshot' => $request->original_items_snapshot ?? $this->buildOriginalItemsSnapshot($request),
+                'review_draft' => null,
+                'customer_approval_status' => $this->resolveCustomerApprovalAfterLink($request),
             ]);
 
             $this->ensureOrderSourceLink($order, $request);
@@ -216,6 +224,52 @@ class QrOrderPosIntegrationService
                 aggregateUpdatedAtIso: $resolved->updated_at?->toIso8601String()
             ));
         });
+    }
+
+    private function syncLinkedRequestWithOrder(?User $user, QrOrderRequest $request, Order $order): void
+    {
+        $updates = [];
+        if (is_array($request->review_draft) && $request->review_draft !== []) {
+            $updates['review_draft'] = null;
+        }
+
+        $requestStatus = (string) $request->status;
+        if ($requestStatus === 'confirmed' && (string) $order->payment_status === 'paid') {
+            $this->transitionValidator->assertQrRequestStatusTransition('confirmed', 'paid');
+            $updates['status'] = 'paid';
+        }
+
+        if ($updates !== []) {
+            $this->qrOrderRequestRepository->update($request, $updates);
+            $resolved = $request->fresh();
+            if (($updates['status'] ?? null) === 'paid') {
+                $this->auditLogService->log(
+                    'qr_order.paid',
+                    'qr_order_request',
+                    (int) $resolved->id,
+                    (int) $resolved->outlet_id,
+                    $user,
+                    ['orderId' => (int) $order->id]
+                );
+                event(new QrOrderDecisionChanged(
+                    outletId: (int) $resolved->outlet_id,
+                    requestId: (int) $resolved->id,
+                    status: (string) $resolved->status,
+                    orderId: (int) $order->id,
+                    sequence: (int) $resolved->id,
+                    aggregateUpdatedAtIso: $resolved->updated_at?->toIso8601String()
+                ));
+            }
+        }
+    }
+
+    private function resolveCustomerApprovalAfterLink(QrOrderRequest $request): ?string
+    {
+        if ((string) ($request->customer_approval_status ?? '') === 'pending_approval') {
+            return 'approved';
+        }
+
+        return $request->customer_approval_status;
     }
 
     public function syncPaidStatusFromOrder(?User $user, Order $order): void

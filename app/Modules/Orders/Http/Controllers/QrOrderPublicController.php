@@ -5,6 +5,8 @@ namespace App\Modules\Orders\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Orders\Services\QrOrderLifecycleService;
 use App\Modules\Orders\Services\QrOrderPublicLookupService;
+use App\Support\AppLocale;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
@@ -17,13 +19,15 @@ class QrOrderPublicController extends Controller
         private readonly QrOrderLifecycleService $lifecycleService,
     ) {}
 
-    public function show(string $orderCode): JsonResponse
+    public function show(Request $request, string $orderCode): JsonResponse
     {
+        $locale = AppLocale::fromRequest($request);
+
         try {
-            $data = $this->lookupService->findByOrderCode($orderCode);
+            $data = $this->lookupService->findByOrderCode($orderCode, $locale);
         } catch (ModelNotFoundException) {
             return response()->json([
-                'message' => 'Order not found or expired.',
+                'message' => trans('qr.public.not_found', [], $locale),
             ], Response::HTTP_NOT_FOUND);
         }
 
@@ -32,24 +36,27 @@ class QrOrderPublicController extends Controller
         ]);
     }
 
-    public function approveAdjustments(string $orderCode): JsonResponse
+    public function approveAdjustments(Request $request, string $orderCode): JsonResponse
     {
+        $locale = AppLocale::fromRequest($request);
+
         try {
-            $request = $this->lifecycleService->approveAdjustments($orderCode);
-            $data = $this->lookupService->findByOrderCode((string) $request->request_code);
+            $qrRequest = $this->lifecycleService->approveAdjustments($orderCode);
+            $data = $this->lookupService->findByOrderCode((string) $qrRequest->request_code, $locale);
         } catch (ValidationException $exception) {
             return response()->json([
-                'message' => collect($exception->errors())->flatten()->first() ?? 'Unable to approve adjustments.',
+                'message' => collect($exception->errors())->flatten()->first()
+                    ?? trans('qr.public.approve_failed', [], $locale),
                 'errors' => $exception->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (ModelNotFoundException) {
             return response()->json([
-                'message' => 'Order not found or expired.',
+                'message' => trans('qr.public.not_found', [], $locale),
             ], Response::HTTP_NOT_FOUND);
         }
 
         return response()->json([
-            'message' => 'Adjustments approved.',
+            'message' => trans('qr.public.approved', [], $locale),
             'data' => $data,
         ]);
     }

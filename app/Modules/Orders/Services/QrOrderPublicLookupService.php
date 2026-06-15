@@ -20,7 +20,7 @@ class QrOrderPublicLookupService
     ) {}
 
     /** @return array<string, mixed> */
-    public function findByOrderCode(string $orderCode): array
+    public function findByOrderCode(string $orderCode, string $locale = 'en'): array
     {
         $normalized = $this->codeParser->normalizePublicLookupCode($orderCode);
         if ($normalized === null) {
@@ -37,7 +37,7 @@ class QrOrderPublicLookupService
         }
 
         $request = $this->qrOrderExpiryService->markExpiredIfNeeded($request);
-        $status = $this->customerStatusService->resolve($request);
+        $status = $this->customerStatusService->resolve($request, $locale);
         $financials = $this->resolveFinancials($request);
         $outletName = Outlet::query()->whereKey((int) $request->outlet_id)->value('name');
 
@@ -56,7 +56,7 @@ class QrOrderPublicLookupService
             'customerStatusLabel' => $status['customerStatusLabel'],
             'timelineStep' => $status['timelineStep'],
             'isTerminal' => $status['isTerminal'],
-            'timeline' => $this->timelineService->build($request),
+            'timeline' => $this->timelineService->build($request, $locale),
             'items' => $financials['items'],
             'subtotal' => $financials['subtotal'],
             'discount' => $financials['discount'],
