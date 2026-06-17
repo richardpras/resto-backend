@@ -119,14 +119,15 @@ class ReservationQrCoexistenceTest extends TestCase
 
     private function createQrRequest(int $outletId, int $tableId, int $menuItemId): int
     {
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outletId,
-            'tableId' => $tableId,
-            'customerName' => 'QR Guest',
-            'items' => [
-                ['menuItemId' => $menuItemId, 'qty' => 1],
-            ],
-        ]);
+        $table = RestaurantTable::query()->findOrFail($tableId);
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            $outletId,
+            $tableId,
+            $table,
+            [['menuItemId' => $menuItemId, 'qty' => 1]],
+            ['customerName' => 'QR Guest'],
+        );
         $create->assertCreated();
 
         return (int) $create->json('data.id');

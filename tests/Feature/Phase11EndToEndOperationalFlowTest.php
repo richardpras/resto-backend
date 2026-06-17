@@ -129,12 +129,14 @@ class Phase11EndToEndOperationalFlowTest extends TestCase
         ]);
         $this->openSession((int) $outlet->id, (int) $user->id);
 
-        $createQr = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => (int) $outlet->id,
-            'tableId' => (int) $table->id,
-            'customerName' => 'Guest QR',
-            'items' => [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
-        ]);
+        $this->ensureQrOrderingEnabled();
+        $createQr = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+            ['customerName' => 'Guest QR'],
+        );
         $createQr->assertCreated();
         $requestId = (int) $createQr->json('data.id');
 

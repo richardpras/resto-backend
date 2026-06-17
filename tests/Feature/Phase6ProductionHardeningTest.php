@@ -194,12 +194,15 @@ class Phase6ProductionHardeningTest extends TestCase
 
     private function createQrRequest(int $outletId, int $tableId, int $menuItemId): int
     {
-        $response = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outletId,
-            'tableId' => $tableId,
-            'customerName' => 'P6 Guest',
-            'items' => [['menuItemId' => $menuItemId, 'qty' => 1]],
-        ]);
+        $table = RestaurantTable::query()->findOrFail($tableId);
+        $this->ensureQrOrderingEnabled();
+        $response = $this->submitQrOrder(
+            $outletId,
+            $tableId,
+            $table,
+            [['menuItemId' => $menuItemId, 'qty' => 1]],
+            ['customerName' => 'P6 Guest'],
+        );
         $response->assertCreated();
 
         return (int) $response->json('data.id');

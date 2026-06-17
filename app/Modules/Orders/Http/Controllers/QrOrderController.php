@@ -53,6 +53,7 @@ class QrOrderController extends Controller
             (int) $request->validated('outletId'),
             (int) $request->validated('tableId'),
             $request->validated('reason'),
+            $request->validated('guestSessionToken'),
         );
 
         return response()->json([

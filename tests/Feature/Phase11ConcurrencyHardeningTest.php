@@ -131,12 +131,14 @@ class Phase11ConcurrencyHardeningTest extends TestCase
             'price' => 10000,
             'available' => true,
         ]);
-        $request = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => (int) $outlet->id,
-            'tableId' => (int) $table->id,
-            'customerName' => 'P11 Guest',
-            'items' => [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
-        ]);
+        $this->ensureQrOrderingEnabled();
+        $request = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+            ['customerName' => 'P11 Guest'],
+        );
         $request->assertCreated();
         $requestId = (int) $request->json('data.id');
 

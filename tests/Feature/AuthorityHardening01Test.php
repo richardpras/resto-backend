@@ -75,14 +75,13 @@ class AuthorityHardening01Test extends TestCase
         ]);
 
         // Public QR customer flow stays operational: submit + call cashier only.
-        $request = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => (int) $outlet->id,
-            'tableId' => (int) $table->id,
-            'customerName' => 'Guest',
-            'items' => [
-                ['menuItemId' => (int) $menu->id, 'qty' => 1],
-            ],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $request = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menu->id, 'qty' => 1]],
+        )->assertCreated();
 
         $requestId = (int) $request->json('data.id');
         $this->postJson('/api/v1/qr-orders/'.$requestId.'/call-cashier', [

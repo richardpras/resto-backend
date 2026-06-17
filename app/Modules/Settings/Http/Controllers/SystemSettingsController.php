@@ -26,6 +26,8 @@ class SystemSettingsController extends Controller
             'confirmBeforePayment' => ['required', 'boolean'],
             'enableQROrdering' => ['required', 'boolean'],
             'enableCallCashier' => ['sometimes', 'boolean'],
+            'requireCustomerApprovalForAdjustments' => ['sometimes', 'boolean'],
+            'qrPendingConfirmationTtlMinutes' => ['sometimes', 'integer', 'min:5', 'max:120'],
             'enforceStockOnSale' => ['sometimes', 'boolean'],
             'stockEnforcementMode' => ['sometimes', 'string', 'in:strict,warning,deferred'],
             'allowNegativeStock' => ['sometimes', 'boolean'],

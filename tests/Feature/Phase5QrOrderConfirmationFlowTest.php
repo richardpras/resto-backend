@@ -29,14 +29,14 @@ class Phase5QrOrderConfirmationFlowTest extends TestCase
     {
         [$outlet, $table, $menuItem] = $this->seedQrSetup();
 
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest A',
-            'items' => [
-                ['menuItemId' => $menuItem->id, 'qty' => 2],
-            ],
-        ]);
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 2]],
+            ['customerName' => 'Guest A'],
+        );
         $create->assertCreated();
 
         $requestId = (int) $create->json('data.id');
@@ -195,15 +195,18 @@ class Phase5QrOrderConfirmationFlowTest extends TestCase
 
     private function createQrRequest(int $outletId, int $tableId, int $menuItemId, int $expiresInMinutes = 20): int
     {
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outletId,
-            'tableId' => $tableId,
-            'customerName' => 'Guest QR',
-            'expiresInMinutes' => $expiresInMinutes,
-            'items' => [
-                ['menuItemId' => $menuItemId, 'qty' => 1, 'notes' => 'No chili'],
+        $table = RestaurantTable::query()->findOrFail($tableId);
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            $outletId,
+            $tableId,
+            $table,
+            [['menuItemId' => $menuItemId, 'qty' => 1, 'notes' => 'No chili']],
+            [
+                'customerName' => 'Guest QR',
+                'expiresInMinutes' => $expiresInMinutes,
             ],
-        ]);
+        );
         $create->assertCreated();
 
         return (int) $create->json('data.id');

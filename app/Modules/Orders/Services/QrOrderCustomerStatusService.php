@@ -43,13 +43,10 @@ class QrOrderCustomerStatusService
                 return $this->pack('cancelled', 'cancelled', $this->t('cancelled', $locale), null, true);
             }
 
-            if ($request->customer_served_at !== null) {
-                return $this->pack('served', 'served', $this->t('served', $locale), 4, false);
-            }
-
             return $this->resolveFromKitchenStatus(
                 KitchenStatusNormalizer::forOrder((string) ($order->kitchen_status ?? 'queued')),
                 (string) $order->payment_status,
+                $request->customer_served_at !== null,
                 $locale,
             );
         }
@@ -71,19 +68,41 @@ class QrOrderCustomerStatusService
     }
 
     /** @return array{status: string, customerStatus: string, customerStatusLabel: string, timelineStep: int|null, isTerminal: bool} */
-    private function resolveFromKitchenStatus(string $kitchenStatus, string $paymentStatus, string $locale): array
-    {
-        if ($kitchenStatus === 'completed' || ($kitchenStatus === 'served' && $paymentStatus === 'paid')) {
+    private function resolveFromKitchenStatus(
+        string $kitchenStatus,
+        string $paymentStatus,
+        bool $customerMarkedServed,
+        string $locale,
+    ): array {
+        if ($this->isFullyComplete($kitchenStatus, $paymentStatus, $customerMarkedServed)) {
             return $this->pack('completed', 'completed', $this->t('completed', $locale), 5, true);
+        }
+
+        if ($this->isKitchenFinished($kitchenStatus, $customerMarkedServed)) {
+            return $this->pack('served', 'served', $this->t('served', $locale), 4, false);
         }
 
         return match ($kitchenStatus) {
             'queued' => $this->pack('confirmed', 'confirmed', $this->t('confirmed', $locale), 1, false),
             'preparing', 'in_kitchen', 'cooking', 'in_progress' => $this->pack('cooking', 'cooking', $this->t('cooking', $locale), 2, false),
             'ready' => $this->pack('ready', 'ready', $this->t('ready', $locale), 3, false),
-            'served' => $this->pack('served', 'served', $this->t('served', $locale), 4, false),
             default => $this->pack('confirmed', 'confirmed', $this->t('confirmed', $locale), 1, false),
         };
+    }
+
+    private function isKitchenFinished(string $kitchenStatus, bool $customerMarkedServed): bool
+    {
+        if ($customerMarkedServed) {
+            return true;
+        }
+
+        return in_array($kitchenStatus, ['served', 'completed'], true);
+    }
+
+    private function isFullyComplete(string $kitchenStatus, string $paymentStatus, bool $customerMarkedServed): bool
+    {
+        return $this->isKitchenFinished($kitchenStatus, $customerMarkedServed)
+            && $paymentStatus === 'paid';
     }
 
     /** @return array{status: string, customerStatus: string, customerStatusLabel: string, timelineStep: int|null, isTerminal: bool} */

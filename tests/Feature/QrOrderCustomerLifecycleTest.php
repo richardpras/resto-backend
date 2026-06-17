@@ -57,14 +57,16 @@ class QrOrderCustomerLifecycleTest extends TestCase
         [$outlet, $table, $menuItem] = $this->seedSetup();
         $table->update(['qr_public_id' => 'tbl-active-01', 'qr_enabled' => true]);
 
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated();
 
-        $this->getJson('/api/v1/qr/tables/tbl-active-01')
+        $guestToken = $this->guestSessionForTable($table);
+        $this->getJson('/api/v1/qr/tables/tbl-active-01', ['X-Qr-Guest-Session' => $guestToken])
             ->assertOk()
             ->assertJsonPath('data.activeSession.hasActiveSession', true)
             ->assertJsonPath('data.activeSession.activeQrOrder.requestCode', $create->json('data.requestCode'));
@@ -73,21 +75,22 @@ class QrOrderCustomerLifecycleTest extends TestCase
     public function test_append_items_reuses_existing_qro_code(): void
     {
         [$outlet, $table, $menuItem] = $this->seedSetup();
-        $first = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $first = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated();
         $code = (string) $first->json('data.requestCode');
 
-        $second = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 2]],
-            'appendToRequestCode' => $code,
-        ])->assertCreated();
+        $second = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 2]],
+            ['appendToRequestCode' => $code],
+        )->assertCreated();
 
         $this->assertSame($code, $second->json('data.requestCode'));
         $this->assertDatabaseCount('qr_order_requests', 1);
@@ -106,12 +109,13 @@ class QrOrderCustomerLifecycleTest extends TestCase
             'opened_at' => now(),
         ]);
 
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated();
         $requestId = (int) $create->json('data.id');
         $requestCode = (string) $create->json('data.requestCode');
 
@@ -143,12 +147,13 @@ class QrOrderCustomerLifecycleTest extends TestCase
             'opened_at' => now(),
         ]);
 
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated();
         $requestId = (int) $create->json('data.id');
         $requestCode = (string) $create->json('data.requestCode');
 
@@ -166,12 +171,13 @@ class QrOrderCustomerLifecycleTest extends TestCase
     public function test_call_cashier_accepts_reason(): void
     {
         [$outlet, $table, $menuItem] = $this->seedSetup();
-        $requestId = (int) $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->json('data.id');
+        $this->ensureQrOrderingEnabled();
+        $requestId = (int) $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->json('data.id');
 
         $this->postJson("/api/v1/qr-orders/{$requestId}/call-cashier", [
             'outletId' => $outlet->id,

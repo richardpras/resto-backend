@@ -14,9 +14,9 @@ class QrTableActiveOrderService
     ) {}
 
     /** @return array<string, mixed> */
-    public function resolveForTable(RestaurantTable $table): array
+    public function resolveForTable(RestaurantTable $table, ?int $guestSessionId = null): array
     {
-        $activeQr = $this->findActiveQrRequest((int) $table->outlet_id, (int) $table->id);
+        $activeQr = $this->findActiveQrRequest((int) $table->outlet_id, (int) $table->id, $guestSessionId);
         $openBill = $this->findActiveOpenBill((int) $table->outlet_id, (int) $table->id);
 
         $payload = [
@@ -70,7 +70,7 @@ class QrTableActiveOrderService
         return $payload;
     }
 
-    public function resolveByPublicId(string $qrPublicId): array
+    public function resolveByPublicId(string $qrPublicId, ?int $guestSessionId = null): array
     {
         $table = RestaurantTable::query()
             ->where('qr_public_id', trim($qrPublicId))
@@ -81,12 +81,12 @@ class QrTableActiveOrderService
             throw (new ModelNotFoundException())->setModel(RestaurantTable::class, [$qrPublicId]);
         }
 
-        return $this->resolveForTable($table);
+        return $this->resolveForTable($table, $guestSessionId);
     }
 
-    public function findActiveQrRequest(int $outletId, int $tableId): ?QrOrderRequest
+    public function findActiveQrRequest(int $outletId, int $tableId, ?int $guestSessionId = null): ?QrOrderRequest
     {
-        return QrOrderRequest::query()
+        $query = QrOrderRequest::query()
             ->where('outlet_id', $outletId)
             ->where('table_id', $tableId)
             ->whereNotIn('status', ['rejected', 'expired'])
@@ -106,7 +106,13 @@ class QrTableActiveOrderService
                                     });
                             });
                     });
-            })
+            });
+
+        if ($guestSessionId !== null) {
+            $query->where('guest_session_id', $guestSessionId);
+        }
+
+        return $query
             ->with(['items.menuItem', 'table', 'order'])
             ->orderByDesc('id')
             ->first();

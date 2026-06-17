@@ -94,6 +94,11 @@ Schedule::command('failed-jobs:monitor')
     ->withoutOverlapping()
     ->name('failed-jobs-monitor');
 
+Schedule::command('qr-orders:expire-pending')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->name('qr-orders-expire-pending');
+
 Schedule::call(static function (): void {
     ProductionCheckService::recordSchedulerHeartbeat();
 })->everyMinute()->name('system-scheduler-heartbeat');

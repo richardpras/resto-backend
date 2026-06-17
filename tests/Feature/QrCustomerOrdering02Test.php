@@ -213,21 +213,22 @@ class QrCustomerOrdering02Test extends TestCase
     public function test_additional_order_allowed_for_same_table(): void
     {
         [$outlet, $table, $menuItem] = $this->seedQrSetup();
-        $firstCode = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest QR 1',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated()->json('data.requestCode');
+        $this->ensureQrOrderingEnabled();
+        $firstCode = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+            ['customerName' => 'Guest QR 1'],
+        )->assertCreated()->json('data.requestCode');
 
-        $second = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest QR 2',
-            'items' => [
-                ['menuItemId' => $menuItem->id, 'qty' => 1],
-            ],
-        ]);
+        $second = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+            ['customerName' => 'Guest QR 2'],
+        );
 
         $second->assertCreated();
         $this->assertNotSame($firstCode, $second->json('data.requestCode'));
@@ -238,25 +239,31 @@ class QrCustomerOrdering02Test extends TestCase
     {
         [$outlet, $table, $menuItem] = $this->seedQrSetup();
 
-        $response = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ]);
+        $this->ensureQrOrderingEnabled();
+        $payload = $this->qrOrderPayload(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            $this->guestSessionForTable($table),
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        );
+        unset($payload['customerName']);
+        $response = $this->postJson('/api/v1/qr-orders', $payload);
         $response->assertUnprocessable();
         $response->assertJsonValidationErrors(['customerName']);
     }
 
     private function createQrRequest(int $outletId, int $tableId, int $menuItemId): int
     {
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outletId,
-            'tableId' => $tableId,
-            'customerName' => 'Guest QR',
-            'items' => [
-                ['menuItemId' => $menuItemId, 'qty' => 1],
-            ],
-        ]);
+        $table = RestaurantTable::query()->findOrFail($tableId);
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            $outletId,
+            $tableId,
+            $table,
+            [['menuItemId' => $menuItemId, 'qty' => 1]],
+            ['customerName' => 'Guest QR'],
+        );
         $create->assertCreated();
 
         return (int) $create->json('data.id');

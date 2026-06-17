@@ -61,12 +61,13 @@ class QrOrderScannerSupportTest extends TestCase
         $user = $this->actingAsUserManagementApiAdministrator();
         $this->assignUserToOutlets($user, [(int) $outlet->id]);
 
-        $requestCode = (string) $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated()->json('data.requestCode');
+        $this->ensureQrOrderingEnabled();
+        $requestCode = (string) $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated()->json('data.requestCode');
 
         return [$requestCode, $user];
     }

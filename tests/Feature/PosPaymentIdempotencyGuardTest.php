@@ -289,12 +289,13 @@ class PosPaymentIdempotencyGuardTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated();
 
         return [$outlet, $table, $menuItem, (int) $create->json('data.id')];
     }

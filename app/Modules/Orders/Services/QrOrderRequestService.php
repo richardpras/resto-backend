@@ -26,30 +26,35 @@ class QrOrderRequestService
         private readonly QrOrderNotificationAdapter $notificationAdapter,
         private readonly PosIdempotencyService $idempotencyService,
         private readonly QrOrderingSettingsService $qrOrderingSettingsService,
+        private readonly QrGuestSessionService $guestSessionService,
     ) {}
 
     public function create(array $payload)
     {
+        $guestSession = $this->resolveGuestSessionForPayload($payload);
+
         $appendCode = isset($payload['appendToRequestCode']) ? strtoupper(trim((string) $payload['appendToRequestCode'])) : null;
         if ($appendCode !== null && $appendCode !== '') {
-            return $this->appendItems($payload, $appendCode);
+            return $this->appendItems($payload, $appendCode, $guestSession);
         }
 
-        return DB::transaction(function () use ($payload) {
+        return DB::transaction(function () use ($payload, $guestSession) {
             return $this->idempotencyService->run(
                 'qr-orders.create.'.((int) $payload['outletId']).'.'.((int) $payload['tableId']),
                 $payload['idempotencyKey'] ?? null,
                 $payload,
-                function () use ($payload) {
+                function () use ($payload, $guestSession) {
                     $table = $this->resolveActiveTable((int) $payload['outletId'], (int) $payload['tableId']);
+                    $ttlMinutes = $this->qrOrderingSettingsService->pendingConfirmationTtlMinutes();
 
                     $request = $this->qrOrderRequestRepository->create([
                         'outlet_id' => (int) $payload['outletId'],
                         'table_id' => (int) $payload['tableId'],
+                        'guest_session_id' => (int) $guestSession->id,
                         'request_code' => $this->generateRequestCode(),
                         'customer_name' => $payload['customerName'] ?? null,
                         'status' => 'pending_cashier_confirmation',
-                        'expires_at' => now()->addMinutes((int) ($payload['expiresInMinutes'] ?? 20)),
+                        'expires_at' => now()->addMinutes($ttlMinutes),
                     ]);
 
                     $this->persistItems($request, $payload['items']);
@@ -82,9 +87,11 @@ class QrOrderRequestService
     }
 
     /** @param array<string, mixed> $payload */
-    public function appendItems(array $payload, string $requestCode): QrOrderRequest
+    public function appendItems(array $payload, string $requestCode, ?\App\Models\Modules\Orders\Domain\QrGuestSession $guestSession = null): QrOrderRequest
     {
-        return DB::transaction(function () use ($payload, $requestCode): QrOrderRequest {
+        $guestSession ??= $this->resolveGuestSessionForPayload($payload);
+
+        return DB::transaction(function () use ($payload, $requestCode, $guestSession): QrOrderRequest {
             $request = QrOrderRequest::query()
                 ->where('request_code', strtoupper(trim($requestCode)))
                 ->where('outlet_id', (int) $payload['outletId'])
@@ -95,6 +102,12 @@ class QrOrderRequestService
             if ($request === null) {
                 throw ValidationException::withMessages([
                     'appendToRequestCode' => ['Active QR order not found for append.'],
+                ]);
+            }
+
+            if ((int) $request->guest_session_id !== (int) $guestSession->id) {
+                throw ValidationException::withMessages([
+                    'appendToRequestCode' => ['Cannot append items to an order from another session.'],
                 ]);
             }
 
@@ -135,7 +148,7 @@ class QrOrderRequestService
             }
 
             $request->update([
-                'expires_at' => now()->addMinutes((int) ($payload['expiresInMinutes'] ?? 20)),
+                'expires_at' => now()->addMinutes($this->qrOrderingSettingsService->pendingConfirmationTtlMinutes()),
             ]);
 
             $resolved = $this->qrOrderRequestRepository->findScoped((int) $request->id, [(int) $request->outlet_id]);
@@ -166,7 +179,7 @@ class QrOrderRequestService
         return $this->qrOrderRequestRepository->paginateScoped($perPage, $allowed, $filters);
     }
 
-    public function callCashier(int $requestId, int $outletId, int $tableId, ?string $reason = null): QrOrderRequest
+    public function callCashier(int $requestId, int $outletId, int $tableId, ?string $reason = null, ?string $guestSessionToken = null): QrOrderRequest
     {
         if (! $this->qrOrderingSettingsService->enableCallCashier()) {
             throw ValidationException::withMessages([
@@ -176,7 +189,7 @@ class QrOrderRequestService
 
         $normalizedReason = $this->normalizeCallReason($reason);
 
-        return DB::transaction(function () use ($requestId, $outletId, $tableId, $normalizedReason): QrOrderRequest {
+        return DB::transaction(function () use ($requestId, $outletId, $tableId, $normalizedReason, $guestSessionToken): QrOrderRequest {
             $request = QrOrderRequest::query()
                 ->whereKey($requestId)
                 ->where('outlet_id', $outletId)
@@ -188,6 +201,15 @@ class QrOrderRequestService
                 throw ValidationException::withMessages([
                     'request' => ['QR order request not found for this table.'],
                 ]);
+            }
+
+            if ($guestSessionToken !== null && trim($guestSessionToken) !== '') {
+                $guestSession = $this->guestSessionService->findActiveByToken($guestSessionToken);
+                if ($guestSession === null || (int) $request->guest_session_id !== (int) $guestSession->id) {
+                    throw ValidationException::withMessages([
+                        'guestSessionToken' => ['Guest session does not own this order.'],
+                    ]);
+                }
             }
 
             if (! in_array((string) $request->status, ['pending_cashier_confirmation', 'under_review'], true)) {
@@ -257,11 +279,12 @@ class QrOrderRequestService
             ->whereKey($tableId)
             ->where('outlet_id', $outletId)
             ->where('status', 'active')
+            ->where('qr_enabled', true)
             ->first();
 
         if ($table === null) {
             throw ValidationException::withMessages([
-                'tableId' => ['Table not found for this outlet or table is inactive.'],
+                'tableId' => ['Table not found for this outlet, table is inactive, or QR ordering is disabled.'],
             ]);
         }
 
@@ -279,5 +302,31 @@ class QrOrderRequestService
     private function generateRequestCode(): string
     {
         return 'QRO-'.strtoupper((string) str()->random(10));
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function resolveGuestSessionForPayload(array $payload): \App\Models\Modules\Orders\Domain\QrGuestSession
+    {
+        $token = trim((string) ($payload['guestSessionToken'] ?? ''));
+        $qrPublicId = trim((string) ($payload['qrPublicId'] ?? ''));
+        $outletId = (int) ($payload['outletId'] ?? 0);
+        $tableId = (int) ($payload['tableId'] ?? 0);
+
+        if ($token === '' || $qrPublicId === '') {
+            throw ValidationException::withMessages([
+                'guestSessionToken' => ['Guest session is required. Please scan the table QR again.'],
+            ]);
+        }
+
+        $session = $this->guestSessionService->findActiveByToken($token);
+        if ($session === null) {
+            throw ValidationException::withMessages([
+                'guestSessionToken' => ['Guest session has expired. Please scan the table QR again.'],
+            ]);
+        }
+
+        $this->guestSessionService->assertCanSubmit($session, $qrPublicId, $outletId, $tableId);
+
+        return $session;
     }
 }

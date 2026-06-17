@@ -12,6 +12,7 @@ class QrOrderRequest extends Model
     protected $fillable = [
         'outlet_id',
         'table_id',
+        'guest_session_id',
         'request_code',
         'customer_name',
         'status',
@@ -59,6 +60,11 @@ class QrOrderRequest extends Model
     public function table(): BelongsTo
     {
         return $this->belongsTo(RestaurantTable::class, 'table_id');
+    }
+
+    public function guestSession(): BelongsTo
+    {
+        return $this->belongsTo(QrGuestSession::class, 'guest_session_id');
     }
 
     public function order(): BelongsTo

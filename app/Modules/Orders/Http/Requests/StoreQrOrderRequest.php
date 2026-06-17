@@ -16,6 +16,8 @@ class StoreQrOrderRequest extends FormRequest
         return [
             'outletId' => ['required', 'integer', 'min:1'],
             'tableId' => ['required', 'integer', 'min:1'],
+            'guestSessionToken' => ['required', 'string', 'max:64'],
+            'qrPublicId' => ['required', 'string', 'max:64'],
             'customerName' => ['required', 'string', 'max:255'],
             'expiresInMinutes' => ['nullable', 'integer', 'min:1', 'max:120'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],

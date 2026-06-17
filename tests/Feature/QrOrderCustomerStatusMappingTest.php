@@ -126,6 +126,62 @@ class QrOrderCustomerStatusMappingTest extends TestCase
         $this->assertFalse($mapped['isTerminal']);
     }
 
+    public function test_served_unpaid_maps_to_served_not_terminal(): void
+    {
+        $request = $this->makeRequest('confirmed', 'served', 'unpaid');
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('served', $mapped['customerStatus']);
+        $this->assertFalse($mapped['isTerminal']);
+    }
+
+    public function test_served_paid_maps_to_completed(): void
+    {
+        $request = $this->makeRequest('confirmed', 'served', 'paid');
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('completed', $mapped['customerStatus']);
+        $this->assertSame('Selesai', $mapped['customerStatusLabel']);
+        $this->assertTrue($mapped['isTerminal']);
+        $this->assertSame(5, $mapped['timelineStep']);
+    }
+
+    public function test_mark_served_unpaid_stays_served_not_terminal(): void
+    {
+        $request = $this->makeRequest('confirmed', 'ready', 'unpaid', true);
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('served', $mapped['customerStatus']);
+        $this->assertFalse($mapped['isTerminal']);
+    }
+
+    public function test_mark_served_paid_maps_to_completed(): void
+    {
+        $request = $this->makeRequest('confirmed', 'ready', 'paid', true);
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('completed', $mapped['customerStatus']);
+        $this->assertTrue($mapped['isTerminal']);
+    }
+
+    public function test_kitchen_completed_unpaid_maps_to_served_not_terminal(): void
+    {
+        $request = $this->makeRequest('confirmed', 'completed', 'unpaid');
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('served', $mapped['customerStatus']);
+        $this->assertFalse($mapped['isTerminal']);
+    }
+
+    public function test_pay_first_path_served_paid_maps_to_completed(): void
+    {
+        $request = $this->makeRequest('paid', 'served', 'paid');
+        $mapped = app(QrOrderCustomerStatusService::class)->resolve($request, 'id');
+
+        $this->assertSame('completed', $mapped['customerStatus']);
+        $this->assertTrue($mapped['isTerminal']);
+    }
+
     public function test_public_lookup_uses_customer_labels(): void
     {
         [$outlet, $table, $menuItem] = $this->seedSetup();
@@ -139,12 +195,13 @@ class QrOrderCustomerStatusMappingTest extends TestCase
             'opened_at' => now(),
         ]);
 
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
+        $this->ensureQrOrderingEnabled();
+        $create = $this->submitQrOrder(
+            (int) $outlet->id,
+            (int) $table->id,
+            $table,
+            [['menuItemId' => (int) $menuItem->id, 'qty' => 1]],
+        )->assertCreated();
         $requestId = (int) $create->json('data.id');
         $requestCode = (string) $create->json('data.requestCode');
 
@@ -160,8 +217,12 @@ class QrOrderCustomerStatusMappingTest extends TestCase
             ->assertJsonPath('data.customerStatusLabel', 'Sedang dimasak');
     }
 
-    private function makeRequest(string $status, ?string $kitchenStatus = null): QrOrderRequest
-    {
+    private function makeRequest(
+        string $status,
+        ?string $kitchenStatus = null,
+        string $paymentStatus = 'unpaid',
+        bool $customerMarkedServed = false,
+    ): QrOrderRequest {
         [$outlet, $table, $menuItem] = $this->seedSetup();
         $request = QrOrderRequest::query()->create([
             'outlet_id' => $outlet->id,
@@ -170,6 +231,7 @@ class QrOrderCustomerStatusMappingTest extends TestCase
             'customer_name' => 'Guest',
             'status' => $status,
             'expires_at' => now()->addMinutes(20),
+            'customer_served_at' => $customerMarkedServed ? now() : null,
         ]);
 
         if ($kitchenStatus !== null) {
@@ -181,7 +243,7 @@ class QrOrderCustomerStatusMappingTest extends TestCase
                 'service_mode' => 'dine_in',
                 'order_type' => 'Dine In',
                 'status' => 'confirmed',
-                'payment_status' => 'unpaid',
+                'payment_status' => $paymentStatus,
                 'kitchen_status' => $kitchenStatus,
                 'subtotal' => 25000,
                 'tax' => 0,

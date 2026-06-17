@@ -2,15 +2,14 @@
 
 namespace Tests\Feature;
 
-use App\Models\Modules\Menu\Domain\MenuItem;
-use App\Models\Modules\Orders\Domain\RestaurantTable;
-use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesQrGuestSession;
 use Tests\TestCase;
 
 class QrOrderPublicSecurityTest extends TestCase
 {
+    use CreatesQrGuestSession;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -42,40 +41,22 @@ class QrOrderPublicSecurityTest extends TestCase
         $response->assertJsonMissingPath('data.orderId');
     }
 
+    public function test_raw_outlet_and_table_submit_without_guest_session_is_rejected(): void
+    {
+        $ctx = $this->seedQrGuestOrderingContext();
+
+        $this->postJson('/api/v1/qr-orders', [
+            'outletId' => $ctx['outlet']->id,
+            'tableId' => $ctx['table']->id,
+            'customerName' => 'Guest',
+            'items' => [['menuItemId' => $ctx['menuItem']->id, 'qty' => 1]],
+        ])->assertStatus(422);
+    }
+
     private function createRequest(): string
     {
-        $outlet = Outlet::query()->create([
-            'name' => 'Secure Outlet',
-            'address' => '',
-            'phone' => '',
-            'manager' => '',
-            'status' => 'active',
-            'code' => 'sec-'.uniqid(),
-        ]);
+        $ctx = $this->seedQrGuestOrderingContext();
 
-        $table = RestaurantTable::query()->create([
-            'outlet_id' => $outlet->id,
-            'name' => 'S1',
-            'capacity' => 4,
-            'status' => 'active',
-        ]);
-
-        $menuItem = MenuItem::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outlet->id,
-            'name' => 'Secure Item',
-            'category' => 'main',
-            'price' => 10000,
-            'available' => true,
-        ]);
-
-        $create = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => $outlet->id,
-            'tableId' => $table->id,
-            'customerName' => 'Secret Guest',
-            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
-        ])->assertCreated();
-
-        return (string) $create->json('data.requestCode');
+        return (string) $this->postQrOrderRequest($ctx)->json('data.requestCode');
     }
 }

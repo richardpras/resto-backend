@@ -7,10 +7,12 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Modules\Orders\Http\Resources\RestaurantTableResource;
 use App\Modules\Orders\Http\Resources\TableQrResolveResource;
+use App\Modules\Orders\Services\QrGuestSessionService;
 use App\Modules\Orders\Services\QrTableActiveOrderService;
 use App\Modules\Orders\Services\TableQrManagementService;
 use App\Modules\Orders\Services\TableQrPdfService;
 use App\Modules\Orders\Services\TableQrService;
+use App\Modules\Orders\Support\ResolvesQrGuestSessionHeader;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
@@ -19,12 +21,15 @@ use Symfony\Component\HttpFoundation\Response;
 
 class TableQrController extends Controller
 {
+    use ResolvesQrGuestSessionHeader;
+
     public function __construct(
         private readonly TableQrManagementService $tableQrManagementService,
         private readonly TableQrService $tableQrService,
         private readonly TableQrPdfService $tableQrPdfService,
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly QrTableActiveOrderService $activeOrderService,
+        private readonly QrGuestSessionService $guestSessionService,
     ) {}
 
     public function generate(Request $request, RestaurantTable $table): JsonResponse
@@ -116,27 +121,34 @@ class TableQrController extends Controller
         ]);
     }
 
-    public function resolve(string $qrPublicId): JsonResponse
+    public function resolve(Request $request, string $qrPublicId): JsonResponse
     {
         $failure = $this->resolveFailure($qrPublicId);
         if ($failure !== null) {
             return response()->json($failure['body'], $failure['status']);
         }
 
-        $table = $this->tableQrManagementService->resolveByPublicId($qrPublicId);
-        $activeSession = $this->activeOrderService->resolveForTable($table);
+        $existingToken = $this->guestSessionTokenFromRequest($request);
+        $resolved = $this->guestSessionService->resolveOrCreate($qrPublicId, $existingToken);
+        $table = $resolved['table'];
+        $guestSession = $resolved['session'];
+
+        $activeSession = $this->activeOrderService->resolveForTable($table, (int) $guestSession->id);
 
         $resource = new TableQrResolveResource($table, $this->tableQrManagementService);
 
         return response()->json([
             'data' => array_merge(
-                $resource->toArray(request()),
-                ['activeSession' => $activeSession],
+                $resource->toArray($request),
+                [
+                    'activeSession' => $activeSession,
+                    'guestSession' => $this->guestSessionService->toPublicPayload($guestSession),
+                ],
             ),
         ]);
     }
 
-    public function activeSession(string $qrPublicId): JsonResponse
+    public function activeSession(Request $request, string $qrPublicId): JsonResponse
     {
         $failure = $this->resolveFailure($qrPublicId);
         if ($failure !== null) {
@@ -144,7 +156,14 @@ class TableQrController extends Controller
         }
 
         try {
-            $session = $this->activeOrderService->resolveByPublicId($qrPublicId);
+            $guestSessionId = null;
+            $token = $this->guestSessionTokenFromRequest($request);
+            if ($token !== null) {
+                $guestSession = $this->guestSessionService->findActiveByToken($token);
+                $guestSessionId = $guestSession?->id !== null ? (int) $guestSession->id : null;
+            }
+
+            $session = $this->activeOrderService->resolveByPublicId($qrPublicId, $guestSessionId);
         } catch (ModelNotFoundException) {
             return response()->json([
                 'message' => 'Table not found.',
@@ -184,8 +203,17 @@ class TableQrController extends Controller
             ], Response::HTTP_GONE);
         }
 
+        $existingToken = $this->guestSessionTokenFromRequest($request);
+        $resolved = $this->guestSessionService->resolveOrCreate((string) $table->qr_public_id, $existingToken);
+        $guestSession = $resolved['session'];
+
         return response()->json([
-            'data' => new TableQrResolveResource($table, $this->tableQrManagementService),
+            'data' => array_merge(
+                (new TableQrResolveResource($table, $this->tableQrManagementService))->toArray($request),
+                [
+                    'guestSession' => $this->guestSessionService->toPublicPayload($guestSession),
+                ],
+            ),
             'meta' => ['compatibility' => 'legacy-query'],
         ]);
     }

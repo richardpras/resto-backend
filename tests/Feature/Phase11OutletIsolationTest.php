@@ -186,12 +186,16 @@ class Phase11OutletIsolationTest extends TestCase
             'available' => true,
         ]);
 
-        $spoof = $this->postJson('/api/v1/qr-orders', [
-            'outletId' => (int) $allowed->id,
-            'tableId' => (int) $forbiddenTable->id,
-            'customerName' => 'Spoof',
-            'items' => [['menuItemId' => (int) $allowedMenu->id, 'qty' => 1]],
-        ]);
+        $this->ensureQrOrderingEnabled();
+        $this->enableTableQr($forbiddenTable);
+        $spoof = $this->postJson('/api/v1/qr-orders', $this->qrOrderPayload(
+            (int) $allowed->id,
+            (int) $forbiddenTable->id,
+            $forbiddenTable,
+            $this->guestSessionForTable($forbiddenTable),
+            [['menuItemId' => (int) $allowedMenu->id, 'qty' => 1]],
+            ['customerName' => 'Spoof'],
+        ));
         $spoof->assertUnprocessable();
 
         $this->assertSame(

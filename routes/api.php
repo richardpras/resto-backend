@@ -91,6 +91,7 @@ use App\Modules\Orders\Http\Controllers\OrderItemRecoveryController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoverySettlementController;
 use App\Modules\Orders\Http\Controllers\PosSessionController;
 use App\Modules\Orders\Http\Controllers\QrOrderController;
+use App\Modules\Orders\Http\Controllers\QrGuestSessionPublicController;
 use App\Modules\Orders\Http\Controllers\QrOrderPublicController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Orders\Http\Controllers\TableQrController;
@@ -157,6 +158,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('qr-orders/{qrOrderRequest}/call-cashier', [QrOrderController::class, 'callCashier']);
     Route::get('public/qr-orders/{orderCode}', [QrOrderPublicController::class, 'show']);
     Route::post('public/qr-orders/{orderCode}/approve-adjustments', [QrOrderPublicController::class, 'approveAdjustments']);
+    Route::get('public/qr-guest-sessions/{guestSessionToken}/orders', [QrGuestSessionPublicController::class, 'orders']);
     Route::get('public/qr/tables/{qrPublicId}/active-session', [TableQrController::class, 'activeSession']);
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
     Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
