@@ -134,31 +134,6 @@ class Phase15GiftCardStoreCreditTest extends TestCase
         ])->assertStatus(422)->assertJsonValidationErrors(['outletId']);
     }
 
-    public function test_coupon_validation_endpoint_returns_expected_result(): void
-    {
-        [$outlet] = $this->actAsAdminWithOutlet();
-
-        $valid = $this->postJson('/api/v1/promotions/coupons/validate', [
-            'outletId' => (int) $outlet->id,
-            'couponCode' => 'WELCOME10',
-            'subtotal' => 60000,
-        ])->assertOk();
-
-        $valid->assertJsonPath('success', true)
-            ->assertJsonPath('data.valid', true)
-            ->assertJsonPath('data.discountType', 'percentage')
-            ->assertJsonPath('data.discountValue', 10);
-
-        $invalid = $this->postJson('/api/v1/promotions/coupons/validate', [
-            'outletId' => (int) $outlet->id,
-            'couponCode' => 'WELCOME10',
-            'subtotal' => 20000,
-        ])->assertOk();
-
-        $invalid->assertJsonPath('data.valid', false)
-            ->assertJsonPath('data.reasonCode', 'min_subtotal_not_met');
-    }
-
     /** @return array{0:Outlet} */
     private function actAsAdminWithOutlet(): array
     {

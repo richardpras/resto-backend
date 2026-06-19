@@ -2,6 +2,10 @@
 
 namespace App\Modules\Orders\Http\Resources;
 
+use App\Modules\Orders\Http\Resources\OrderPromotionResource;
+use App\Modules\Orders\Http\Resources\OrderVoucherResource;
+use App\Modules\Orders\Services\OrderPromotionService;
+use App\Modules\Orders\Services\OrderVoucherService;
 use App\Modules\Orders\Services\OrderSourceLinkService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -28,12 +32,15 @@ class OrderResource extends JsonResource
             'tax' => (float) $this->tax,
             'total' => (float) $this->total,
             'discountAmount' => (float) ($this->discount_amount ?? 0),
+            'balanceDue' => max(0.0, (float) $this->total - (float) ($this->paid_total ?? 0)),
             'paymentStatus' => $this->payment_status,
             'kitchenStatus' => $this->kitchen_status ?? 'queued',
             'isPosted' => (bool) $this->is_posted,
             'customerName' => $this->customer_name,
             'customerPhone' => $this->customer_phone,
             'memberId' => $this->member_id !== null ? (int) $this->member_id : null,
+            'memberName' => $this->whenLoaded('member', fn () => $this->member?->displayName()),
+            'memberNo' => $this->whenLoaded('member', fn () => $this->member?->member_no),
             'tableId' => $this->table_id !== null ? (int) $this->table_id : null,
             'tableName' => $this->table_name,
             /** @deprecated Prefer `tableName` / master `tableId`; legacy column `table_number` read-only. */
@@ -96,7 +103,40 @@ class OrderResource extends JsonResource
                 $this->relationLoaded('orderVoucher') || $this->orderVoucher !== null,
                 fn () => $this->buildVoucherPreviewArray(),
             ),
+            'promotion' => $this->whenLoaded('orderPromotion', fn () => $this->orderPromotion !== null
+                ? new OrderPromotionResource($this->orderPromotion)
+                : null),
+            'promotionDiscount' => $this->when(
+                $this->relationLoaded('orderPromotion'),
+                fn () => $this->orderPromotion !== null
+                    ? (float) $this->resolveLivePromotionDiscount()
+                    : 0.0,
+            ),
+            'promotionPreview' => $this->when(
+                $this->relationLoaded('orderPromotion') || $this->orderPromotion !== null,
+                fn () => $this->buildPromotionPreviewArray(),
+            ),
         ];
+    }
+
+    private function resolveLivePromotionDiscount(): float
+    {
+        /** @var OrderPromotionService $service */
+        $service = app(OrderPromotionService::class);
+        $preview = $service->buildPreview($this->resource);
+
+        return (float) $preview['discount'];
+    }
+
+    /**
+     * @return array{subtotal: float, discount: float, subtotalAfterDiscount: float, tax: float, total: float, balanceDue: float}
+     */
+    private function buildPromotionPreviewArray(): array
+    {
+        /** @var OrderPromotionService $service */
+        $service = app(OrderPromotionService::class);
+
+        return $service->buildPreview($this->resource);
     }
 
     private function resolveLiveVoucherDiscount(): float
@@ -124,17 +164,13 @@ class OrderResource extends JsonResource
     }
 
     /**
-     * @return array{subtotal: float, discount: float, subtotalAfterDiscount: float}
+     * @return array{subtotal: float, discount: float, subtotalAfterDiscount: float, tax: float, total: float, balanceDue: float}
      */
     private function buildVoucherPreviewArray(): array
     {
-        $subtotal = (float) $this->subtotal;
-        $discount = $this->resolveLiveVoucherDiscount();
+        /** @var OrderVoucherService $service */
+        $service = app(OrderVoucherService::class);
 
-        return [
-            'subtotal' => $subtotal,
-            'discount' => $discount,
-            'subtotalAfterDiscount' => max(0.0, $subtotal - $discount),
-        ];
+        return $service->buildPreview($this->resource);
     }
 }

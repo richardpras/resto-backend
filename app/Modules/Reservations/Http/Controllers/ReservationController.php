@@ -8,10 +8,12 @@ use App\Modules\Reservations\Http\Requests\ListReservationsRequest;
 use App\Modules\Reservations\Http\Requests\ReservationDashboardRequest;
 use App\Modules\Reservations\Http\Requests\StoreReservationRequest;
 use App\Modules\Reservations\Http\Requests\UnallocateReservationTableRequest;
+use App\Modules\Reservations\Http\Requests\UpdateReservationRequest;
 use App\Modules\Reservations\Http\Resources\ReservationResource;
 use App\Modules\Reservations\Http\Resources\ReservationTableAllocationResource;
 use App\Modules\Reservations\Services\ReservationAllocationService;
 use App\Modules\Reservations\Services\ReservationDashboardService;
+use App\Modules\Reservations\Services\ReservationPosIntegrationService;
 use App\Modules\Reservations\Services\ReservationService;
 use App\Modules\Reservations\Services\ReservationTimelineService;
 use Illuminate\Http\JsonResponse;
@@ -24,6 +26,7 @@ class ReservationController extends Controller
         private readonly ReservationAllocationService $allocationService,
         private readonly ReservationDashboardService $dashboardService,
         private readonly ReservationTimelineService $timelineService,
+        private readonly ReservationPosIntegrationService $posIntegrationService,
     ) {}
 
     public function store(StoreReservationRequest $request): JsonResponse
@@ -78,6 +81,41 @@ class ReservationController extends Controller
 
         return response()->json([
             'data' => new ReservationResource($reservation),
+        ]);
+    }
+
+    public function update(UpdateReservationRequest $request, int $id): JsonResponse
+    {
+        $reservation = $this->service->updateMemberLink($request->user(), $id, $request->validated());
+
+        return response()->json([
+            'message' => 'Reservation updated successfully.',
+            'data' => new ReservationResource($reservation),
+        ]);
+    }
+
+    public function posQueue(): JsonResponse
+    {
+        $validated = validator(request()->all(), [
+            'outletId' => ['required', 'integer', 'min:1'],
+        ])->validate();
+
+        $queue = $this->posIntegrationService->posQueue(request()->user(), (int) $validated['outletId']);
+
+        return response()->json([
+            'readyToStart' => ReservationResource::collection($queue['readyToStart']),
+            'inService' => ReservationResource::collection($queue['inService']),
+        ]);
+    }
+
+    public function openInPos(int $id): JsonResponse
+    {
+        $result = $this->posIntegrationService->openInPos(request()->user(), $id);
+
+        return response()->json([
+            'message' => 'Reservation opened in POS successfully.',
+            'posSession' => $result['posSession'],
+            'loadPayload' => $result['loadPayload'],
         ]);
     }
 

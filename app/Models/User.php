@@ -79,6 +79,7 @@ class User extends Authenticatable
      */
     private const PERMISSION_SATISFIED_BY_ANY_OF = [
         'tables.view' => ['tables.view', 'tables.manage'],
+        'purchase.approve' => ['purchase.approve', 'purchase.manage'],
     ];
 
     public function hasPermission(string $permissionCode): bool

@@ -64,6 +64,7 @@ class OrderService
         private readonly PosOrderCreateGuardService $posOrderCreateGuardService,
         private readonly PosCheckoutIntegrityService $posCheckoutIntegrityService,
         private readonly OrderCodeAllocationService $orderCodeAllocationService,
+        private readonly OrderPromotionService $orderPromotionService,
     ) {}
 
     /** @var array<string, mixed>|null */
@@ -416,6 +417,8 @@ class OrderService
 
             if ($orderItemsUpdated) {
                 $this->kitchenTicketService->syncTicketItemsFromOrder($fresh);
+                $fresh = $this->orderRepository->findWithRelations($order->id) ?? $fresh;
+                $this->orderPromotionService->syncAppliedPromotionForOrder($fresh);
                 $fresh = $this->orderRepository->findWithRelations($order->id) ?? $fresh;
             }
 

@@ -82,9 +82,12 @@ use App\Modules\Menu\Http\Controllers\MenuOptimizationController;
 use App\Modules\Menu\Http\Controllers\MenuProductionController;
 use App\Modules\Menu\Http\Controllers\MenuProfitabilityController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
+use App\Modules\Menu\Http\Controllers\MenuItemImageController;
+use App\Modules\Menu\Http\Controllers\PublicQrMenuController;
 use App\Modules\Monitoring\Http\Controllers\MonitoringMetricsController;
 use App\Modules\Monitoring\Http\Controllers\DashboardSummaryController;
 use App\Modules\Orders\Http\Controllers\OrderController;
+use App\Modules\Orders\Http\Controllers\OrderPromotionController;
 use App\Modules\Orders\Http\Controllers\OrderVoucherController;
 use App\Modules\Orders\Http\Controllers\OpenBillController;
 use App\Modules\Orders\Http\Controllers\OrderItemRecoveryController;
@@ -100,7 +103,7 @@ use App\Modules\Payments\Http\Controllers\PaymentHealthController;
 use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
 use App\Modules\Payments\Http\Controllers\XenditSandboxSimulationController;
 use App\Modules\Payments\Http\Controllers\XenditInvoiceWebhookController;
-use App\Modules\Production\Http\Controllers\ProductionStationController;
+use App\Modules\PromotionEngine\Http\Controllers\PromotionController;
 use App\Modules\Print\Http\Controllers\PrinterProfileController;
 use App\Modules\Print\Http\Controllers\PrinterRouteController;
 use App\Modules\Print\Http\Controllers\PrintQueueController;
@@ -118,7 +121,6 @@ use App\Modules\Purchase\Http\Controllers\PurchaseInvoiceController;
 use App\Modules\Purchase\Http\Controllers\SupplierPaymentController;
 use App\Modules\Purchase\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequestController;
-use App\Modules\Promotions\Http\Controllers\CouponValidationController;
 use App\Modules\Settings\Http\Controllers\BankAccountSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\IntegrationSettingsController;
 use App\Modules\Settings\Http\Controllers\MerchantSettingsController;
@@ -159,7 +161,8 @@ Route::prefix('v1')->group(function (): void {
     Route::get('public/qr-orders/{orderCode}', [QrOrderPublicController::class, 'show']);
     Route::post('public/qr-orders/{orderCode}/approve-adjustments', [QrOrderPublicController::class, 'approveAdjustments']);
     Route::get('public/qr-guest-sessions/{guestSessionToken}/orders', [QrGuestSessionPublicController::class, 'orders']);
-    Route::get('public/qr/tables/{qrPublicId}/active-session', [TableQrController::class, 'activeSession']);
+    Route::get('public/qr/tables/{qrPublicId}/menu', [PublicQrMenuController::class, 'show']);
+    Route::get('public/menu-images/{menuItem}', [MenuItemImageController::class, 'serve'])->whereNumber('menuItem');
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
     Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
 
@@ -169,8 +172,14 @@ Route::prefix('v1')->group(function (): void {
     Route::patch('orders/{order}', [OrderController::class, 'update'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/member', [OrderController::class, 'setMember'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/voucher', [OrderVoucherController::class, 'apply'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/voucher/by-code', [OrderVoucherController::class, 'applyByCode'])->middleware(['auth:api', 'permission:pos.use']);
     Route::delete('orders/{order}/voucher', [OrderVoucherController::class, 'remove'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('orders/{order}/voucher-preview', [OrderVoucherController::class, 'preview'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/promotions', [OrderPromotionController::class, 'apply'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/promotions/by-code', [OrderPromotionController::class, 'applyByCode'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::delete('orders/{order}/promotions', [OrderPromotionController::class, 'remove'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('orders/{order}/promotion-preview', [OrderPromotionController::class, 'preview'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('promotions/evaluate', [PromotionController::class, 'evaluate'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
@@ -191,6 +200,12 @@ Route::prefix('v1')->group(function (): void {
     Route::apiResource('menu-items', MenuItemController::class)
         ->only(['index', 'store', 'show', 'update'])
         ->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('menu-items/{menuItem}/image', [MenuItemImageController::class, 'upload'])
+        ->whereNumber('menuItem')
+        ->middleware(['auth:api', 'permission:menu.manage']);
+    Route::delete('menu-items/{menuItem}/image', [MenuItemImageController::class, 'destroy'])
+        ->whereNumber('menuItem')
+        ->middleware(['auth:api', 'permission:menu.manage']);
 
     Route::prefix('menu-costing')->middleware(['auth:api', 'permission:pos.use'])->group(function (): void {
         Route::get('menu-items/{menuItem}/breakdown', [MenuCostingController::class, 'breakdown']);
@@ -877,6 +892,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('outlets/{outlet}/payment-checkout-methods', [OutletPaymentMethodConfigController::class, 'checkoutMethods'])->middleware('permission:pos.use');
 
         Route::get('members/search', [MemberController::class, 'search'])->middleware('permission.any:pos.use,members.manage');
+        Route::get('members/by-loyalty-account/{loyaltyAccountId}', [MemberController::class, 'byLoyaltyAccount'])->middleware('permission:members.manage');
         Route::post('members/quick', [MemberController::class, 'quickStore'])->middleware('permission.any:pos.use,members.manage');
         Route::get('members/{member}/profile', [MemberController::class, 'profile'])->middleware('permission.any:pos.use,members.manage');
         Route::get('members/{member}/notifications', [LoyaltyNotificationController::class, 'indexForMember'])->middleware('permission:members.manage');
@@ -914,6 +930,12 @@ Route::prefix('v1')->group(function (): void {
         Route::get('loyalty-vouchers/{loyaltyVoucher}', [LoyaltyVoucherController::class, 'show'])->middleware('permission:members.manage');
         Route::patch('loyalty-vouchers/{loyaltyVoucher}', [LoyaltyVoucherController::class, 'update'])->middleware('permission:members.manage');
         Route::patch('loyalty-vouchers/{loyaltyVoucher}/activation', [LoyaltyVoucherController::class, 'setActivation'])->middleware('permission:members.manage');
+
+        Route::get('promotions', [PromotionController::class, 'index'])->middleware('permission:promotions.manage');
+        Route::post('promotions', [PromotionController::class, 'store'])->middleware('permission:promotions.manage');
+        Route::get('promotions/{promotion}', [PromotionController::class, 'show'])->middleware('permission:promotions.manage');
+        Route::patch('promotions/{promotion}', [PromotionController::class, 'update'])->middleware('permission:promotions.manage');
+        Route::patch('promotions/{promotion}/activation', [PromotionController::class, 'setActivation'])->middleware('permission:promotions.manage');
 
         Route::get('member-vouchers/{memberVoucher}', [MemberVoucherController::class, 'show'])->middleware('permission:members.manage');
         Route::patch('member-vouchers/{memberVoucher}/status', [MemberVoucherController::class, 'updateStatus'])->middleware('permission:members.manage');
@@ -1006,7 +1028,6 @@ Route::prefix('v1')->group(function (): void {
         Route::get('gift-cards/{code}', [GiftCardController::class, 'check'])->middleware('permission:pos.use');
         Route::post('gift-cards/redeem', [GiftCardController::class, 'redeem'])->middleware('permission:pos.use');
         Route::post('gift-cards/settlements', [GiftCardController::class, 'settle'])->middleware('permission:pos.use');
-        Route::post('promotions/coupons/validate', [CouponValidationController::class, 'validateCoupon'])->middleware('permission:pos.use');
         Route::get('customers', [CustomerController::class, 'index'])->middleware('permission:members.manage');
         Route::post('customers', [CustomerController::class, 'store'])->middleware('permission:members.manage');
         Route::get('customers/{customer}', [CustomerController::class, 'show'])->middleware('permission:members.manage');
@@ -1066,8 +1087,10 @@ Route::prefix('v1')->group(function (): void {
         Route::post('reservations', [ReservationController::class, 'store'])->middleware('permission:pos.use');
         Route::get('reservations', [ReservationController::class, 'index'])->middleware('permission:pos.use');
         Route::get('reservations/dashboard', [ReservationController::class, 'dashboard'])->middleware('permission:pos.use');
+        Route::get('reservations/pos-queue', [ReservationController::class, 'posQueue'])->middleware('permission:pos.use');
         Route::get('reservations/{id}/timeline', [ReservationController::class, 'timeline'])->middleware('permission:pos.use');
         Route::get('reservations/{id}', [ReservationController::class, 'show'])->middleware('permission:pos.use');
+        Route::patch('reservations/{id}', [ReservationController::class, 'update'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/confirm', [ReservationController::class, 'confirm'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/check-in', [ReservationController::class, 'checkIn'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/seat', [ReservationController::class, 'seat'])->middleware('permission:pos.use');
@@ -1078,6 +1101,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('reservations/{id}/unallocate-table', [ReservationController::class, 'unallocateTable'])->middleware('permission:pos.use');
         Route::get('reservations/{id}/allocated-tables', [ReservationController::class, 'allocatedTables'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/start-service', [ReservationController::class, 'startService'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/open-in-pos', [ReservationController::class, 'openInPos'])->middleware('permission:pos.use');
 
         Route::get('suppliers', [SupplierController::class, 'index'])->middleware('permission:suppliers.manage');
         Route::post('suppliers', [SupplierController::class, 'store'])->middleware('permission:suppliers.manage');
@@ -1109,6 +1133,9 @@ Route::prefix('v1')->group(function (): void {
         Route::get('procurement/analytics/trends', [ProcurementAnalyticsController::class, 'trends'])->middleware('permission:purchase.manage');
         Route::get('procurement/analytics/posting', [ProcurementAnalyticsController::class, 'posting'])->middleware('permission:purchase.manage');
         Route::get('warehouses', [WarehouseController::class, 'index'])->middleware('permission:purchase.manage');
+        Route::post('warehouses', [WarehouseController::class, 'store'])->middleware('permission:purchase.manage');
+        Route::patch('warehouses/{warehouse}', [WarehouseController::class, 'update'])->middleware('permission:purchase.manage');
+        Route::delete('warehouses/{warehouse}', [WarehouseController::class, 'destroy'])->middleware('permission:purchase.manage');
         Route::get('procurement-settings', [InventoryProcurementSettingController::class, 'index'])->middleware('permission:purchase.manage');
         Route::post('procurement-settings', [InventoryProcurementSettingController::class, 'store'])->middleware('permission:purchase.manage');
         Route::patch('procurement-settings/{inventoryProcurementSetting}', [InventoryProcurementSettingController::class, 'update'])->middleware('permission:purchase.manage');
@@ -1119,8 +1146,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('purchase-requests/{purchaseRequest}', [PurchaseRequestController::class, 'show'])->middleware('permission:purchase.manage');
         Route::patch('purchase-requests/{purchaseRequest}', [PurchaseRequestController::class, 'update'])->middleware('permission:purchase.manage');
         Route::post('purchase-requests/{purchaseRequest}/submit', [PurchaseRequestController::class, 'submit'])->middleware('permission:purchase.manage');
-        Route::post('purchase-requests/{purchaseRequest}/approve', [PurchaseRequestController::class, 'approve'])->middleware('permission:purchase.manage');
-        Route::post('purchase-requests/{purchaseRequest}/reject', [PurchaseRequestController::class, 'reject'])->middleware('permission:purchase.manage');
+        Route::post('purchase-requests/{purchaseRequest}/approve', [PurchaseRequestController::class, 'approve'])->middleware('permission:purchase.approve');
+        Route::post('purchase-requests/{purchaseRequest}/reject', [PurchaseRequestController::class, 'reject'])->middleware('permission:purchase.approve');
         Route::post('purchase-requests/{purchaseRequest}/cancel', [PurchaseRequestController::class, 'cancel'])->middleware('permission:purchase.manage');
         Route::post('purchase-requests/{purchaseRequest}/convert', [PurchaseRequestController::class, 'convert'])->middleware('permission:purchase.manage');
         Route::get('purchase-orders', [PurchaseOrderController::class, 'index'])->middleware('permission:purchase.manage');
@@ -1129,8 +1156,8 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'update'])->middleware('permission:purchase.manage');
         Route::delete('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'destroy'])->middleware('permission:purchase.manage');
         Route::patch('purchase-orders/{purchaseOrder}/submit', [PurchaseOrderController::class, 'submit'])->middleware('permission:purchase.manage');
-        Route::patch('purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve'])->middleware('permission:purchase.manage');
-        Route::patch('purchase-orders/{purchaseOrder}/reject', [PurchaseOrderController::class, 'reject'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve'])->middleware('permission:purchase.approve');
+        Route::patch('purchase-orders/{purchaseOrder}/reject', [PurchaseOrderController::class, 'reject'])->middleware('permission:purchase.approve');
         Route::patch('purchase-orders/{purchaseOrder}/cancel', [PurchaseOrderController::class, 'cancel'])->middleware('permission:purchase.manage');
         Route::patch('purchase-orders/{purchaseOrder}/close', [PurchaseOrderController::class, 'close'])->middleware('permission:purchase.manage');
         Route::get('purchase-orders/{purchaseOrder}/progress', [PurchaseOrderController::class, 'progress'])->middleware('permission:purchase.manage');
@@ -1148,7 +1175,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('purchase-invoices/{purchaseInvoice}', [PurchaseInvoiceController::class, 'show'])->middleware('permission:purchase.manage');
         Route::patch('purchase-invoices/{purchaseInvoice}', [PurchaseInvoiceController::class, 'update'])->middleware('permission:purchase.manage');
         Route::patch('purchase-invoices/{purchaseInvoice}/submit', [PurchaseInvoiceController::class, 'submit'])->middleware('permission:purchase.manage');
-        Route::patch('purchase-invoices/{purchaseInvoice}/approve', [PurchaseInvoiceController::class, 'approve'])->middleware('permission:purchase.manage');
+        Route::patch('purchase-invoices/{purchaseInvoice}/approve', [PurchaseInvoiceController::class, 'approve'])->middleware('permission:purchase.approve');
         Route::patch('purchase-invoices/{purchaseInvoice}/void', [PurchaseInvoiceController::class, 'void'])->middleware('permission:purchase.manage');
         Route::get('purchase-invoices/{purchaseInvoice}/outstanding', [PurchaseInvoiceController::class, 'outstanding'])->middleware('permission:purchase.manage');
         Route::post('purchase-invoices/{purchaseInvoice}/payments', [PurchaseInvoiceController::class, 'addPayment'])->middleware('permission:purchase.manage');
@@ -1156,8 +1183,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('supplier-payments', [SupplierPaymentController::class, 'store'])->middleware('permission:purchase.manage');
         Route::get('supplier-payments/{supplierPayment}', [SupplierPaymentController::class, 'show'])->middleware('permission:purchase.manage');
         Route::patch('supplier-payments/{supplierPayment}', [SupplierPaymentController::class, 'update'])->middleware('permission:purchase.manage');
-        Route::patch('supplier-payments/{supplierPayment}/approve', [SupplierPaymentController::class, 'approve'])->middleware('permission:purchase.manage');
-        Route::patch('supplier-payments/{supplierPayment}/post', [SupplierPaymentController::class, 'post'])->middleware('permission:purchase.manage');
+        Route::patch('supplier-payments/{supplierPayment}/approve', [SupplierPaymentController::class, 'approve'])->middleware('permission:purchase.approve');
+        Route::patch('supplier-payments/{supplierPayment}/post', [SupplierPaymentController::class, 'post'])->middleware('permission:purchase.approve');
         Route::patch('supplier-payments/{supplierPayment}/void', [SupplierPaymentController::class, 'void'])->middleware('permission:purchase.manage');
     });
 });

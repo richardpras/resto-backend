@@ -32,6 +32,7 @@ class StoreLoyaltyProgramRequest extends FormRequest
             'effectiveUntil' => ['nullable', 'date', 'after_or_equal:effectiveFrom'],
             'expiryEnabled' => ['nullable', 'boolean'],
             'expiryDays' => ['nullable', 'integer', 'min:1', 'required_if:expiryEnabled,true'],
+            'ruleConfig' => ['nullable', 'array'],
         ];
     }
 }

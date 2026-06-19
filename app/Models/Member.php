@@ -2,14 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Modules\Loyalty\Domain\LoyaltyAccount;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyRewardRedemption;
+use App\Models\Modules\LoyaltyEngine\Domain\MemberLoyaltyBalance;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Member extends Model
 {
     protected $fillable = [
         'outlet_id',
+        'loyalty_account_id',
         'member_no',
         'full_name',
         'name',
@@ -55,6 +59,16 @@ class Member extends Model
                 $member->is_active = $member->status === 'active';
             }
         });
+    }
+
+    public function loyaltyAccount(): BelongsTo
+    {
+        return $this->belongsTo(LoyaltyAccount::class, 'loyalty_account_id');
+    }
+
+    public function loyaltyBalance(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(MemberLoyaltyBalance::class, 'member_id');
     }
 
     public function transactions(): HasMany

@@ -35,7 +35,10 @@ class LoyaltySpendEarningService
         }
 
         $config = $this->programService->loadRuleConfig($program);
-        $points = $this->programService->calculateSpendBasedPoints((float) $order->total, $config);
+        $points = $this->programService->calculateSpendBasedPoints(
+            (float) ($order->subtotal ?? $order->total),
+            $config,
+        );
         if ($points <= 0) {
             return null;
         }

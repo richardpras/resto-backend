@@ -18,6 +18,8 @@ class ReservationResource extends JsonResource
             'customerName' => (string) $this->customer_name,
             'customerPhone' => $this->customer_phone !== null ? (string) $this->customer_phone : null,
             'memberId' => $this->member_id !== null ? (int) $this->member_id : null,
+            'memberNo' => $this->whenLoaded('member', fn () => $this->member?->member_no),
+            'memberName' => $this->whenLoaded('member', fn () => $this->member?->displayName()),
             'partySize' => (int) $this->party_size,
             'reservationAt' => $this->reservation_at?->toISOString(),
             'confirmedAt' => $this->confirmed_at?->toISOString(),

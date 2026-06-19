@@ -8,6 +8,7 @@ use App\Models\Modules\Loyalty\Domain\LoyaltyRewardRedemption;
 use App\Models\User;
 use App\Modules\Loyalty\Events\CustomerLoyaltyUpdated;
 use App\Modules\Loyalty\Events\RewardRedemptionCreated;
+use App\Modules\Members\Services\MemberPointsMirrorService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -80,6 +81,16 @@ class LoyaltyPointService
                 null,
                 $freshAccount->updated_at?->toIso8601String(),
             ));
+
+            if (! MemberPointsMirrorService::isMirrorOriginKey($idempotencyKey)) {
+                app(MemberPointsMirrorService::class)->mirrorCrmAccrualToEngine(
+                    $freshAccount,
+                    $outletId,
+                    $effectivePoints,
+                    $idempotencyKey,
+                    $user,
+                );
+            }
 
             return ['ledger' => $ledger, 'account' => $freshAccount, 'idempotent' => false];
         });
@@ -168,6 +179,16 @@ class LoyaltyPointService
                 null,
                 $freshAccount->updated_at?->toIso8601String(),
             ));
+
+            if (! MemberPointsMirrorService::isMirrorOriginKey($idempotencyKey)) {
+                app(MemberPointsMirrorService::class)->mirrorCrmRedemptionToEngine(
+                    $freshAccount,
+                    $outletId,
+                    $pointsCost,
+                    $idempotencyKey,
+                    $user,
+                );
+            }
 
             return ['redemption' => $redemption, 'account' => $freshAccount, 'idempotent' => false];
         });

@@ -30,6 +30,7 @@ class MemberProfileResource extends JsonResource
                     : null,
             ],
             'currentPoints' => (int) ($payload['currentPoints'] ?? 0),
+            'pointsBalance' => (int) ($payload['currentPoints'] ?? 0),
             'loyaltyHistory' => LoyaltyMemberLedgerResource::collection($payload['loyaltyHistory'] ?? []),
             'availableRewards' => LoyaltyRewardCatalogItemResource::collection($payload['availableRewards'] ?? []),
             'rewardRedemptions' => LoyaltyRewardRedemptionResource::collection($payload['rewardRedemptions'] ?? []),
@@ -51,6 +52,8 @@ class MemberProfileResource extends JsonResource
             'tierHistory' => MemberTierHistoryResource::collection($payload['tierHistory'] ?? []),
             'notifications' => LoyaltyNotificationResource::collection($payload['notifications'] ?? []),
             'transactions' => MemberTransactionResource::collection($payload['transactions']),
+            'crmAccount' => $payload['crmAccount'] ?? null,
+            'crmPointsLedger' => $payload['crmPointsLedger'] ?? [],
         ];
     }
 }

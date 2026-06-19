@@ -74,6 +74,43 @@ class ExecutiveSalesReportApiTest extends TestCase
         $this->assertSame(60000.0, (float) $payments->firstWhere('method', 'cash')['amount']);
     }
 
+    public function test_executive_sales_includes_outlet_promotion_discounts(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet('Exec Promo');
+        $date = now()->format('Y-m-d');
+
+        $orderId = $this->seedPaidOrder($outlet->id, [
+            'code' => 'ES-PROMO',
+            'subtotal' => 100000,
+            'discount_amount' => 0,
+            'total' => 100000,
+            'paid_total' => 85000,
+            'source' => 'pos',
+            'order_channel' => 'dine_in',
+        ]);
+
+        $this->attachPromotionDiscount($orderId, 15000);
+
+        DB::table('payments')->insert([
+            'order_id' => $orderId,
+            'method' => 'cash',
+            'amount' => 85000,
+            'paid_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/v1/reports/executive-sales?'.http_build_query([
+            'outletId' => $outlet->id,
+            'startDate' => $date,
+            'endDate' => $date,
+        ]))
+            ->assertOk()
+            ->assertJsonPath('data.summary.grossSales', 100000)
+            ->assertJsonPath('data.summary.promotionDiscount', 15000)
+            ->assertJsonPath('data.summary.netSales', 85000);
+    }
+
     public function test_channel_and_payment_aggregation(): void
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet('Exec Channel');
@@ -307,6 +344,37 @@ class ExecutiveSalesReportApiTest extends TestCase
             'voucher_id' => $voucherId,
             'voucher_code' => 'SAVE10',
             'discount_type' => 'fixed',
+            'discount_value' => $amount,
+            'discount_amount' => $amount,
+            'applied_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function attachPromotionDiscount(int $orderId, float $amount): void
+    {
+        $promotionId = DB::table('promotions')->insertGetId([
+            'outlet_id' => DB::table('orders')->where('id', $orderId)->value('outlet_id'),
+            'code' => 'PROMO'.random_int(100, 999),
+            'name' => 'Outlet Promo',
+            'type' => 'fixed_amount',
+            'config' => json_encode(['amount' => $amount]),
+            'conditions' => json_encode([]),
+            'priority' => 1,
+            'is_combinable' => false,
+            'exclusive' => false,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('order_promotions')->insert([
+            'order_id' => $orderId,
+            'promotion_id' => $promotionId,
+            'promotion_code' => 'PROMO',
+            'promotion_name' => 'Outlet Promo',
+            'discount_type' => 'fixed_amount',
             'discount_value' => $amount,
             'discount_amount' => $amount,
             'applied_at' => now(),

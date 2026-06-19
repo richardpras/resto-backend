@@ -2,6 +2,7 @@
 
 namespace App\Modules\Menu\Http\Resources;
 
+use App\Modules\Menu\Services\MenuImageService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -30,11 +31,16 @@ class MenuItemResource extends JsonResource
             }
         }
 
+        $menuImageService = app(MenuImageService::class);
+
         return [
             'id' => (string) $this->id,
             'name' => $displayName,
             'category' => $this->category,
             'emoji' => $this->emoji,
+            'imageUrl' => $this->image_path ? $menuImageService->publicUrl($this->resource) : null,
+            'imageVersion' => (int) $this->image_version,
+            'hasImage' => $this->image_path !== null,
             'price' => $displayPrice,
             'available' => (bool) $this->available,
             'productionStation' => $this->whenLoaded('productionStation', function () {

@@ -18,18 +18,23 @@ trait ProcurementTestFixture
         $this->seed(UserManagementPermissionsSeeder::class);
     }
 
-    protected function actingAsProcurementUser(?Outlet $outlet = null): User
+    protected function actingAsProcurementUser(?Outlet $outlet = null, bool $manageOnly = false): User
     {
         $this->seedProcurementPermissions();
         Artisan::call('passport:keys', ['--force' => true]);
 
+        $roleName = $manageOnly ? '__test_procurement_manage_only__' : '__test_procurement_user__';
         $role = Role::query()->firstOrCreate(
-            ['name' => '__test_procurement_user__'],
+            ['name' => $roleName],
             ['description' => 'Test fixture: procurement access'],
         );
 
+        $codes = $manageOnly
+            ? ['purchase.manage', 'suppliers.manage', 'outlets.view_all']
+            : ['purchase.manage', 'purchase.approve', 'suppliers.manage', 'outlets.view_all'];
+
         $permissionIds = Permission::query()
-            ->whereIn('code', ['purchase.manage', 'suppliers.manage', 'outlets.view_all'])
+            ->whereIn('code', $codes)
             ->pluck('id')
             ->all();
         $role->permissions()->sync($permissionIds);

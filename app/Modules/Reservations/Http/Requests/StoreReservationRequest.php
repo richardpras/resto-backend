@@ -25,6 +25,7 @@ class StoreReservationRequest extends FormRequest
             'outletId' => ['required', 'integer', 'min:1', 'exists:outlets,id', $mustBeAllowedOutlet],
             'customerName' => ['required', 'string', 'max:120'],
             'customerPhone' => ['nullable', 'string', 'max:40'],
+            'memberId' => ['nullable', 'integer', 'min:1', 'exists:members,id'],
             'partySize' => ['required', 'integer', 'min:1', 'max:100'],
             'reservationAt' => ['required', 'date'],
         ];

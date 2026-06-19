@@ -227,6 +227,7 @@ class CustomerController extends Controller
 
         $validated = validator($request->all(), [
             'customerId' => ['required', 'integer', 'min:1'],
+            'outletId' => ['nullable', 'integer', 'min:1', 'exists:outlets,id'],
             'rewardCode' => ['nullable', 'string', 'max:100'],
             'pointsCost' => ['nullable', 'integer', 'min:1'],
             'idempotencyKey' => ['nullable', 'string', 'max:128'],
@@ -237,13 +238,15 @@ class CustomerController extends Controller
         ])->validate();
         $account = $this->customerProfileService->findScoped($user, (int) $validated['customerId']);
         $payload = $validated;
+        $payload['outletId'] = (int) ($validated['outletId'] ?? $account->outlet_id ?? 0);
         $payload['rewardCode'] = $validated['rewardCode'] ?? 'crm-redemption';
         $payload['pointsCost'] = (int) ($validated['pointsCost'] ?? $validated['pointsUsed'] ?? 0);
         $payload['idempotencyKey'] = (string) ($validated['idempotencyKey'] ?? $validated['replayFingerprint'] ?? '');
-        if ($payload['pointsCost'] < 1 || $payload['idempotencyKey'] === '') {
+        if ($payload['pointsCost'] < 1 || $payload['idempotencyKey'] === '' || $payload['outletId'] < 1) {
             throw ValidationException::withMessages([
                 'pointsCost' => ['pointsCost/pointsUsed is required.'],
                 'idempotencyKey' => ['idempotencyKey/replayFingerprint is required.'],
+                'outletId' => ['outletId is required for redemption.'],
             ]);
         }
         $result = $this->loyaltyPointService->redeem($user, $account, $payload);

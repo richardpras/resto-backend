@@ -33,6 +33,7 @@ class UpdateLoyaltyProgramRequest extends FormRequest
             'effectiveUntil' => ['sometimes', 'nullable', 'date'],
             'expiryEnabled' => ['sometimes', 'boolean'],
             'expiryDays' => ['sometimes', 'nullable', 'integer', 'min:1', 'required_if:expiryEnabled,true'],
+            'ruleConfig' => ['sometimes', 'nullable', 'array'],
         ];
     }
 }

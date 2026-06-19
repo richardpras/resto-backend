@@ -3,6 +3,7 @@
 namespace App\Modules\Orders\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Orders\Http\Requests\ApplyOrderVoucherByCodeRequest;
 use App\Modules\Orders\Http\Requests\ApplyOrderVoucherRequest;
 use App\Modules\Orders\Http\Resources\OrderResource;
 use App\Modules\Orders\Services\OrderVoucherService;
@@ -25,6 +26,24 @@ class OrderVoucherController extends Controller
             $user,
             $order,
             (int) $request->validated('memberVoucherId'),
+        );
+
+        return response()->json([
+            'message' => 'Voucher applied successfully.',
+            'data' => new OrderResource($result['order']),
+            'preview' => $result['preview'],
+        ]);
+    }
+
+    public function applyByCode(ApplyOrderVoucherByCodeRequest $request, int $order): JsonResponse
+    {
+        $user = $this->resolveAuthenticatedUser($request);
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        $result = $this->orderVoucherService->applyByCode(
+            $user,
+            $order,
+            (string) $request->validated('code'),
         );
 
         return response()->json([

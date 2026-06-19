@@ -46,8 +46,12 @@ class OrderVoucherTest extends TestCase
             ->assertJsonPath('preview.subtotal', 250000)
             ->assertJsonPath('preview.discount', 25000)
             ->assertJsonPath('preview.subtotalAfterDiscount', 225000)
+            ->assertJsonPath('preview.tax', 22500)
+            ->assertJsonPath('preview.total', 247500)
             ->assertJsonPath('data.voucher.voucherCode', $memberVoucher->voucher_code)
-            ->assertJsonPath('data.voucherDiscount', 25000);
+            ->assertJsonPath('data.voucherDiscount', 25000)
+            ->assertJsonPath('data.tax', 22500)
+            ->assertJsonPath('data.total', 247500);
 
         $this->assertDatabaseHas('order_vouchers', [
             'order_id' => $orderId,
@@ -63,7 +67,10 @@ class OrderVoucherTest extends TestCase
         $this->assertDatabaseHas('orders', [
             'id' => $orderId,
             'subtotal' => 250000,
-            'total' => 275000,
+            'discount_amount' => 25000,
+            'tax' => 22500,
+            'total' => 247500,
+            'balance_due' => 247500,
         ]);
     }
 
@@ -83,7 +90,9 @@ class OrderVoucherTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('preview.discount', 50000)
-            ->assertJsonPath('preview.subtotalAfterDiscount', 200000);
+            ->assertJsonPath('preview.subtotalAfterDiscount', 200000)
+            ->assertJsonPath('preview.tax', 20000)
+            ->assertJsonPath('preview.total', 220000);
     }
 
     public function test_remove_voucher(): void
@@ -101,7 +110,9 @@ class OrderVoucherTest extends TestCase
         $this->deleteJson("/api/v1/orders/{$orderId}/voucher")
             ->assertOk()
             ->assertJsonPath('preview.discount', 0)
-            ->assertJsonPath('preview.subtotalAfterDiscount', 250000);
+            ->assertJsonPath('preview.subtotalAfterDiscount', 250000)
+            ->assertJsonPath('preview.tax', 25000)
+            ->assertJsonPath('preview.total', 275000);
 
         $this->assertDatabaseMissing('order_vouchers', [
             'order_id' => $orderId,
@@ -149,5 +160,45 @@ class OrderVoucherTest extends TestCase
         ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['memberId']);
+    }
+
+    public function test_apply_voucher_by_code_auto_attaches_member(): void
+    {
+        [$user, $outlet] = $this->actAsPosUserWithOutlet();
+        $member = $this->createOrderVoucherMember($outlet);
+        $voucher = $this->createOrderVoucherDefinition($outlet, [
+            'value_type' => LoyaltyVoucher::VALUE_PERCENTAGE,
+            'value' => 10,
+        ]);
+        $memberVoucher = $this->issueOrderVoucherMemberVoucher($user, $member, $voucher);
+        $orderId = $this->createWalkInOrder($outlet);
+
+        $this->postJson("/api/v1/orders/{$orderId}/voucher/by-code", [
+            'code' => $memberVoucher->voucher_code,
+        ])
+            ->assertOk()
+            ->assertJsonPath('preview.discount', 25000)
+            ->assertJsonPath('data.total', 247500);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'member_id' => $member->id,
+        ]);
+    }
+
+    public function test_apply_voucher_by_code_wrong_outlet(): void
+    {
+        [$user, $outletA] = $this->actAsPosUserWithOutlet();
+        $outletB = $this->createOrderVoucherOutlet();
+        $this->assignUserToOutlets($user, [(int) $outletA->id, (int) $outletB->id]);
+
+        $member = $this->createOrderVoucherMember($outletA);
+        $voucher = $this->createOrderVoucherDefinition($outletA);
+        $memberVoucher = $this->issueOrderVoucherMemberVoucher($user, $member, $voucher);
+        $orderId = $this->createWalkInOrder($outletB);
+
+        $this->postJson("/api/v1/orders/{$orderId}/voucher/by-code", [
+            'code' => $memberVoucher->voucher_code,
+        ])->assertUnprocessable();
     }
 }

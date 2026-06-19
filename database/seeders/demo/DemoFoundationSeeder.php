@@ -39,6 +39,7 @@ class DemoFoundationSeeder extends Seeder
         'automation.view',
         'forecasting.view',
         'purchase.manage',
+        'purchase.approve',
         'promotions.manage',
         'suppliers.manage',
         'members.manage',
@@ -77,7 +78,7 @@ class DemoFoundationSeeder extends Seeder
                 'Demo Owner' => $this->permissionIds($permissionMap, self::OWNER_PERMISSION_CODES),
                 'Demo Manager' => $this->permissionIds($permissionMap, [
                     'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
-                    'purchase.manage', 'tables.view', 'tables.manage', 'qr_orders.view', 'reports.view',
+                    'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view', 'reports.view',
                     'members.manage', 'suppliers.manage', 'promotions.manage', 'accounting.manage',
                     'payroll.manage', 'employees.view', 'attendance.view', 'settings.manage',
                 ]),
@@ -177,6 +178,18 @@ class DemoFoundationSeeder extends Seeder
                         ],
                     );
                 }
+
+                DB::table('warehouses')->updateOrInsert(
+                    ['code' => "WH-{$key}-MAIN"],
+                    [
+                        'outlet_id' => $outlet->id,
+                        'name' => "Gudang Utama {$spec['name']}",
+                        'type' => 'outlet',
+                        'is_active' => true,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ],
+                );
             }
         });
     }

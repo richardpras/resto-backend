@@ -135,7 +135,7 @@ class DemoDatasetSeederService
                 'Demo Cashier' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'orders.recovery.read', 'orders.recovery.request'],
                 'Demo Kitchen' => ['kitchen.use', 'orders.recovery.read', 'orders.recovery.request'],
                 'Demo Waiter' => ['pos.use', 'tables.view', 'qr_orders.view'],
-                'Demo Inventory Admin' => ['inventory.manage', 'purchase.manage', 'reports.view'],
+                'Demo Inventory Admin' => ['inventory.manage', 'purchase.manage', 'purchase.approve', 'reports.view'],
             ];
 
             $roleIds = [];
@@ -719,14 +719,24 @@ class DemoDatasetSeederService
                     $lifetimeSpend = $lifetimeVisits * 125000;
                     $tier = $lifetimeSpend >= 5000000 ? $tiers['GOLD'] : ($lifetimeSpend >= 2000000 ? $tiers['SILVER'] : $tiers['BRONZE']);
                     $uuid = self::stableUuid("loyalty-{$key}-{$i}");
+                    $phone = "0813{$key}".str_pad((string) $i, 8, '0', STR_PAD_LEFT);
                     $account = LoyaltyAccount::query()->updateOrCreate(
                         ['outlet_id' => $outlet->id, 'customer_uuid' => $uuid],
-                        ['global_customer_uuid' => self::stableUuid("global-customer-{$key}-{$i}"), 'name' => "Loyalty {$key} {$i}", 'phone' => "0813{$key}".str_pad((string) $i, 8, '0', STR_PAD_LEFT), 'email' => $isGuest ? null : "cust{$i}@".strtolower($key).'.demo.customer', 'points_balance' => $isInactive ? 0 : $lifetimeVisits * 10, 'lifetime_points_earned' => $lifetimeVisits * 20, 'lifetime_points_redeemed' => $lifetimeVisits * 10, 'lifetime_spend' => $lifetimeSpend, 'lifetime_visits' => $lifetimeVisits, 'current_tier_id' => $tier->id, 'last_activity_at' => $isInactive ? now()->subMonths(8) : now()->subDays($i)],
+                        ['global_customer_uuid' => self::stableUuid("global-customer-{$key}-{$i}"), 'name' => "Loyalty {$key} {$i}", 'phone' => $phone, 'email' => $isGuest ? null : "cust{$i}@".strtolower($key).'.demo.customer', 'points_balance' => $isInactive ? 0 : $lifetimeVisits * 10, 'lifetime_points_earned' => $lifetimeVisits * 20, 'lifetime_points_redeemed' => $lifetimeVisits * 10, 'lifetime_spend' => $lifetimeSpend, 'lifetime_visits' => $lifetimeVisits, 'current_tier_id' => $tier->id, 'last_activity_at' => $isInactive ? now()->subMonths(8) : now()->subDays($i)],
                     );
 
                     Member::query()->updateOrCreate(
-                        ['phone' => "08{$key}99".str_pad((string) $i, 8, '0', STR_PAD_LEFT)],
-                        ['name' => $account->name, 'email' => $account->email, 'points' => $account->points_balance, 'status' => $isInactive ? 'inactive' : 'active'],
+                        ['outlet_id' => $outlet->id, 'phone' => $phone],
+                        [
+                            'loyalty_account_id' => $account->id,
+                            'member_no' => sprintf('MEM-%05d', $i),
+                            'full_name' => $account->name,
+                            'name' => $account->name,
+                            'email' => $account->email,
+                            'points' => $account->points_balance,
+                            'is_active' => ! $isInactive,
+                            'status' => $isInactive ? 'inactive' : 'active',
+                        ],
                     );
 
                     $ledgerKey = "{$outlet->id}-loyalty-ledger-{$i}";

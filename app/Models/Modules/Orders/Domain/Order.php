@@ -2,7 +2,9 @@
 
 namespace App\Models\Modules\Orders\Domain;
 
+use App\Models\Member;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -66,5 +68,15 @@ class Order extends Model
     public function orderVoucher(): HasOne
     {
         return $this->hasOne(OrderVoucher::class);
+    }
+
+    public function orderPromotion(): HasOne
+    {
+        return $this->hasOne(OrderPromotion::class);
+    }
+
+    public function member(): BelongsTo
+    {
+        return $this->belongsTo(Member::class);
     }
 }

@@ -75,6 +75,81 @@ class LoyaltyEngineTest extends TestCase
         ]);
     }
 
+    public function test_spend_earn_mirrors_points_to_crm_account(): void
+    {
+        $outletId = $this->createOutletId();
+        $member = $this->seedMember($outletId);
+        $this->seedSpendBasedProgram($outletId);
+
+        $order = \App\Models\Modules\Orders\Domain\Order::query()->create([
+            'tenant_id' => 1,
+            'outlet_id' => $outletId,
+            'code' => 'LOY-CRM-MIRROR',
+            'source' => 'pos',
+            'order_type' => 'Takeaway',
+            'status' => 'completed',
+            'payment_status' => 'paid',
+            'member_id' => $member->id,
+            'subtotal' => 250000,
+            'tax' => 0,
+            'total' => 250000,
+        ]);
+
+        app(\App\Modules\LoyaltyEngine\Services\LoyaltySpendEarningService::class)->processPaidOrder($order);
+
+        $member->refresh();
+        $this->assertNotNull($member->loyalty_account_id);
+        $this->assertSame(25, (int) \App\Models\Modules\Loyalty\Domain\LoyaltyAccount::query()
+            ->whereKey($member->loyalty_account_id)
+            ->value('points_balance'));
+    }
+
+    public function test_spend_program_earns_from_subtotal_not_tax(): void
+    {
+        $outletId = $this->createOutletId();
+        $member = $this->seedMember($outletId);
+
+        $program = LoyaltyProgram::query()->create([
+            'outlet_id' => $outletId,
+            'code' => 'SPEND-SUB-'.uniqid(),
+            'name' => 'Subtotal spend program',
+            'type' => LoyaltyProgram::TYPE_SPEND_BASED,
+            'is_active' => true,
+        ]);
+        LoyaltyProgramRule::query()->create([
+            'loyalty_program_id' => $program->id,
+            'rule_type' => LoyaltyProgram::TYPE_SPEND_BASED,
+            'config' => [
+                'earnPerAmount' => 1000,
+                'pointsEarned' => 1,
+            ],
+        ]);
+
+        $order = \App\Models\Modules\Orders\Domain\Order::query()->create([
+            'tenant_id' => 1,
+            'outlet_id' => $outletId,
+            'code' => 'LOY-SUBTOTAL',
+            'source' => 'pos',
+            'order_type' => 'Takeaway',
+            'status' => 'completed',
+            'payment_status' => 'paid',
+            'member_id' => $member->id,
+            'subtotal' => 1000000,
+            'tax' => 100000,
+            'total' => 1100000,
+        ]);
+
+        app(\App\Modules\LoyaltyEngine\Services\LoyaltySpendEarningService::class)->processPaidOrder($order);
+
+        $this->assertDatabaseHas('loyalty_member_ledger', [
+            'member_id' => $member->id,
+            'type' => 'earn',
+            'reference_type' => 'order',
+            'reference_id' => (string) $order->id,
+            'points' => 1000,
+        ]);
+    }
+
     public function test_paid_order_without_member_earns_nothing(): void
     {
         $user = $this->actingAsPosCashier();

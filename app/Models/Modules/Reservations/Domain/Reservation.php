@@ -2,6 +2,7 @@
 
 namespace App\Models\Modules\Reservations\Domain;
 
+use App\Models\Member;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
@@ -61,5 +62,10 @@ class Reservation extends Model
     public function linkedOrder(): BelongsTo
     {
         return $this->belongsTo(Order::class, 'linked_order_id');
+    }
+
+    public function member(): BelongsTo
+    {
+        return $this->belongsTo(Member::class, 'member_id');
     }
 }

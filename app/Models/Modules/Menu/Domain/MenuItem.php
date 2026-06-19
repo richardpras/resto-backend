@@ -17,6 +17,11 @@ class MenuItem extends Model
         'category',
         'production_station_id',
         'emoji',
+        'image_path',
+        'image_path_fallback',
+        'image_version',
+        'image_width',
+        'image_height',
         'price',
         'available',
     ];

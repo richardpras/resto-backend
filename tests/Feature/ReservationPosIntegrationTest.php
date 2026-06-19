@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Modules\Accounting\Domain\Account;
+use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Reservations\Domain\Reservation;
@@ -44,7 +45,38 @@ class ReservationPosIntegrationTest extends TestCase
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')
             ->assertUnprocessable()
-            ->assertJsonPath('errors.status.0', 'Service can only be started for seated reservations.');
+            ->assertJsonPath('errors.status.0', 'Service can only be started for checked-in or seated reservations.');
+    }
+
+    public function test_checked_in_reservation_can_start_service_without_manual_seat(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = $this->createOutlet('CheckedIn Start '.uniqid());
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
+
+        $tableId = (int) RestaurantTable::query()->create([
+            'outlet_id' => $outlet->id,
+            'name' => 'T-CI',
+            'status' => 'active',
+            'active' => true,
+        ])->id;
+
+        $reservationId = $this->createDraftReservationForOutlet((int) $outlet->id);
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/check-in')->assertOk();
+
+        $this->postJson('/api/v1/pos-sessions/open', [
+            'outletId' => $outlet->id,
+            'openingCash' => 100000,
+        ])->assertCreated();
+
+        $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
+
+        $this->assertDatabaseHas('reservations', [
+            'id' => $reservationId,
+            'status' => 'seated',
+        ]);
     }
 
     public function test_service_cannot_start_twice(): void
@@ -101,9 +133,19 @@ class ReservationPosIntegrationTest extends TestCase
 
     public function test_kitchen_lifecycle_for_linked_order_uses_existing_flow(): void
     {
-        [$reservationId] = $this->createSeatedReservationReadyForService();
+        [$reservationId, , $outletId] = $this->createSeatedReservationReadyForService();
+        $menuItem = $this->createMenuItem($outletId);
         $response = $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
         $linkedOrderId = (int) $response->json('linkedOrderId');
+
+        $this->patchJson('/api/v1/orders/'.$linkedOrderId, [
+            'items' => [
+                ['id' => (string) $menuItem->id, 'name' => $menuItem->name, 'qty' => 1, 'price' => 15000],
+            ],
+            'subtotal' => 15000,
+            'tax' => 1500,
+            'total' => 16500,
+        ])->assertOk();
 
         $this->assertDatabaseHas('kitchen_tickets', [
             'order_id' => $linkedOrderId,
@@ -118,13 +160,14 @@ class ReservationPosIntegrationTest extends TestCase
 
     public function test_payment_lifecycle_for_linked_order_uses_existing_flow(): void
     {
-        [$reservationId] = $this->createSeatedReservationReadyForService();
+        [$reservationId, , $outletId] = $this->createSeatedReservationReadyForService();
+        $menuItem = $this->createMenuItem($outletId, 'Water');
         $response = $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
         $linkedOrderId = (int) $response->json('linkedOrderId');
 
         $this->patchJson('/api/v1/orders/'.$linkedOrderId, [
             'items' => [
-                ['id' => '501', 'name' => 'Water', 'qty' => 1, 'price' => 15000],
+                ['id' => (string) $menuItem->id, 'name' => $menuItem->name, 'qty' => 1, 'price' => 15000],
             ],
             'subtotal' => 15000,
             'tax' => 1500,
@@ -147,12 +190,13 @@ class ReservationPosIntegrationTest extends TestCase
         [$reservationId, , $outletId] = $this->createSeatedReservationReadyForService();
         $this->seedBasicAccounts($outletId);
 
+        $menuItem = $this->createMenuItem($outletId, 'Tea');
         $response = $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
         $linkedOrderId = (int) $response->json('linkedOrderId');
 
         $this->patchJson('/api/v1/orders/'.$linkedOrderId, [
             'items' => [
-                ['id' => '601', 'name' => 'Tea', 'qty' => 1, 'price' => 20000],
+                ['id' => (string) $menuItem->id, 'name' => $menuItem->name, 'qty' => 1, 'price' => 20000],
             ],
             'subtotal' => 20000,
             'tax' => 2000,
@@ -190,7 +234,6 @@ class ReservationPosIntegrationTest extends TestCase
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/check-in')->assertOk();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/seat')->assertOk();
 
         $this->postJson('/api/v1/pos-sessions/open', [
             'outletId' => $outlet->id,
@@ -233,6 +276,18 @@ class ReservationPosIntegrationTest extends TestCase
             'manager' => '',
             'status' => 'active',
             'code' => 'out-'.uniqid(),
+        ]);
+    }
+
+    private function createMenuItem(int $outletId, string $name = 'POS Item'): MenuItem
+    {
+        return MenuItem::query()->create([
+            'tenant_id' => 1,
+            'outlet_id' => $outletId,
+            'name' => $name,
+            'category' => 'main',
+            'price' => 15000,
+            'available' => true,
         ]);
     }
 

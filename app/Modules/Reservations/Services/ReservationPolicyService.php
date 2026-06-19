@@ -75,9 +75,9 @@ class ReservationPolicyService
 
     public function assertStartServiceAllowed(string $status, ?int $linkedOrderId): void
     {
-        if ($status !== 'seated') {
+        if (! in_array($status, ['checked_in', 'seated'], true)) {
             throw \Illuminate\Validation\ValidationException::withMessages([
-                'status' => ['Service can only be started for seated reservations.'],
+                'status' => ['Service can only be started for checked-in or seated reservations.'],
             ]);
         }
 

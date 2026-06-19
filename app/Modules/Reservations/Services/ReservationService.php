@@ -2,11 +2,13 @@
 
 namespace App\Modules\Reservations\Services;
 
+use App\Models\Member;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Reservations\Domain\Reservation;
 use App\Models\Modules\Reservations\Domain\ReservationTableAllocation;
 use App\Models\User;
+use App\Modules\Members\Services\MemberService;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Services\OrderService;
 use App\Modules\Settings\Support\OutletAccessResolver;
@@ -22,6 +24,7 @@ class ReservationService
         private readonly ReservationPolicyService $policyService,
         private readonly OrderService $orderService,
         private readonly ReservationRealtimePublisher $realtimePublisher,
+        private readonly MemberService $memberService,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -30,19 +33,58 @@ class ReservationService
         $outletId = (int) $data['outletId'];
         $this->assertOutletAllowed($user, $outletId);
 
+        $member = $this->resolveOptionalMember($user, $outletId, isset($data['memberId']) ? (int) $data['memberId'] : null);
+        $customerName = (string) $data['customerName'];
+        $customerPhone = isset($data['customerPhone']) ? (string) $data['customerPhone'] : null;
+        if ($member !== null) {
+            $customerName = $member->displayName();
+            $customerPhone = $member->phone ?: $customerPhone;
+        }
+
         $reservation = Reservation::query()->create([
             'outlet_id' => $outletId,
             'table_id' => null,
             'reservation_code' => $this->generateReservationCode(),
-            'customer_name' => (string) $data['customerName'],
-            'customer_phone' => isset($data['customerPhone']) ? (string) $data['customerPhone'] : null,
+            'customer_name' => $customerName,
+            'customer_phone' => $customerPhone,
+            'member_id' => $member?->id,
             'party_size' => (int) $data['partySize'],
             'reservation_at' => (string) $data['reservationAt'],
             'status' => 'draft',
         ]);
-        $this->realtimePublisher->publishCreated($reservation->fresh(['tableAllocations']) ?? $reservation);
+        $fresh = $reservation->fresh(['tableAllocations', 'member']) ?? $reservation;
+        $this->realtimePublisher->publishCreated($fresh);
 
-        return $reservation;
+        return $fresh;
+    }
+
+    /** @param array<string, mixed> $data */
+    public function updateMemberLink(User $user, int $reservationId, array $data): Reservation
+    {
+        return DB::transaction(function () use ($user, $reservationId, $data): Reservation {
+            $reservation = $this->findScopedOrFail($user, $reservationId, true);
+            if (! in_array((string) $reservation->status, ['draft', 'confirmed', 'checked_in'], true)) {
+                throw ValidationException::withMessages([
+                    'status' => ['Member link cannot be changed for this reservation status.'],
+                ]);
+            }
+
+            $memberId = array_key_exists('memberId', $data) && $data['memberId'] !== null
+                ? (int) $data['memberId']
+                : null;
+            $member = $memberId !== null && $memberId > 0
+                ? $this->resolveOptionalMember($user, (int) $reservation->outlet_id, $memberId)
+                : null;
+
+            $reservation->member_id = $member?->id;
+            if ($member !== null) {
+                $reservation->customer_name = $member->displayName();
+                $reservation->customer_phone = $member->phone ?: $reservation->customer_phone;
+            }
+            $reservation->save();
+
+            return $reservation->fresh(['tableAllocations', 'member']) ?? $reservation;
+        });
     }
 
     /** @param array<string, mixed> $filters */
@@ -53,6 +95,7 @@ class ReservationService
 
         return Reservation::query()
             ->where('outlet_id', $outletId)
+            ->with(['member', 'tableAllocations'])
             ->when(isset($filters['status']), fn ($q) => $q->where('status', (string) $filters['status']))
             ->orderBy('reservation_at')
             ->orderBy('id')
@@ -61,7 +104,10 @@ class ReservationService
 
     public function show(User $user, int $reservationId): Reservation
     {
-        return $this->findScopedOrFail($user, $reservationId);
+        $reservation = $this->findScopedOrFail($user, $reservationId);
+        $reservation->load(['member', 'tableAllocations']);
+
+        return $reservation;
     }
 
     public function confirm(User $user, int $reservationId): Reservation
@@ -167,8 +213,9 @@ class ReservationService
     {
         return DB::transaction(function () use ($user, $reservationId): Reservation {
             $reservation = $this->findScopedOrFail($user, $reservationId, true);
+            $fromStatus = (string) $reservation->status;
             $this->policyService->assertStartServiceAllowed(
-                (string) $reservation->status,
+                $fromStatus,
                 $reservation->linked_order_id !== null ? (int) $reservation->linked_order_id : null,
             );
 
@@ -199,6 +246,17 @@ class ReservationService
             $tableId = (int) $allocation->table_id;
             $startedAt = now();
 
+            if ($fromStatus === 'checked_in') {
+                $reservation->status = 'seated';
+                $reservation->seated_at = $startedAt;
+                $reservation->save();
+                $this->realtimePublisher->publishStatusChanged(
+                    $reservation->fresh(['tableAllocations']) ?? $reservation,
+                    'checked_in',
+                    'seated',
+                );
+            }
+
             $order = $this->normalizeZeroTotalServiceShell($this->orderService->create(
                 new CreateOrderData(
                     tenantId: 1,
@@ -216,6 +274,7 @@ class ReservationService
                     discountAmount: 0,
                     customerName: (string) $reservation->customer_name,
                     customerPhone: $reservation->customer_phone,
+                    memberId: $reservation->member_id !== null ? (int) $reservation->member_id : null,
                     tableId: $tableId,
                     tableNumber: null,
                     createdAt: $startedAt->toISOString(),
@@ -232,11 +291,34 @@ class ReservationService
             $reservation->service_started_at = $startedAt;
             $reservation->save();
 
-            $fresh = $reservation->fresh(['linkedOrder', 'tableAllocations']) ?? $reservation;
+            $fresh = $reservation->fresh(['linkedOrder', 'tableAllocations', 'member']) ?? $reservation;
             $this->realtimePublisher->publishServiceStarted($fresh);
 
             return $fresh;
         });
+    }
+
+    private function resolveOptionalMember(User $user, int $outletId, ?int $memberId): ?Member
+    {
+        if ($memberId === null || $memberId < 1) {
+            return null;
+        }
+
+        $member = $this->memberService->findForOutlet($user, $memberId, $outletId);
+        if ($member === null) {
+            throw ValidationException::withMessages([
+                'memberId' => ['Member not found for this outlet.'],
+            ]);
+        }
+
+        $isActive = $member->is_active ?? (($member->status ?? 'active') === 'active');
+        if (! $isActive) {
+            throw ValidationException::withMessages([
+                'memberId' => ['Member is inactive.'],
+            ]);
+        }
+
+        return $member;
     }
 
     /**

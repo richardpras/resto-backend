@@ -36,6 +36,7 @@ class MemberService
         private readonly LoyaltyTierService $loyaltyTierService,
         private readonly TierBenefitService $tierBenefitService,
         private readonly LoyaltyNotificationService $loyaltyNotificationService,
+        private readonly MemberLoyaltyAccountLinker $memberLoyaltyAccountLinker,
     ) {}
 
     /**
@@ -43,7 +44,7 @@ class MemberService
      */
     public function listForOutlet(?User $user, ?int $outletId): Collection
     {
-        $query = Member::query()->orderBy('full_name')->orderBy('name');
+        $query = Member::query()->with(['loyaltyAccount', 'loyaltyBalance'])->orderBy('full_name')->orderBy('name');
 
         if ($outletId !== null && $outletId > 0) {
             $this->assertOutletAllowed($user, $outletId);
@@ -127,9 +128,10 @@ class MemberService
                     (int) $fresh->id,
                     LoyaltyAutomation::TRIGGER_MEMBER_CREATED,
                 );
+                $this->memberLoyaltyAccountLinker->ensureForMember($fresh);
             }
 
-            return $fresh ?? $member;
+            return $fresh?->fresh(['loyaltyAccount']) ?? $member;
         });
     }
 
@@ -211,7 +213,19 @@ class MemberService
             ->where('type', LoyaltyMemberLedger::TYPE_EXPIRED)
             ->sum('points'));
 
-        return [
+        $member->loadMissing('loyaltyAccount');
+        $loyaltyAccount = $member->loyaltyAccount;
+        if ($loyaltyAccount === null && $memberOutletId > 0) {
+            try {
+                $loyaltyAccount = $this->memberLoyaltyAccountLinker->ensureForMember($member->fresh());
+                $member->load('loyaltyAccount');
+                $loyaltyAccount = $member->loyaltyAccount;
+            } catch (\Throwable) {
+                $loyaltyAccount = null;
+            }
+        }
+
+        $result = [
             'member' => $member,
             'stats' => [
                 'totalVisits' => (int) ($aggregate->visit_count ?? 0),
@@ -249,7 +263,18 @@ class MemberService
                     LoyaltyNotification::CHANNEL_IN_APP,
                 )
                 : collect(),
+            'crmAccount' => $loyaltyAccount !== null ? [
+                'id' => (int) $loyaltyAccount->id,
+                'pointsBalance' => (int) $loyaltyAccount->points_balance,
+                'giftCardBalance' => 0,
+                'tierName' => $loyaltyAccount->currentTier?->name,
+                'tierCode' => $loyaltyAccount->currentTier?->code ?? null,
+                'code' => 'CRM-'.str_pad((string) $loyaltyAccount->id, 5, '0', STR_PAD_LEFT),
+            ] : null,
+            'crmPointsLedger' => $this->memberLoyaltyAccountLinker->crmPointsLedgerForAccount($loyaltyAccount),
         ];
+
+        return $result;
     }
 
     /**
@@ -316,7 +341,15 @@ class MemberService
         $member->fill($attributes);
         $member->save();
 
-        return $member->fresh();
+        $fresh = $member->fresh(['loyaltyAccount']);
+        if ($fresh !== null && $fresh->loyaltyAccount instanceof \App\Models\Modules\Loyalty\Domain\LoyaltyAccount) {
+            $this->memberLoyaltyAccountLinker->syncProfileToAccount($fresh, $fresh->loyaltyAccount);
+        } elseif ($fresh !== null && (int) ($fresh->outlet_id ?? 0) > 0) {
+            $this->memberLoyaltyAccountLinker->ensureForMember($fresh);
+            $fresh = $fresh->fresh(['loyaltyAccount']);
+        }
+
+        return $fresh ?? $member;
     }
 
     public function toggleActive(Member $member): Member

@@ -60,6 +60,45 @@ class LoyaltyProgramManagementTest extends TestCase
             ->assertJsonPath('data.0.id', (string) $programId);
     }
 
+    public function test_create_program_with_rule_config_upserts_rule(): void
+    {
+        $admin = $this->actingAsMembersManager();
+        $outletId = $this->createOutlet()->id;
+        $this->assignUserToOutlets($admin, [(int) $outletId]);
+
+        $create = $this->postJson('/api/v1/loyalty-programs', [
+            'outletId' => $outletId,
+            'code' => 'SPEND-MERGED',
+            'name' => 'Merged rule program',
+            'type' => 'spend_based',
+            'isActive' => true,
+            'ruleConfig' => [
+                'earnPerAmount' => 1000,
+                'pointsEarned' => 1,
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.ruleConfig.earnPerAmount', 1000)
+            ->assertJsonPath('data.ruleConfig.pointsEarned', 1)
+            ->assertJsonPath('data.ruleSummary', '1 pt / Rp 1.000');
+
+        $programId = (int) $create->json('data.id');
+
+        $this->assertDatabaseHas('loyalty_program_rules', [
+            'loyalty_program_id' => $programId,
+            'rule_type' => 'spend_based',
+        ]);
+
+        $this->patchJson("/api/v1/loyalty-programs/{$programId}", [
+            'ruleConfig' => [
+                'earnPerAmount' => 2000,
+                'pointsEarned' => 1,
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.ruleConfig.earnPerAmount', 2000);
+
+        $this->assertSame(1, LoyaltyProgramRule::query()->where('loyalty_program_id', $programId)->count());
+    }
+
     public function test_rule_crud_for_program(): void
     {
         $admin = $this->actingAsMembersManager();

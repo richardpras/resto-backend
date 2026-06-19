@@ -3,7 +3,9 @@
 namespace App\Modules\LoyaltyEngine\Services;
 
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyProgram;
+use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyProgramRule;
 use App\Models\User;
+use App\Modules\LoyaltyEngine\Support\LoyaltyRuleConfigValidator;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +16,7 @@ class LoyaltyProgramManagementService
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly LoyaltyProgramService $loyaltyProgramService,
+        private readonly LoyaltyRuleConfigValidator $ruleConfigValidator,
     ) {}
 
     /**
@@ -21,7 +24,10 @@ class LoyaltyProgramManagementService
      */
     public function list(?User $user, ?int $outletId = null, ?string $type = null, ?bool $isActive = null): Collection
     {
-        $query = LoyaltyProgram::query()->withCount('rules')->orderByDesc('id');
+        $query = LoyaltyProgram::query()
+            ->withCount('rules')
+            ->with('activeRule')
+            ->orderByDesc('id');
 
         if ($outletId !== null && $outletId > 0) {
             $this->assertOutletAllowed($user, $outletId);
@@ -50,7 +56,7 @@ class LoyaltyProgramManagementService
 
     public function findScoped(?User $user, int $programId): ?LoyaltyProgram
     {
-        $program = LoyaltyProgram::query()->with('rules')->whereKey($programId)->first();
+        $program = LoyaltyProgram::query()->with(['rules', 'activeRule'])->whereKey($programId)->first();
         if ($program === null) {
             return null;
         }
@@ -78,7 +84,7 @@ class LoyaltyProgramManagementService
         $expiry = $this->resolveExpiryAttributes($payload);
 
         return DB::transaction(function () use ($payload, $outletId, $type, $expiry): LoyaltyProgram {
-            return LoyaltyProgram::query()->create([
+            $program = LoyaltyProgram::query()->create([
                 'outlet_id' => $outletId > 0 ? $outletId : null,
                 'code' => (string) $payload['code'],
                 'name' => (string) $payload['name'],
@@ -90,6 +96,12 @@ class LoyaltyProgramManagementService
                 'effective_from' => $payload['effectiveFrom'] ?? null,
                 'effective_until' => $payload['effectiveUntil'] ?? null,
             ]);
+
+            if (array_key_exists('ruleConfig', $payload)) {
+                $this->upsertActiveRule($program, is_array($payload['ruleConfig']) ? $payload['ruleConfig'] : []);
+            }
+
+            return $program->fresh(['activeRule', 'rules']) ?? $program;
         });
     }
 
@@ -143,7 +155,47 @@ class LoyaltyProgramManagementService
             $program->save();
         }
 
-        return $program->fresh(['rules']) ?? $program;
+        if (array_key_exists('ruleConfig', $payload)) {
+            $this->upsertActiveRule($program, is_array($payload['ruleConfig']) ? $payload['ruleConfig'] : []);
+        }
+
+        return $program->fresh(['activeRule', 'rules']) ?? $program;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    public function upsertActiveRule(LoyaltyProgram $program, array $config): ?LoyaltyProgramRule
+    {
+        if ($program->type === LoyaltyProgram::TYPE_MANUAL) {
+            return null;
+        }
+
+        if ($config === []) {
+            return null;
+        }
+
+        $validated = $this->ruleConfigValidator->validate((string) $program->type, $config);
+
+        $existing = LoyaltyProgramRule::query()
+            ->where('loyalty_program_id', $program->id)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($existing instanceof LoyaltyProgramRule) {
+            $existing->update([
+                'rule_type' => (string) $program->type,
+                'config' => $validated,
+            ]);
+
+            return $existing->fresh();
+        }
+
+        return LoyaltyProgramRule::query()->create([
+            'loyalty_program_id' => $program->id,
+            'rule_type' => (string) $program->type,
+            'config' => $validated,
+        ]);
     }
 
     public function setActive(?User $user, LoyaltyProgram $program, bool $isActive): LoyaltyProgram

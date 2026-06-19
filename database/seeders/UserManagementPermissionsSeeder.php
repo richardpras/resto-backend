@@ -51,6 +51,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'forecasting.manage', 'name' => 'Manage menu forecast snapshots'],
             ['code' => 'inventory.manage', 'name' => 'Manage inventory'],
             ['code' => 'purchase.manage', 'name' => 'Manage purchases'],
+            ['code' => 'purchase.approve', 'name' => 'Approve purchase workflow documents'],
             ['code' => 'promotions.manage', 'name' => 'Manage promotions'],
             ['code' => 'payroll.manage', 'name' => 'Manage payroll (web)'],
             ['code' => 'payroll.view', 'name' => 'View payroll'],

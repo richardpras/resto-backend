@@ -122,6 +122,22 @@ trait OrderVoucherTestFixtures
         return (int) $response->json('data.id');
     }
 
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    protected function createWalkInOrder(Outlet $outlet, array $overrides = []): int
+    {
+        $response = $this->postJson('/api/v1/orders', $this->orderVoucherOrderPayload(array_merge([
+            'outletId' => $outlet->id,
+            'code' => 'OV-'.uniqid(),
+            'idempotencyKey' => 'voucher-test-'.uniqid(),
+        ], $overrides)));
+
+        $response->assertSuccessful();
+
+        return (int) $response->json('data.id');
+    }
+
     protected function freezeVoucherTime(Carbon $time): void
     {
         Carbon::setTestNow($time);

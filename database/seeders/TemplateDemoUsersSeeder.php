@@ -25,6 +25,7 @@ class TemplateDemoUsersSeeder extends Seeder
             'menu.manage',
             'inventory.manage',
             'purchase.manage',
+            'purchase.approve',
             'promotions.manage',
             'suppliers.manage',
             'members.manage',

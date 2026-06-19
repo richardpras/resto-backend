@@ -25,7 +25,7 @@ class MembersSuppliersApiTest extends TestCase
 
     public function test_members_crud_and_status_toggle(): void
     {
-        $this->actingAsUserManagementApiAdministrator();
+        $user = $this->actingAsUserManagementApiAdministrator();
 
         $this->getJson('/api/v1/members')->assertOk()->assertJsonStructure(['data']);
 
@@ -37,6 +37,7 @@ class MembersSuppliersApiTest extends TestCase
             'status' => 'active',
             'code' => 'mem-test-'.uniqid(),
         ]);
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
 
         $create = $this->postJson('/api/v1/members', [
             'outletId' => (int) $outlet->id,
@@ -47,6 +48,11 @@ class MembersSuppliersApiTest extends TestCase
         ])->assertCreated()->assertJsonPath('data.name', 'Test Member');
 
         $id = $create->json('data.id');
+        $this->assertNotNull($create->json('data.loyaltyAccountId'));
+        $this->assertDatabaseHas('members', [
+            'id' => $id,
+            'loyalty_account_id' => (int) $create->json('data.loyaltyAccountId'),
+        ]);
 
         $this->patchJson("/api/v1/members/{$id}", [
             'notes' => 'VIP guest',

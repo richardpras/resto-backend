@@ -173,6 +173,60 @@ class PosPaymentIdempotencyGuardTest extends TestCase
         );
     }
 
+    public function test_sequential_multi_payment_with_unique_keys_succeeds(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet('PosPayment Multi Pay');
+        $this->seedFullAccounts((int) $outlet->id);
+        [, , $menuId] = $this->seedRecipeContext((int) $outlet->id, 1.0, 1.0, 100, 100);
+        $orderId = $this->createConfirmedOrder((int) $outlet->id, (int) $user->id, 'POS-MULTI-PAY', $menuId, qty: 1, unitPrice: 90);
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 30]],
+            'idempotencyKey' => 'pos-pay-multi-1-'.uniqid(),
+        ])->assertOk();
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 30]],
+            'idempotencyKey' => 'pos-pay-multi-2-'.uniqid(),
+        ])->assertOk();
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 30]],
+            'idempotencyKey' => 'pos-pay-multi-3-'.uniqid(),
+        ])->assertOk();
+
+        $this->assertDatabaseCount('payments', 3);
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'payment_status' => 'paid',
+        ]);
+    }
+
+    public function test_payment_key_reused_with_different_payload_returns_422(): void
+    {
+        [$user, $outlet] = $this->actAsAdminWithOutlet('PosPayment Key Mismatch');
+        $this->seedFullAccounts((int) $outlet->id);
+        [, , $menuId] = $this->seedRecipeContext((int) $outlet->id, 1.0, 1.0, 100, 100);
+        $orderId = $this->createConfirmedOrder((int) $outlet->id, (int) $user->id, 'POS-KEY-MISMATCH', $menuId, qty: 1, unitPrice: 90);
+        $idem = 'pos-pay-mismatch-'.uniqid();
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [['method' => 'cash', 'amount' => 30]],
+            'idempotencyKey' => $idem,
+        ])->assertOk();
+
+        $this->postJson("/api/v1/orders/{$orderId}/payments", [
+            'payments' => [
+                ['method' => 'cash', 'amount' => 20],
+                ['method' => 'cash', 'amount' => 10],
+            ],
+            'idempotencyKey' => $idem,
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['idempotencyKey']);
+
+        $this->assertDatabaseCount('payments', 1);
+    }
+
     public function test_double_click_payment_replays_single_payment_request(): void
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet('PosPayment Double Click');

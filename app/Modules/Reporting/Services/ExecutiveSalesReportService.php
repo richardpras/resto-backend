@@ -4,6 +4,7 @@ namespace App\Modules\Reporting\Services;
 
 use App\Models\User;
 use App\Modules\Accounting\Services\AccountingService;
+use App\Modules\PromotionEngine\Services\PromotionUsageService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,7 @@ final class ExecutiveSalesReportService
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly AccountingService $accountingService,
+        private readonly PromotionUsageService $promotionUsageService,
     ) {}
 
     /**
@@ -26,6 +28,7 @@ final class ExecutiveSalesReportService
 
         $orderIds = $this->qualifyingOrderIds($scopedOutletIds, $start, $end);
         $voucherDiscountsByOrder = $this->voucherDiscountsByOrder($orderIds);
+        $promotionDiscountsByOrder = $this->promotionUsageService->promotionDiscountsByOrder($orderIds);
         $reservationOrderIds = $this->reservationLinkedOrderIds($orderIds);
 
         $orders = $orderIds === []
@@ -48,13 +51,15 @@ final class ExecutiveSalesReportService
         foreach ($orders as $order) {
             $gross = (float) $order->subtotal;
             $orderVoucher = (float) ($voucherDiscountsByOrder[(int) $order->id] ?? 0);
+            $orderPromotion = (float) ($promotionDiscountsByOrder[(int) $order->id] ?? 0);
             $totalDiscount = (float) ($order->discount_amount ?? 0);
-            $unattributed = max(0, round($totalDiscount - $orderVoucher, 2));
+            $manual = max(0, round($totalDiscount - $orderVoucher - $orderPromotion, 2));
 
             $grossSales += $gross;
             $voucherDiscount += $orderVoucher;
-            $manualDiscount += $unattributed;
-            $netSales += max(0, round($gross - $orderVoucher - $unattributed, 2));
+            $promotionDiscount += $orderPromotion;
+            $manualDiscount += $manual;
+            $netSales += max(0, round($gross - $orderVoucher - $orderPromotion - $manual, 2));
         }
 
         $giftCardRedemption = round($giftCardSettled['gift_card'] + $giftCardSettled['store_credit'], 2);
@@ -103,10 +108,10 @@ final class ExecutiveSalesReportService
         return [
             'summary' => $summary,
             'trends' => $this->dailyTrends($scopedOutletIds, $start, $end),
-            'channels' => $this->channelBreakdown($orders, $reservationOrderIds, $voucherDiscountsByOrder),
+            'channels' => $this->channelBreakdown($orders, $reservationOrderIds, $voucherDiscountsByOrder, $promotionDiscountsByOrder),
             'payments' => $this->paymentMix($scopedOutletIds, $start, $end, $orderIds, $giftCardSettled),
             'discounts' => $this->discountBreakdown($summary),
-            'topProducts' => $this->topProducts($orderIds, $voucherDiscountsByOrder, $orders),
+            'topProducts' => $this->topProducts($orderIds, $voucherDiscountsByOrder, $promotionDiscountsByOrder, $orders),
             'filters' => [
                 'outletIds' => $scopedOutletIds,
                 'startDate' => $start->toDateString(),
@@ -342,12 +347,28 @@ final class ExecutiveSalesReportService
     }
 
     /**
+     * @param  array<int,float>  $voucherDiscountsByOrder
+     * @param  array<int,float>  $promotionDiscountsByOrder
+     */
+    private function netSalesForOrder(object $order, array $voucherDiscountsByOrder, array $promotionDiscountsByOrder): float
+    {
+        $subtotal = (float) $order->subtotal;
+        $voucher = (float) ($voucherDiscountsByOrder[(int) $order->id] ?? 0);
+        $promotion = (float) ($promotionDiscountsByOrder[(int) $order->id] ?? 0);
+        $columnDiscount = (float) ($order->discount_amount ?? 0);
+        $manual = max(0, round($columnDiscount - $voucher - $promotion, 2));
+
+        return max(0, round($subtotal - $voucher - $promotion - $manual, 2));
+    }
+
+    /**
      * @param  \Illuminate\Support\Collection<int,object>  $orders
      * @param  list<int>  $reservationOrderIds
      * @param  array<int,float>  $voucherDiscountsByOrder
+     * @param  array<int,float>  $promotionDiscountsByOrder
      * @return list<array{channel:string,sales:float,orders:int,averageOrderValue:float}>
      */
-    private function channelBreakdown($orders, array $reservationOrderIds, array $voucherDiscountsByOrder): array
+    private function channelBreakdown($orders, array $reservationOrderIds, array $voucherDiscountsByOrder, array $promotionDiscountsByOrder): array
     {
         $buckets = [
             'pos' => ['sales' => 0.0, 'orders' => 0],
@@ -359,8 +380,7 @@ final class ExecutiveSalesReportService
 
         foreach ($orders as $order) {
             $channel = $this->resolveChannel($order, $reservationOrderIds);
-            $voucher = (float) ($voucherDiscountsByOrder[(int) $order->id] ?? 0);
-            $net = max(0, round((float) $order->subtotal - (float) ($order->discount_amount ?? 0), 2));
+            $net = $this->netSalesForOrder($order, $voucherDiscountsByOrder, $promotionDiscountsByOrder);
             $buckets[$channel]['sales'] += $net;
             $buckets[$channel]['orders']++;
         }
@@ -508,10 +528,11 @@ final class ExecutiveSalesReportService
     /**
      * @param  list<int>  $orderIds
      * @param  array<int,float>  $voucherDiscountsByOrder
+     * @param  array<int,float>  $promotionDiscountsByOrder
      * @param  \Illuminate\Support\Collection<int,object>  $orders
      * @return list<array{productId:string,productName:string,quantity:int,grossSales:float,netSales:float}>
      */
-    private function topProducts(array $orderIds, array $voucherDiscountsByOrder, $orders): array
+    private function topProducts(array $orderIds, array $voucherDiscountsByOrder, array $promotionDiscountsByOrder, $orders): array
     {
         if ($orderIds === []) {
             return [];
@@ -520,8 +541,12 @@ final class ExecutiveSalesReportService
         $discountRatioByOrder = [];
         foreach ($orders as $order) {
             $subtotal = (float) $order->subtotal;
-            $discount = (float) ($order->discount_amount ?? 0);
-            $discountRatioByOrder[(int) $order->id] = $subtotal > 0 ? min(1, $discount / $subtotal) : 0.0;
+            $voucher = (float) ($voucherDiscountsByOrder[(int) $order->id] ?? 0);
+            $promotion = (float) ($promotionDiscountsByOrder[(int) $order->id] ?? 0);
+            $columnDiscount = (float) ($order->discount_amount ?? 0);
+            $manual = max(0, round($columnDiscount - $voucher - $promotion, 2));
+            $totalDiscount = $voucher + $promotion + $manual;
+            $discountRatioByOrder[(int) $order->id] = $subtotal > 0 ? min(1, $totalDiscount / $subtotal) : 0.0;
         }
 
         $rows = DB::table('order_items as oi')

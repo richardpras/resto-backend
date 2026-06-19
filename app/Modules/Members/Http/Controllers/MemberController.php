@@ -15,6 +15,7 @@ use App\Modules\Members\Http\Requests\StoreMemberRequest;
 use App\Modules\Members\Http\Requests\UpdateMemberRequest;
 use App\Modules\Members\Http\Resources\MemberProfileResource;
 use App\Modules\Members\Http\Resources\MemberResource;
+use App\Modules\Members\Services\MemberLoyaltyAccountLinker;
 use App\Modules\Members\Services\MemberService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +27,7 @@ class MemberController extends Controller
         private readonly MemberService $memberService,
         private readonly LoyaltyRedeemService $loyaltyRedeemService,
         private readonly LoyaltyRewardRedemptionService $loyaltyRewardRedemptionService,
+        private readonly MemberLoyaltyAccountLinker $memberLoyaltyAccountLinker,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -127,6 +129,34 @@ class MemberController extends Controller
                 'memberId' => (string) $result['memberId'],
                 'redeemedPoints' => $result['redeemedPoints'],
                 'currentBalance' => $result['currentBalance'],
+            ],
+        ]);
+    }
+
+    public function byLoyaltyAccount(Request $request, int $loyaltyAccountId): JsonResponse
+    {
+        $member = $this->memberLoyaltyAccountLinker->findMemberByLoyaltyAccountId($loyaltyAccountId);
+        if ($member === null) {
+            return response()->json([
+                'message' => 'Member not found for loyalty account.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        $outletId = $request->query('outletId') !== null ? (int) $request->query('outletId') : null;
+        $scoped = $this->memberService->findForOutlet(
+            $this->resolveAuthenticatedUser($request),
+            (int) $member->id,
+            $outletId,
+        );
+        if ($scoped === null) {
+            return response()->json([
+                'message' => 'Member not found for loyalty account.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->json([
+            'data' => [
+                'memberId' => (string) $member->id,
             ],
         ]);
     }

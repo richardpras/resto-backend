@@ -6,12 +6,17 @@ use App\Models\Member;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyAutomation;
 use App\Models\Modules\LoyaltyEngine\Domain\LoyaltyMemberLedger;
 use App\Models\Modules\LoyaltyEngine\Domain\MemberLoyaltyBalance;
+use App\Models\User;
+use App\Modules\Members\Services\MemberPointsMirrorService;
 use Illuminate\Support\Facades\DB;
 
 class LoyaltyBalanceProjectionService
 {
-    public function applyLedgerEntry(LoyaltyMemberLedger $entry): MemberLoyaltyBalance
-    {
+    public function applyLedgerEntry(
+        LoyaltyMemberLedger $entry,
+        bool $skipMirror = false,
+        ?User $user = null,
+    ): MemberLoyaltyBalance {
         $balance = DB::transaction(function () use ($entry): MemberLoyaltyBalance {
             $balance = MemberLoyaltyBalance::query()
                 ->where('member_id', $entry->member_id)
@@ -44,6 +49,10 @@ class LoyaltyBalanceProjectionService
                     'currentBalance' => (int) $balance->current_points,
                 ],
             );
+        }
+
+        if (! $skipMirror && $entry->reference_type !== 'crm_mirror') {
+            app(MemberPointsMirrorService::class)->mirrorEngineEntryToCrm($entry, $user);
         }
 
         return $balance;
