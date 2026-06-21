@@ -5,13 +5,17 @@ namespace Tests\Feature;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Print\Domain\ReceiptRenderHistory;
+use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\OutletReceiptSetting;
 use App\Models\Modules\Settings\Domain\SettingPrinter;
 use App\Modules\Print\Services\ReceiptDocumentService;
 use App\Modules\Print\Services\SettingPrinterSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -25,6 +29,7 @@ class OutletReceiptThermalLayoutTest extends TestCase
         parent::setUp();
         config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
         Artisan::call('passport:keys', ['--force' => true]);
+        Storage::fake('public');
     }
 
     public function test_customer_receipt_thermal_uses_outlet_receipt_settings(): void
@@ -117,6 +122,46 @@ class OutletReceiptThermalLayoutTest extends TestCase
         $second = $service->resolveReceiptBrandingFingerprint((int) $outlet->id);
 
         $this->assertNotSame($first, $second);
+    }
+
+    public function test_queue_print_includes_thermal_document_with_logo_raster(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD extension is required for outlet logo processing.');
+        }
+
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = $this->createOutlet('Logo Thermal Outlet');
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
+        $this->seedReceiptSettings($outlet, showTaxBreakdown: false);
+        $this->seedCashierPrinter($outlet, '58mm');
+
+        $this->postJson('/api/v1/outlets/'.$outlet->id.'/logo', [
+            'image' => UploadedFile::fake()->image('logo.png', 220, 220),
+        ])->assertOk();
+
+        $order = $this->createPaidOrder($outlet);
+
+        Queue::fake();
+
+        $response = $this->postJson('/api/v1/print/documents/render', [
+            'outletId' => (int) $outlet->id,
+            'kind' => 'customer_receipt',
+            'sourceType' => 'order',
+            'sourceId' => (int) $order->id,
+            'issueFiscal' => false,
+            'queuePrint' => true,
+            'generatePdf' => false,
+            'forceRegenerate' => true,
+        ]);
+        $response->assertOk();
+
+        $job = PrintJob::query()->latest('id')->first();
+        $this->assertNotNull($job);
+        $snapshot = is_array($job?->printable_snapshot) ? $job->printable_snapshot : [];
+        $this->assertIsArray($snapshot['thermalDocument'] ?? null);
+        $this->assertIsArray($snapshot['thermalDocument']['images'] ?? null);
+        $this->assertNotEmpty($snapshot['thermalDocument']['images']);
     }
 
     private function createOutlet(string $name): Outlet

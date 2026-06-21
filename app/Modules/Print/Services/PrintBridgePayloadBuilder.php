@@ -100,6 +100,13 @@ class PrintBridgePayloadBuilder
         /** @var array<string,mixed> $snapshot */
         $snapshot = is_array($job->printable_snapshot) ? $job->printable_snapshot : [];
 
+        if (is_array($snapshot['thermalDocument'] ?? null) && is_array($snapshot['thermalDocument']['lines'] ?? null)) {
+            /** @var array<string,mixed> $document */
+            $document = $snapshot['thermalDocument'];
+
+            return array_merge(['cut' => true], $document);
+        }
+
         if (is_string($snapshot['thermalText'] ?? null) && trim((string) $snapshot['thermalText']) !== '') {
             return [
                 'lines' => $this->textToLines((string) $snapshot['thermalText']),

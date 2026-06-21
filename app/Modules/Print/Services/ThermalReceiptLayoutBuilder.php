@@ -6,7 +6,7 @@ use Illuminate\Support\Carbon;
 
 class ThermalReceiptLayoutBuilder
 {
-    public const LAYOUT_VERSION = 'v2';
+    public const LAYOUT_VERSION = 'v3';
 
     /**
      * @param  array<string,mixed>  $snapshot
@@ -115,6 +115,33 @@ class ThermalReceiptLayoutBuilder
         }
 
         return array_slice(array_merge($lines, $this->trailingFeedLines()), 0, 256);
+    }
+
+    /**
+     * @param  array<string,mixed>  $snapshot
+     * @param  ?array{width:int,height:int,widthBytes:int,rasterBase64:string}  $thermalRaster
+     * @return array{lines:list<array{text:string,bold?:bool,align?:string}>,images?:list<array{align:string,rasterBase64:string,width:int,height:int,widthBytes:int}>,cut:bool}
+     */
+    public function buildCustomerReceiptDocument(array $snapshot, int $width, ?array $thermalRaster = null): array
+    {
+        $document = [
+            'lines' => $this->buildCustomerReceipt($snapshot, $width),
+            'cut' => true,
+        ];
+
+        /** @var array<string,mixed> $branding */
+        $branding = is_array($snapshot['receipt_branding'] ?? null) ? $snapshot['receipt_branding'] : [];
+        if (($branding['showLogo'] ?? false) && $thermalRaster !== null) {
+            $document['images'] = [[
+                'align' => 'center',
+                'rasterBase64' => (string) $thermalRaster['rasterBase64'],
+                'width' => (int) $thermalRaster['width'],
+                'height' => (int) $thermalRaster['height'],
+                'widthBytes' => (int) $thermalRaster['widthBytes'],
+            ]];
+        }
+
+        return $document;
     }
 
     /**

@@ -131,6 +131,7 @@ use App\Modules\Settings\Http\Controllers\NumberingSettingsController;
 use App\Modules\Settings\Http\Controllers\OutletPaymentMethodConfigController;
 use App\Modules\Settings\Http\Controllers\OutletReceiptSettingsController;
 use App\Modules\Settings\Http\Controllers\OutletSettingsCrudController;
+use App\Modules\Settings\Http\Controllers\OutletLogoController;
 use App\Modules\Settings\Http\Controllers\PaymentMethodSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\PrinterSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\SystemSettingsController;
@@ -181,6 +182,7 @@ Route::prefix('v1')->group(function (): void {
     Route::get('public/qr-guest-sessions/{guestSessionToken}/orders', [QrGuestSessionPublicController::class, 'orders']);
     Route::get('public/qr/tables/{qrPublicId}/menu', [PublicQrMenuController::class, 'show']);
     Route::get('public/menu-images/{menuItem}', [MenuItemImageController::class, 'serve'])->whereNumber('menuItem');
+    Route::get('public/outlet-logos/{outlet}', [OutletLogoController::class, 'serve'])->whereNumber('outlet');
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
     Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
 
@@ -885,6 +887,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('outlets', [OutletSettingsCrudController::class, 'store'])->middleware('permission:settings.update');
         Route::patch('outlets/{outletId}', [OutletSettingsCrudController::class, 'update'])->middleware('permission:settings.update');
         Route::delete('outlets/{outletId}', [OutletSettingsCrudController::class, 'destroy'])->middleware('permission:settings.update');
+        Route::post('outlets/{outletId}/logo', [OutletLogoController::class, 'upload'])->middleware('permission:settings.update');
+        Route::delete('outlets/{outletId}/logo', [OutletLogoController::class, 'destroy'])->middleware('permission:settings.update');
 
         Route::get('taxes', [TaxSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
         Route::post('taxes', [TaxSettingsCrudController::class, 'store'])->middleware('permission:settings.update');

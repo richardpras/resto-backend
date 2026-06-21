@@ -113,4 +113,31 @@ class ThermalReceiptLayoutBuilderTest extends TestCase
         $this->assertCount(3, $feed);
         $this->assertSame(' ', $feed[0]['text']);
     }
+
+    public function test_build_customer_receipt_document_prepends_logo_raster_when_enabled(): void
+    {
+        $document = $this->builder->buildCustomerReceiptDocument([
+            'order_code' => 'ORD-LOGO',
+            'subtotal' => 10000.0,
+            'total' => 10000.0,
+            'lines' => [],
+            'receipt_branding' => [
+                'outletName' => 'Logo Cafe',
+                'header' => '',
+                'footer' => '',
+                'showTaxBreakdown' => false,
+                'showLogo' => true,
+            ],
+        ], 32, [
+            'width' => 16,
+            'height' => 16,
+            'widthBytes' => 2,
+            'rasterBase64' => base64_encode('abcd'),
+        ]);
+
+        $this->assertArrayHasKey('images', $document);
+        $this->assertCount(1, $document['images']);
+        $this->assertSame('center', $document['images'][0]['align']);
+        $this->assertSame('abcd', base64_decode((string) $document['images'][0]['rasterBase64']));
+    }
 }

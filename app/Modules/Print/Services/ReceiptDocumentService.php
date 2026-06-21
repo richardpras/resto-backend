@@ -7,12 +7,14 @@ use App\Models\Modules\Orders\Domain\OrderSplit;
 use App\Models\Modules\Orders\Domain\OrderSplitItem;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
+use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Print\Domain\ReceiptRenderHistory;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\User;
 use App\Modules\Print\Support\ReceiptDocumentKind;
+use App\Modules\Settings\Services\OutletLogoService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -33,6 +35,7 @@ class ReceiptDocumentService
         private readonly CashierPrinterResolver $cashierPrinterResolver,
         private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
         private readonly ThermalReceiptLayoutBuilder $thermalReceiptLayout,
+        private readonly OutletLogoService $outletLogoService,
     ) {}
 
     /**
@@ -178,6 +181,7 @@ class ReceiptDocumentService
         $printType = $kind === ReceiptDocumentKind::KitchenChit ? 'kitchen' : 'receipt';
         $outletId = (int) $history->outlet_id;
         $resolvedProfileId = null;
+        $profile = null;
         if ($printType === 'receipt') {
             $profile = $this->cashierPrinterResolver->resolveForOutlet($outletId);
             if ($profile !== null) {
@@ -209,6 +213,17 @@ class ReceiptDocumentService
             'deferredReplay' => (bool) $history->deferred_replay_pending,
             'recovery' => ['marker' => 'phase14-queue-v1'],
         ];
+
+        if ($printType === 'receipt') {
+            $thermalDocument = $this->buildQueuedThermalDocument(
+                $outletId,
+                (array) $history->context_snapshot,
+                $profile,
+            );
+            if ($thermalDocument !== null) {
+                $snapshot['thermalDocument'] = $thermalDocument;
+            }
+        }
 
         $job = $this->routing->enqueuePrintJob(
             $outletId,
@@ -342,7 +357,7 @@ class ReceiptDocumentService
     }
 
     /**
-     * @return array{outletName:string,header:string,footer:string,showTaxBreakdown:bool}
+     * @return array{outletName:string,header:string,footer:string,showTaxBreakdown:bool,showLogo:bool,logoVersion:int,logoUrl:?string}
      */
     public function resolveReceiptBranding(int $outletId): array
     {
@@ -350,12 +365,17 @@ class ReceiptDocumentService
         $outlet = Outlet::query()->with('receiptSetting')->find($outletId);
         $setting = $outlet?->receiptSetting;
 
-        return [
+        $branding = [
             'outletName' => (string) ($outlet?->name ?? ''),
             'header' => (string) ($setting?->receipt_header ?? ''),
             'footer' => (string) ($setting?->receipt_footer ?? ''),
             'showTaxBreakdown' => (bool) ($setting?->show_tax_breakdown ?? false),
+            'showLogo' => (bool) ($setting?->show_logo ?? false),
+            'logoVersion' => (int) ($outlet?->logo_version ?? 0),
+            'logoUrl' => $this->outletLogoService->publicUrl($outlet),
         ];
+
+        return $branding;
     }
 
     public function resolveReceiptBrandingFingerprint(int $outletId): string
@@ -406,6 +426,34 @@ class ReceiptDocumentService
             'external_reference' => (string) $tx->external_reference,
             'order_code' => $tx->order?->code,
         ];
+    }
+
+    /**
+     * @param  array<string,mixed>  $context
+     * @return ?array{lines:list<array{text:string,bold?:bool,align?:string}>,images?:list<array{align:string,rasterBase64:string,width:int,height:int,widthBytes:int}>,cut:bool}
+     */
+    private function buildQueuedThermalDocument(int $outletId, array $context, ?PrinterProfile $profile): ?array
+    {
+        if (! is_array($context['receipt_branding'] ?? null)) {
+            return null;
+        }
+
+        $width = $profile !== null
+            ? $this->thermalPaperWidthResolver->resolveWidthChars($profile)
+            : 32;
+
+        $thermalRaster = null;
+        /** @var array<string,mixed> $branding */
+        $branding = $context['receipt_branding'];
+        if (($branding['showLogo'] ?? false)) {
+            $outlet = Outlet::query()->find($outletId);
+            if ($outlet !== null) {
+                $paperKey = OutletLogoService::paperKeyForWidthChars($width);
+                $thermalRaster = $this->outletLogoService->loadThermalRaster($outlet, $paperKey);
+            }
+        }
+
+        return $this->thermalReceiptLayout->buildCustomerReceiptDocument($context, $width, $thermalRaster);
     }
 
     /**

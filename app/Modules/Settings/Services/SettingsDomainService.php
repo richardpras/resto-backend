@@ -27,6 +27,7 @@ class SettingsDomainService
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly SettingPrinterSyncService $settingPrinterSync,
+        private readonly OutletLogoService $outletLogoService,
     ) {}
 
     /** @return array<string, mixed> */
@@ -640,6 +641,12 @@ class SettingsDomainService
     }
 
     /** @return array<string, mixed> */
+    public function outletToPublicArray(Outlet $o): array
+    {
+        return $this->outletToCamel($o);
+    }
+
+    /** @return array<string, mixed> */
     private function outletToCamel(Outlet $o): array
     {
         $base = [
@@ -652,9 +659,13 @@ class SettingsDomainService
             'status' => $o->status ?? 'active',
             'invoicePrefix' => $o->invoice_prefix,
             'orderPrefix' => $o->order_prefix,
+            'hasLogo' => $this->outletLogoService->hasLogo($o),
+            'logoVersion' => (int) ($o->logo_version ?? 0),
         ];
-        if ($o->logo !== null && $o->logo !== '') {
-            $base['logo'] = $o->logo;
+
+        $logoUrl = $this->outletLogoService->publicUrl($o);
+        if ($logoUrl !== null) {
+            $base['logoUrl'] = $logoUrl;
         }
 
         return $base;

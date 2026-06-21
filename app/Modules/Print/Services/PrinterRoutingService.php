@@ -9,6 +9,7 @@ use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Settings\Domain\Outlet;
+use App\Modules\Settings\Services\OutletLogoService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,7 @@ class PrinterRoutingService
         private readonly CashierPrinterResolver $cashierPrinterResolver,
         private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
         private readonly ThermalReceiptLayoutBuilder $thermalReceiptLayout,
+        private readonly OutletLogoService $outletLogoService,
     ) {}
 
     public function queueKitchenTicketsForOrder(Order $order): void
@@ -133,6 +135,10 @@ class PrinterRoutingService
         $order->loadMissing(['items', 'payments']);
 
         ['route' => $route, 'resolvedProfileId' => $resolvedProfileId] = $this->resolveReceiptRouting($outletId);
+        $profile = $this->cashierPrinterResolver->resolveForOutlet($outletId);
+        $width = $profile !== null
+            ? $this->thermalPaperWidthResolver->resolveWidthChars($profile)
+            : 32;
 
         $lines = $order->items->map(fn ($row): array => [
             'name' => (string) $row->name,
@@ -143,29 +149,46 @@ class PrinterRoutingService
         $branding = $this->resolveReceiptBranding($outletId);
         $paidAt = $order->payments->pluck('paid_at')->filter()->max();
 
+        $printableSnapshot = [
+            'order_id' => (int) $order->id,
+            'order_code' => (string) $order->code,
+            'order_type' => (string) ($order->order_type ?? ''),
+            'service_mode' => (string) ($order->service_mode ?? ''),
+            'table_name' => $order->table_name,
+            'customer' => $order->customer_name,
+            'customer_display' => $this->thermalReceiptLayout->formatCustomerDisplay($order->customer_name),
+            'paid_at' => $paidAt instanceof \Illuminate\Support\Carbon ? $paidAt->toIso8601String() : null,
+            'amount' => (float) $order->paid_total,
+            'subtotal' => (float) $order->subtotal,
+            'tax' => (float) $order->tax,
+            'total' => (float) $order->total,
+            'lines' => $lines,
+            'receipt_branding' => $branding,
+            'reason' => $reason,
+        ];
+
+        $thermalRaster = null;
+        if ($branding['showLogo'] ?? false) {
+            $outlet = Outlet::query()->find($outletId);
+            if ($outlet !== null) {
+                $paperKey = OutletLogoService::paperKeyForWidthChars($width);
+                $thermalRaster = $this->outletLogoService->loadThermalRaster($outlet, $paperKey);
+            }
+        }
+
+        $printableSnapshot['thermalDocument'] = $this->thermalReceiptLayout->buildCustomerReceiptDocument(
+            $printableSnapshot,
+            $width,
+            $thermalRaster,
+        );
+
         $this->enqueuePrintJob(
             outletId: $outletId,
             sourceType: 'order',
             sourceId: (int) $order->id,
             type: 'receipt',
             route: $route,
-            printableSnapshot: [
-                'order_id' => (int) $order->id,
-                'order_code' => (string) $order->code,
-                'order_type' => (string) ($order->order_type ?? ''),
-                'service_mode' => (string) ($order->service_mode ?? ''),
-                'table_name' => $order->table_name,
-                'customer' => $order->customer_name,
-                'customer_display' => $this->thermalReceiptLayout->formatCustomerDisplay($order->customer_name),
-                'paid_at' => $paidAt instanceof \Illuminate\Support\Carbon ? $paidAt->toIso8601String() : null,
-                'amount' => (float) $order->paid_total,
-                'subtotal' => (float) $order->subtotal,
-                'tax' => (float) $order->tax,
-                'total' => (float) $order->total,
-                'lines' => $lines,
-                'receipt_branding' => $branding,
-                'reason' => $reason,
-            ],
+            printableSnapshot: $printableSnapshot,
             idempotencyKey: $reason.'-'.(int) $order->id,
             resolvedProfileId: $resolvedProfileId,
         );
@@ -407,7 +430,7 @@ class PrinterRoutingService
     }
 
     /**
-     * @return array{outletName:string,header:string,footer:string,showTaxBreakdown:bool}
+     * @return array{outletName:string,header:string,footer:string,showTaxBreakdown:bool,showLogo:bool,logoVersion:int,logoUrl:?string}
      */
     private function resolveReceiptBranding(int $outletId): array
     {
@@ -420,6 +443,9 @@ class PrinterRoutingService
             'header' => (string) ($setting?->receipt_header ?? ''),
             'footer' => (string) ($setting?->receipt_footer ?? ''),
             'showTaxBreakdown' => (bool) ($setting?->show_tax_breakdown ?? false),
+            'showLogo' => (bool) ($setting?->show_logo ?? false),
+            'logoVersion' => (int) ($outlet?->logo_version ?? 0),
+            'logoUrl' => $this->outletLogoService->publicUrl($outlet),
         ];
     }
 }

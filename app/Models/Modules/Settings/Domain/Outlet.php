@@ -16,6 +16,10 @@ class Outlet extends Model
         'manager',
         'status',
         'logo',
+        'logo_path',
+        'logo_path_fallback',
+        'logo_thermal_path',
+        'logo_version',
         'invoice_prefix',
         'order_prefix',
     ];
