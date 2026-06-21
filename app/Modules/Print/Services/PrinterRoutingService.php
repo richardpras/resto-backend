@@ -19,6 +19,7 @@ class PrinterRoutingService
         private readonly PrintQueueStateService $stateService,
         private readonly PrinterStationResolver $stationResolver,
         private readonly PrintDispatchService $dispatchService,
+        private readonly CashierPrinterResolver $cashierPrinterResolver,
     ) {}
 
     public function queueKitchenTicketsForOrder(Order $order): void
@@ -125,12 +126,7 @@ class PrinterRoutingService
             return;
         }
 
-        $route = PrinterRoute::query()
-            ->where('outlet_id', $outletId)
-            ->where('print_type', 'receipt')
-            ->where('is_active', true)
-            ->orderBy('priority')
-            ->first();
+        ['route' => $route, 'resolvedProfileId' => $resolvedProfileId] = $this->resolveReceiptRouting($outletId);
 
         $this->enqueuePrintJob(
             outletId: $outletId,
@@ -144,8 +140,55 @@ class PrinterRoutingService
                 'amount' => (float) $order->paid_total,
                 'reason' => $reason,
             ],
-            idempotencyKey: $reason.'-'.(int) $order->id
+            idempotencyKey: $reason.'-'.(int) $order->id,
+            resolvedProfileId: $resolvedProfileId,
         );
+    }
+
+    public function ensureKitchenPrintJobsForOrder(Order $order): void
+    {
+        $status = (string) $order->status;
+        if (! in_array($status, ['confirmed', 'completed'], true)) {
+            return;
+        }
+
+        $outletId = (int) ($order->outlet_id ?? 0);
+        if ($outletId < 1) {
+            return;
+        }
+
+        $hasKitchenJobs = PrintJob::query()
+            ->where('outlet_id', $outletId)
+            ->where('source_type', 'order')
+            ->where('source_id', (int) $order->id)
+            ->where('type', 'kitchen')
+            ->exists();
+
+        if ($hasKitchenJobs) {
+            return;
+        }
+
+        $order->loadMissing('items');
+        $this->queueKitchenTicketsForOrder($order);
+    }
+
+    /**
+     * @return array{route: ?PrinterRoute, resolvedProfileId: ?int}
+     */
+    private function resolveReceiptRouting(int $outletId): array
+    {
+        $profile = $this->cashierPrinterResolver->resolveForOutlet($outletId);
+        if ($profile !== null) {
+            return [
+                'route' => $this->cashierPrinterResolver->resolveRouteForProfile($outletId, $profile),
+                'resolvedProfileId' => (int) $profile->id,
+            ];
+        }
+
+        return [
+            'route' => $this->cashierPrinterResolver->resolveLegacyReceiptRoute($outletId),
+            'resolvedProfileId' => null,
+        ];
     }
 
     /**

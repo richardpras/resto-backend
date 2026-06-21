@@ -986,6 +986,8 @@ class OrderService
         }
 
         $this->postOrderPaymentJournal($paidOrder);
+        $paidOrder->loadMissing('items');
+        $this->printerRoutingService->ensureKitchenPrintJobsForOrder($paidOrder);
         $this->orderPrintOrchestration->onOrderPaid($user, $paidOrder);
         $this->memberTransactionRecorder->recordForPaidOrder($paidOrder);
     }

@@ -6,8 +6,10 @@ use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Settings\Domain\Outlet;
+use App\Models\Modules\Settings\Domain\SettingPrinter;
 use App\Jobs\Print\ProcessPrintJob;
 use App\Modules\Print\Services\PrinterRoutingService;
+use App\Modules\Print\Services\SettingPrinterSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Tests\Concerns\PrinterStationTestFixture;
@@ -46,6 +48,22 @@ class PrintReceiptRegressionTest extends TestCase
             'is_active' => true,
         ]);
 
+        SettingPrinter::query()->create([
+            'id' => 'regression-cashier',
+            'name' => 'Regression Cashier',
+            'printer_type' => 'cashier',
+            'connection' => 'lan',
+            'ip' => '10.0.0.99',
+            'outlet_id' => $outlet->id,
+            'assigned_categories' => null,
+            'printer_profile_id' => null,
+        ]);
+        $regressionSetting = SettingPrinter::query()->findOrFail('regression-cashier');
+        $regressionSetting->created_at = now()->subDay();
+        $regressionSetting->updated_at = now()->subDay();
+        $regressionSetting->saveQuietly();
+        $settingsProfile = app(SettingPrinterSyncService::class)->syncFromSettingPrinter($regressionSetting->fresh());
+
         $kitchenProfile = $this->createKitchenProfile($outlet, 'kitchen-receipt', 'kitchen');
         $foodCategory = $this->ensureMenuCategory('Food');
         $this->createCategoryMapping($outlet, $foodCategory, $kitchenProfile);
@@ -65,6 +83,7 @@ class PrintReceiptRegressionTest extends TestCase
         $receiptJob = PrintJob::query()->where('type', 'receipt')->firstOrFail();
         $this->assertSame('receipt', $receiptJob->type);
         $this->assertSame((int) $order->id, (int) $receiptJob->source_id);
+        $this->assertSame((int) $settingsProfile->id, (int) $receiptJob->printer_profile_id);
     }
 
     private function createOutlet(): Outlet

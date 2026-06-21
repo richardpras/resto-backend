@@ -29,6 +29,7 @@ class ReceiptDocumentService
         private readonly PrinterRoutingService $routing,
         private readonly PrintReprintAuditRecorder $audit,
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly CashierPrinterResolver $cashierPrinterResolver,
     ) {}
 
     /**
@@ -164,12 +165,24 @@ class ReceiptDocumentService
         $history->loadMissing('fiscalInvoice');
         $kind = ReceiptDocumentKind::from($history->kind);
         $printType = $kind === ReceiptDocumentKind::KitchenChit ? 'kitchen' : 'receipt';
-        $route = PrinterRoute::query()
-            ->where('outlet_id', (int) $history->outlet_id)
-            ->where('print_type', $printType)
-            ->where('is_active', true)
-            ->orderBy('priority')
-            ->first();
+        $outletId = (int) $history->outlet_id;
+        $resolvedProfileId = null;
+        if ($printType === 'receipt') {
+            $profile = $this->cashierPrinterResolver->resolveForOutlet($outletId);
+            if ($profile !== null) {
+                $resolvedProfileId = (int) $profile->id;
+                $route = $this->cashierPrinterResolver->resolveRouteForProfile($outletId, $profile);
+            } else {
+                $route = $this->cashierPrinterResolver->resolveLegacyReceiptRoute($outletId);
+            }
+        } else {
+            $route = PrinterRoute::query()
+                ->where('outlet_id', $outletId)
+                ->where('print_type', $printType)
+                ->where('is_active', true)
+                ->orderBy('priority')
+                ->first();
+        }
 
         $suffix = $isReprint
             ? 'requeue-rh'.(string) $history->id.'-r'.((string) ((int) $history->reprint_count)).'-'.substr(sha1((string) $idempotencyTail), 0, 16)
@@ -187,7 +200,7 @@ class ReceiptDocumentService
         ];
 
         $job = $this->routing->enqueuePrintJob(
-            (int) $history->outlet_id,
+            $outletId,
             'receipt_render',
             (int) $history->id,
             $printType,
@@ -195,6 +208,7 @@ class ReceiptDocumentService
             array_merge((array) $history->context_snapshot, $snapshot),
             $suffix,
             (int) $history->id,
+            resolvedProfileId: $resolvedProfileId,
         );
 
         $this->audit->log((int) $history->outlet_id, (int) $history->id, 'queue', $user, $idempotencyTail, (int) $job->id, ['phase14' => true]);
