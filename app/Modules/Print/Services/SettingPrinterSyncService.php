@@ -11,6 +11,7 @@ class SettingPrinterSyncService
 {
     public function __construct(
         private readonly PrinterManagementService $printerManagement,
+        private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
     ) {}
 
     public function syncFromSettingPrinter(SettingPrinter $setting): PrinterProfile
@@ -28,6 +29,10 @@ class SettingPrinterSyncService
                 $lanPort = (int) $portPart;
             }
         }
+
+        $paperWidthMeta = $this->thermalPaperWidthResolver->metaForPaperWidth(
+            (string) ($setting->thermal_paper_width ?? SettingPrinter::PAPER_WIDTH_58MM),
+        );
 
         $payload = [
             'outletId' => $outletId,
@@ -74,6 +79,7 @@ class SettingPrinterSyncService
                         ? ((string) ($setting->ip ?: $setting->name))
                         : null,
                 ],
+                'print' => $paperWidthMeta,
             ],
         ];
 

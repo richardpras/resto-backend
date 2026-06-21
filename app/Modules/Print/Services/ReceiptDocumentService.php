@@ -31,6 +31,7 @@ class ReceiptDocumentService
         private readonly PrintReprintAuditRecorder $audit,
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly CashierPrinterResolver $cashierPrinterResolver,
+        private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
     ) {}
 
     /**
@@ -54,6 +55,8 @@ class ReceiptDocumentService
 
         $template = $this->templateResolver->resolve($outletId, $kind, null);
         $brandingFingerprint = $this->resolveReceiptBrandingFingerprint($outletId);
+        $cashierProfile = $this->cashierPrinterResolver->resolveForOutlet($outletId);
+        $paperWidthFingerprint = $this->thermalPaperWidthResolver->resolvePaperWidth($cashierProfile);
 
         $fingerprintSeed = implode('|', [
             (string) $outletId,
@@ -64,6 +67,7 @@ class ReceiptDocumentService
             (string) $template->id,
             (string) $template->version,
             $brandingFingerprint,
+            $paperWidthFingerprint,
         ]);
         $fingerprint = hash('sha256', $force ? ($fingerprintSeed.'|'.uniqid('', true)) : $fingerprintSeed);
 
@@ -94,7 +98,9 @@ class ReceiptDocumentService
             $context['fiscal_uuid'] = $fiscal->fiscal_uuid;
         }
 
-        $width = max(20, min(80, (int) $template->thermal_width_chars));
+        $width = $cashierProfile !== null
+            ? $this->thermalPaperWidthResolver->resolveWidthChars($cashierProfile)
+            : max(20, min(80, (int) $template->thermal_width_chars));
         $thermal = $this->buildThermalLines($kind, $context, $width);
         $html = $this->buildHtmlSnapshot($kind, $context);
 

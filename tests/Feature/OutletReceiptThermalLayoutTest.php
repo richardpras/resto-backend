@@ -7,7 +7,9 @@ use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Print\Domain\ReceiptRenderHistory;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\OutletReceiptSetting;
+use App\Models\Modules\Settings\Domain\SettingPrinter;
 use App\Modules\Print\Services\ReceiptDocumentService;
+use App\Modules\Print\Services\SettingPrinterSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Tests\Concerns\UserManagementApiFixture;
@@ -31,6 +33,7 @@ class OutletReceiptThermalLayoutTest extends TestCase
         $outlet = $this->createOutlet('Thermal Layout Outlet');
         $this->assignUserToOutlets($user, [(int) $outlet->id]);
         $this->seedReceiptSettings($outlet, showTaxBreakdown: true);
+        $this->seedCashierPrinter($outlet, '58mm');
 
         $order = $this->createPaidOrder($outlet, subtotal: 45000, tax: 4500, total: 49500);
 
@@ -60,6 +63,7 @@ class OutletReceiptThermalLayoutTest extends TestCase
         $this->assertStringNotContainsString('RECEIPT', $thermal);
         $this->assertStringNotContainsString('LOGO', $thermal);
         $this->assertStringNotContainsString('[LOGO]', $thermal);
+        $this->assertThermalWidthAtMost($thermal, 32);
     }
 
     public function test_customer_receipt_hides_tax_line_when_show_tax_breakdown_disabled(): void
@@ -162,5 +166,39 @@ class OutletReceiptThermalLayoutTest extends TestCase
         ]);
 
         return $order->fresh(['items']);
+    }
+
+    private function seedCashierPrinter(Outlet $outlet, string $paperWidth = '58mm'): void
+    {
+        $setting = SettingPrinter::query()->create([
+            'id' => 'cashier-thermal-'.uniqid(),
+            'name' => 'Cashier Thermal',
+            'printer_type' => 'cashier',
+            'connection' => 'lan',
+            'thermal_paper_width' => $paperWidth,
+            'ip' => '10.0.0.70',
+            'bluetooth_device' => null,
+            'outlet_id' => $outlet->id,
+            'assigned_categories' => null,
+            'printer_profile_id' => null,
+        ]);
+
+        app(SettingPrinterSyncService::class)->syncFromSettingPrinter($setting->fresh() ?? $setting);
+    }
+
+    private function assertThermalWidthAtMost(string $thermal, int $maxWidth): void
+    {
+        foreach (preg_split("/\r\n|\n|\r/", $thermal) ?: [] as $line) {
+            $trimmed = rtrim((string) $line);
+            if ($trimmed === '') {
+                continue;
+            }
+
+            $this->assertLessThanOrEqual(
+                $maxWidth,
+                mb_strlen($trimmed),
+                'Thermal line exceeds configured width: '.$trimmed,
+            );
+        }
     }
 }

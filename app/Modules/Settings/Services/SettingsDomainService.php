@@ -255,6 +255,7 @@ class SettingsDomainService
             'name' => $data['name'],
             'printer_type' => $data['printerType'],
             'connection' => $data['connection'],
+            'thermal_paper_width' => $this->normalizeThermalPaperWidth($data['thermalPaperWidth'] ?? null),
             'ip' => $data['ip'] ?? null,
             'bluetooth_device' => $data['bluetoothDevice'] ?? null,
             'outlet_id' => (int) $data['outletId'],
@@ -276,6 +277,7 @@ class SettingsDomainService
             'name' => $data['name'],
             'printer_type' => $data['printerType'],
             'connection' => $data['connection'],
+            'thermal_paper_width' => $this->normalizeThermalPaperWidth($data['thermalPaperWidth'] ?? null),
             'ip' => $data['ip'] ?? null,
             'bluetooth_device' => $data['bluetoothDevice'] ?? null,
             'outlet_id' => (int) $data['outletId'],
@@ -682,6 +684,7 @@ class SettingsDomainService
             'name' => $p->name,
             'printerType' => $p->printer_type,
             'connection' => $p->connection,
+            'thermalPaperWidth' => $this->normalizeThermalPaperWidth($p->thermal_paper_width ?? null),
             'outletId' => (int) $p->outlet_id,
             'printerProfileId' => $p->printer_profile_id !== null ? (int) $p->printer_profile_id : null,
         ];
@@ -768,5 +771,12 @@ class SettingsDomainService
             'accountNumber' => $b->account_number,
             'isDefault' => $b->is_default,
         ];
+    }
+
+    private function normalizeThermalPaperWidth(?string $width): string
+    {
+        return in_array($width, [SettingPrinter::PAPER_WIDTH_58MM, SettingPrinter::PAPER_WIDTH_80MM], true)
+            ? $width
+            : SettingPrinter::PAPER_WIDTH_58MM;
     }
 }

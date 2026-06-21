@@ -21,6 +21,7 @@ class PrinterRoutingService
         private readonly PrinterStationResolver $stationResolver,
         private readonly PrintDispatchService $dispatchService,
         private readonly CashierPrinterResolver $cashierPrinterResolver,
+        private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
     ) {}
 
     public function queueKitchenTicketsForOrder(Order $order): void
@@ -110,6 +111,7 @@ class PrinterRoutingService
                     'category' => $routeResolutionMeta['menu_category_name'] ?? null,
                     'menu_category_id' => $menuCategoryId,
                     'resolved_printer_profile_id' => $groupProfileId,
+                    'thermal_width_chars' => $this->thermalPaperWidthResolver->resolveWidthCharsForProfileId($groupProfileId),
                     'route_resolution' => $routeResolutionMeta,
                     'items' => array_values($groupItems),
                 ],

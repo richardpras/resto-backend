@@ -7,12 +7,17 @@ use App\Models\Modules\Print\Domain\PrinterProfile;
 
 class PrintBridgePayloadBuilder
 {
+    public function __construct(
+        private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
+    ) {}
+
     /**
      * @return array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string,sharePath:?string,printerName:?string,document:array<string,mixed>}
      */
     public function buildExecutionPayload(PrintJob $job, PrinterProfile $profile): array
     {
-        $document = $this->buildDocument($job);
+        $width = $this->thermalPaperWidthResolver->resolveWidthChars($profile);
+        $document = $this->buildDocument($job, $width);
 
         return array_merge(
             $this->resolveTransport($profile),
@@ -89,7 +94,7 @@ class PrintBridgePayloadBuilder
     /**
      * @return array<string,mixed>
      */
-    private function buildDocument(PrintJob $job): array
+    private function buildDocument(PrintJob $job, int $width): array
     {
         /** @var array<string,mixed> $snapshot */
         $snapshot = is_array($job->printable_snapshot) ? $job->printable_snapshot : [];
@@ -102,22 +107,23 @@ class PrintBridgePayloadBuilder
         }
 
         if ((string) $job->type === 'kitchen') {
-            return $this->buildKitchenDocument($snapshot, $job);
+            return $this->buildKitchenDocument($snapshot, $job, $width);
         }
 
-        return $this->buildReceiptDocument($snapshot, $job);
+        return $this->buildReceiptDocument($snapshot, $job, $width);
     }
 
     /**
      * @param  array<string,mixed>  $snapshot
      * @return array<string,mixed>
      */
-    private function buildKitchenDocument(array $snapshot, PrintJob $job): array
+    private function buildKitchenDocument(array $snapshot, PrintJob $job, int $width): array
     {
         $station = (string) data_get($snapshot, 'station', data_get($job->route_snapshot, 'resolved_station', 'kitchen'));
+        $divider = str_repeat('-', $width);
         $lines = [
             ['text' => mb_strtoupper($station).' TICKET', 'bold' => true, 'align' => 'center'],
-            ['text' => str_repeat('-', 32), 'align' => 'center'],
+            ['text' => $divider, 'align' => 'center'],
         ];
 
         if ($orderId = data_get($snapshot, 'order_id')) {
@@ -135,7 +141,7 @@ class PrintBridgePayloadBuilder
             }
         }
 
-        $lines[] = ['text' => str_repeat('-', 32)];
+        $lines[] = ['text' => $divider];
         $lines[] = ['text' => now()->format('Y-m-d H:i:s'), 'align' => 'center'];
 
         return ['lines' => $lines, 'cut' => true];
@@ -145,15 +151,16 @@ class PrintBridgePayloadBuilder
      * @param  array<string,mixed>  $snapshot
      * @return array<string,mixed>
      */
-    private function buildReceiptDocument(array $snapshot, PrintJob $job): array
+    private function buildReceiptDocument(array $snapshot, PrintJob $job, int $width): array
     {
         if (is_array($snapshot['receipt_branding'] ?? null)) {
-            return $this->buildBrandedReceiptDocument($snapshot);
+            return $this->buildBrandedReceiptDocument($snapshot, $width);
         }
 
+        $divider = str_repeat('-', $width);
         $lines = [
             ['text' => 'RECEIPT', 'bold' => true, 'align' => 'center'],
-            ['text' => str_repeat('-', 32), 'align' => 'center'],
+            ['text' => $divider, 'align' => 'center'],
         ];
 
         if ($orderId = data_get($snapshot, 'order_id', $job->source_id)) {
@@ -178,9 +185,8 @@ class PrintBridgePayloadBuilder
      * @param  array<string,mixed>  $snapshot
      * @return array<string,mixed>
      */
-    private function buildBrandedReceiptDocument(array $snapshot): array
+    private function buildBrandedReceiptDocument(array $snapshot, int $width): array
     {
-        $width = 32;
         $divider = str_repeat('-', $width);
         /** @var array<string,mixed> $branding */
         $branding = $snapshot['receipt_branding'];

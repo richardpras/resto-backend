@@ -13,11 +13,16 @@ class SettingPrinter extends Model
 
     protected $keyType = 'string';
 
+    public const PAPER_WIDTH_58MM = '58mm';
+
+    public const PAPER_WIDTH_80MM = '80mm';
+
     protected $fillable = [
         'id',
         'name',
         'printer_type',
         'connection',
+        'thermal_paper_width',
         'ip',
         'bluetooth_device',
         'outlet_id',
