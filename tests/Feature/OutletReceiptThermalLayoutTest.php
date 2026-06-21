@@ -55,8 +55,15 @@ class OutletReceiptThermalLayoutTest extends TestCase
         $this->assertStringContainsString($outlet->name, $thermal);
         $this->assertStringContainsString('Terima kasih sudah mampir', $thermal);
         $this->assertStringContainsString('Sampai jumpa lagi', $thermal);
-        $this->assertStringContainsString('Order: '.$order->code, $thermal);
+        $this->assertStringContainsString('Order', $thermal);
+        $this->assertStringContainsString((string) $order->code, $thermal);
+        $this->assertStringContainsString('Customer', $thermal);
+        $this->assertStringContainsString('Guest', $thermal);
+        $this->assertStringContainsString('Time', $thermal);
+        $this->assertStringContainsString('Type', $thermal);
+        $this->assertStringContainsString('Take Away', $thermal);
         $this->assertStringContainsString('Nasi Goreng', $thermal);
+        $this->assertStringContainsString('1 x 45,000.00', $thermal);
         $this->assertStringContainsString('Subtotal', $thermal);
         $this->assertStringContainsString('Tax', $thermal);
         $this->assertStringContainsString('TOTAL', $thermal);

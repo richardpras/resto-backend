@@ -22,6 +22,7 @@ class PrinterRoutingService
         private readonly PrintDispatchService $dispatchService,
         private readonly CashierPrinterResolver $cashierPrinterResolver,
         private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
+        private readonly ThermalReceiptLayoutBuilder $thermalReceiptLayout,
     ) {}
 
     public function queueKitchenTicketsForOrder(Order $order): void
@@ -129,7 +130,7 @@ class PrinterRoutingService
             return;
         }
 
-        $order->loadMissing('items');
+        $order->loadMissing(['items', 'payments']);
 
         ['route' => $route, 'resolvedProfileId' => $resolvedProfileId] = $this->resolveReceiptRouting($outletId);
 
@@ -140,6 +141,7 @@ class PrinterRoutingService
         ])->values()->all();
 
         $branding = $this->resolveReceiptBranding($outletId);
+        $paidAt = $order->payments->pluck('paid_at')->filter()->max();
 
         $this->enqueuePrintJob(
             outletId: $outletId,
@@ -150,7 +152,12 @@ class PrinterRoutingService
             printableSnapshot: [
                 'order_id' => (int) $order->id,
                 'order_code' => (string) $order->code,
+                'order_type' => (string) ($order->order_type ?? ''),
+                'service_mode' => (string) ($order->service_mode ?? ''),
                 'table_name' => $order->table_name,
+                'customer' => $order->customer_name,
+                'customer_display' => $this->thermalReceiptLayout->formatCustomerDisplay($order->customer_name),
+                'paid_at' => $paidAt instanceof \Illuminate\Support\Carbon ? $paidAt->toIso8601String() : null,
                 'amount' => (float) $order->paid_total,
                 'subtotal' => (float) $order->subtotal,
                 'tax' => (float) $order->tax,

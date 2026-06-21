@@ -32,6 +32,7 @@ class ReceiptDocumentService
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly CashierPrinterResolver $cashierPrinterResolver,
         private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
+        private readonly ThermalReceiptLayoutBuilder $thermalReceiptLayout,
     ) {}
 
     /**
@@ -68,6 +69,7 @@ class ReceiptDocumentService
             (string) $template->version,
             $brandingFingerprint,
             $paperWidthFingerprint,
+            ThermalReceiptLayoutBuilder::LAYOUT_VERSION,
         ]);
         $fingerprint = hash('sha256', $force ? ($fingerprintSeed.'|'.uniqid('', true)) : $fingerprintSeed);
 
@@ -319,8 +321,12 @@ class ReceiptDocumentService
         return [
             'order_code' => (string) $order->code,
             'order_channel' => (string) ($order->order_channel ?? ''),
+            'order_type' => (string) ($order->order_type ?? ''),
+            'service_mode' => (string) ($order->service_mode ?? ''),
             'table' => $order->table_name,
             'customer' => $order->customer_name,
+            'customer_display' => $this->thermalReceiptLayout->formatCustomerDisplay($order->customer_name),
+            'paid_at' => $this->resolveOrderPaidAt($order)?->toIso8601String(),
             'subtotal' => (float) $order->subtotal,
             'tax' => (float) $order->tax,
             'total' => (float) $order->total,
@@ -473,70 +479,9 @@ class ReceiptDocumentService
      */
     private function buildBrandedCustomerReceiptLines(array $context, int $width): array
     {
-        $divider = str_repeat('-', $width);
-        /** @var array<string,mixed> $branding */
-        $branding = is_array($context['receipt_branding'] ?? null) ? $context['receipt_branding'] : [];
-        $lines = [];
+        $structured = $this->thermalReceiptLayout->buildCustomerReceipt($context, $width);
 
-        $outletName = trim((string) ($branding['outletName'] ?? ''));
-        if ($outletName !== '') {
-            $lines[] = $this->centerThermalLine($outletName, $width);
-        }
-
-        $header = trim((string) ($branding['header'] ?? ''));
-        if ($header !== '') {
-            foreach (preg_split("/\r\n|\n|\r/", $header) ?: [] as $headerLine) {
-                $trimmed = trim((string) $headerLine);
-                if ($trimmed !== '') {
-                    $lines[] = $this->centerThermalLine($trimmed, $width);
-                }
-            }
-        }
-
-        if ($code = ($context['order_code'] ?? null)) {
-            $lines[] = 'Order: '.$code;
-        }
-        if ($num = ($context['fiscal_invoice_number'] ?? null)) {
-            $lines[] = 'Invoice: '.$num;
-        }
-
-        $lines[] = $divider;
-
-        foreach ($context['lines'] ?? [] as $row) {
-            $qty = number_format((float) ($row['qty'] ?? 0), 0);
-            $left = mb_substr((string) ($row['name'] ?? ''), 0, max(8, $width - 14)).' x'.$qty;
-            $amount = $this->money((float) ($row['price'] ?? 0) * (float) ($row['qty'] ?? 0));
-            $lines[] = $this->formatThermalColumns($left, $amount, $width);
-        }
-
-        if (! empty($context['split'])) {
-            $lines[] = '-- SPLIT '.$this->sanitize((string) $context['split']['label']).' --';
-            foreach ($context['split']['items'] ?? [] as $chunk) {
-                $lines[] = ($chunk['label'] ?? '').' × '.$this->sanitize((string) ($chunk['qty'] ?? ''));
-            }
-        }
-
-        $lines[] = $divider;
-        $lines[] = $this->formatThermalColumns('Subtotal', $this->money((float) ($context['subtotal'] ?? 0.0)), $width);
-
-        if ((bool) ($branding['showTaxBreakdown'] ?? false)) {
-            $lines[] = $this->formatThermalColumns('Tax', $this->money((float) ($context['tax'] ?? 0.0)), $width);
-        }
-
-        $lines[] = $this->formatThermalColumns('TOTAL', $this->money((float) ($context['total'] ?? 0.0)), $width);
-        $lines[] = $divider;
-
-        $footer = trim((string) ($branding['footer'] ?? ''));
-        if ($footer !== '') {
-            foreach (preg_split("/\r\n|\n|\r/", $footer) ?: [] as $footerLine) {
-                $trimmed = trim((string) $footerLine);
-                if ($trimmed !== '') {
-                    $lines[] = $this->centerThermalLine($trimmed, $width);
-                }
-            }
-        }
-
-        return array_slice($lines, 0, 256);
+        return $this->thermalReceiptLayout->toPlainThermalLines($structured, $width);
     }
 
     /**
@@ -551,22 +496,14 @@ class ReceiptDocumentService
         return is_array($context['receipt_branding'] ?? null);
     }
 
-    private function centerThermalLine(string $text, int $width): string
+    private function resolveOrderPaidAt(Order $order): ?\Illuminate\Support\Carbon
     {
-        $text = mb_substr($text, 0, $width);
-        $pad = max(0, (int) floor(($width - mb_strlen($text)) / 2));
+        $paidAt = $order->payments
+            ->pluck('paid_at')
+            ->filter()
+            ->max();
 
-        return str_repeat(' ', $pad).$text;
-    }
-
-    private function formatThermalColumns(string $left, string $right, int $width): string
-    {
-        $rightLen = mb_strlen($right);
-        $leftMax = max(1, $width - $rightLen - 1);
-        $left = mb_substr($left, 0, $leftMax);
-        $pad = max(1, $width - mb_strlen($left) - mb_strlen($right));
-
-        return $left.str_repeat(' ', $pad).$right;
+        return $paidAt instanceof \Illuminate\Support\Carbon ? $paidAt : null;
     }
 
     /**
