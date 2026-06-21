@@ -4,6 +4,7 @@ namespace App\Modules\Orders\Repositories;
 
 use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 interface QrOrderRequestRepositoryInterface
 {
@@ -16,4 +17,7 @@ interface QrOrderRequestRepositoryInterface
 
     /** @param list<int> $allowedOutletIds */
     public function paginateScoped(int $perPage, array $allowedOutletIds, array $filters = []): LengthAwarePaginator;
+
+    /** @param list<int> $allowedOutletIds */
+    public function pendingSummaryScoped(array $allowedOutletIds, int $outletId): Collection;
 }

@@ -8,7 +8,7 @@ use App\Models\Modules\Print\Domain\PrinterProfile;
 class PrintBridgePayloadBuilder
 {
     /**
-     * @return array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string,document:array<string,mixed>}
+     * @return array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string,sharePath:?string,printerName:?string,document:array<string,mixed>}
      */
     public function buildExecutionPayload(PrintJob $job, PrinterProfile $profile): array
     {
@@ -21,20 +21,39 @@ class PrintBridgePayloadBuilder
     }
 
     /**
-     * @return array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string}
+     * @return array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string,sharePath:?string,printerName:?string}
      */
     private function resolveTransport(PrinterProfile $profile): array
     {
         $connection = strtolower((string) ($profile->connection_type ?: 'lan'));
         $meta = is_array($profile->meta) ? $profile->meta : [];
 
+        if (in_array($connection, ['share', 'shared', 'windows_share', 'windows'], true)) {
+            $sharePath = (string) data_get($meta, 'share.path', data_get($meta, 'windows.sharePath', ''));
+            $printerName = (string) data_get($meta, 'share.printerName', data_get($meta, 'windows.printerName', $profile->name));
+
+            return [
+                'transport' => 'shared',
+                'host' => null,
+                'port' => null,
+                'devicePath' => null,
+                'bluetoothAddress' => null,
+                'sharePath' => $sharePath !== '' ? $sharePath : null,
+                'printerName' => $printerName !== '' ? $printerName : null,
+            ];
+        }
+
         if (in_array($connection, ['bluetooth', 'bt'], true)) {
+            $devicePath = (string) data_get($meta, 'bluetooth.devicePath', data_get($meta, 'usb.devicePath', ''));
+
             return [
                 'transport' => 'bluetooth',
                 'host' => null,
                 'port' => null,
-                'devicePath' => null,
+                'devicePath' => $devicePath !== '' ? $devicePath : null,
                 'bluetoothAddress' => (string) ($profile->bluetooth_address ?: data_get($meta, 'bluetooth.address', '')),
+                'sharePath' => null,
+                'printerName' => null,
             ];
         }
 
@@ -45,6 +64,8 @@ class PrintBridgePayloadBuilder
                 'port' => null,
                 'devicePath' => (string) ($profile->device_identifier ?: data_get($meta, 'usb.devicePath', data_get($meta, 'lan.devicePath', ''))),
                 'bluetoothAddress' => null,
+                'sharePath' => null,
+                'printerName' => null,
             ];
         }
 
@@ -60,6 +81,8 @@ class PrintBridgePayloadBuilder
             'port' => (int) data_get($meta, 'lan.port', 9100),
             'devicePath' => null,
             'bluetoothAddress' => null,
+            'sharePath' => null,
+            'printerName' => null,
         ];
     }
 

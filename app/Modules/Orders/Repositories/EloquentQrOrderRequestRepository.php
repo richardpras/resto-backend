@@ -4,6 +4,7 @@ namespace App\Modules\Orders\Repositories;
 
 use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 class EloquentQrOrderRequestRepository implements QrOrderRequestRepositoryInterface
 {
@@ -63,5 +64,29 @@ class EloquentQrOrderRequestRepository implements QrOrderRequestRepositoryInterf
                 fn ($query) => $query->latest('id')
             )
             ->paginate($perPage);
+    }
+
+    /** @param list<int> $allowedOutletIds */
+    public function pendingSummaryScoped(array $allowedOutletIds, int $outletId): Collection
+    {
+        return QrOrderRequest::query()
+            ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
+            ->where('outlet_id', $outletId)
+            ->where('status', 'pending_cashier_confirmation')
+            ->with(['table:id,name,outlet_id'])
+            ->orderByDesc('cashier_call_count')
+            ->orderByDesc('cashier_called_at')
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get([
+                'id',
+                'request_code',
+                'outlet_id',
+                'table_id',
+                'customer_name',
+                'cashier_call_count',
+                'cashier_called_at',
+                'created_at',
+            ]);
     }
 }

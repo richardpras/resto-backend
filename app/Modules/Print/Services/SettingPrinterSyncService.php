@@ -19,6 +19,15 @@ class SettingPrinterSyncService
         $code = $this->profileCodeForSetting($setting);
         $station = $this->stationForType((string) $setting->printer_type);
         $connectionType = strtolower((string) $setting->connection);
+        $lanHost = (string) ($setting->ip ?? '');
+        $lanPort = 9100;
+        if ($connectionType === 'lan' && str_contains($lanHost, ':')) {
+            [$hostPart, $portPart] = array_pad(explode(':', $lanHost, 2), 2, null);
+            if ($hostPart !== null && $hostPart !== '' && is_numeric($portPart)) {
+                $lanHost = $hostPart;
+                $lanPort = (int) $portPart;
+            }
+        }
 
         $payload = [
             'outletId' => $outletId,
@@ -26,10 +35,14 @@ class SettingPrinterSyncService
             'name' => (string) $setting->name,
             'station' => $station,
             'connectionType' => $connectionType,
-            'ipAddress' => $setting->ip,
-            'endpoint' => $setting->ip ? 'tcp://'.$setting->ip.':9100' : null,
-            'bluetoothName' => $setting->bluetooth_device,
-            'bluetoothAddress' => $this->extractBluetoothAddress((string) $setting->bluetooth_device),
+            'ipAddress' => $connectionType === 'lan' ? $lanHost : ($connectionType === 'shared' ? null : $setting->ip),
+            'endpoint' => $connectionType === 'lan' && $lanHost !== ''
+                ? 'tcp://'.$lanHost.':'.$lanPort
+                : null,
+            'bluetoothName' => in_array($connectionType, ['bluetooth', 'bt'], true) ? $setting->bluetooth_device : null,
+            'bluetoothAddress' => in_array($connectionType, ['bluetooth', 'bt'], true)
+                ? $this->extractBluetoothAddress((string) $setting->bluetooth_device)
+                : null,
             'deviceIdentifier' => $connectionType === 'usb' ? (string) $setting->bluetooth_device : null,
             'isActive' => true,
             'meta' => [
@@ -38,15 +51,28 @@ class SettingPrinterSyncService
                     'deviceKey' => data_get($setting, 'meta.bridge.deviceKey'),
                 ],
                 'lan' => [
-                    'ip' => $setting->ip,
-                    'port' => 9100,
+                    'ip' => $connectionType === 'lan' ? $lanHost : null,
+                    'port' => $lanPort,
                 ],
                 'usb' => [
                     'devicePath' => $connectionType === 'usb' ? (string) $setting->bluetooth_device : null,
                 ],
                 'bluetooth' => [
-                    'name' => $setting->bluetooth_device,
-                    'address' => $this->extractBluetoothAddress((string) $setting->bluetooth_device),
+                    'name' => in_array($connectionType, ['bluetooth', 'bt'], true) ? $setting->bluetooth_device : null,
+                    'address' => in_array($connectionType, ['bluetooth', 'bt'], true)
+                        ? $this->extractBluetoothAddress((string) $setting->bluetooth_device)
+                        : null,
+                    'devicePath' => in_array($connectionType, ['bluetooth', 'bt'], true)
+                        ? (string) $setting->bluetooth_device
+                        : null,
+                ],
+                'share' => [
+                    'path' => in_array($connectionType, ['shared', 'share', 'windows_share', 'windows'], true)
+                        ? (string) $setting->bluetooth_device
+                        : null,
+                    'printerName' => in_array($connectionType, ['shared', 'share', 'windows_share', 'windows'], true)
+                        ? ((string) ($setting->ip ?: $setting->name))
+                        : null,
                 ],
             ],
         ];
@@ -68,7 +94,7 @@ class SettingPrinterSyncService
 
         $this->syncRoutes($setting, $profile);
 
-        return $profile->fresh() ?? $profile;
+        return $profile;
     }
 
     public function deleteRoutesForProfile(int $profileId): void
@@ -80,13 +106,10 @@ class SettingPrinterSyncService
     {
         $printType = in_array((string) $setting->printer_type, ['cashier', 'receipt'], true) ? 'receipt' : 'kitchen';
         $categories = is_array($setting->assigned_categories) ? $setting->assigned_categories : [];
-
-        PrinterRoute::query()
-            ->where('printer_profile_id', (int) $profile->id)
-            ->delete();
+        $desiredKeys = [];
 
         if ($categories === []) {
-            $this->printerManagement->assignRoute([
+            $route = $this->printerManagement->assignRoute([
                 'outletId' => (int) $setting->outlet_id,
                 'printerProfileId' => (int) $profile->id,
                 'printType' => $printType,
@@ -95,12 +118,15 @@ class SettingPrinterSyncService
                 'priority' => 100,
                 'isActive' => true,
             ]);
+            $desiredKeys[] = $this->routeIdentityKey($route);
+
+            $this->deleteOrphanRoutes((int) $profile->id, $desiredKeys);
 
             return;
         }
 
         foreach ($categories as $index => $category) {
-            $this->printerManagement->assignRoute([
+            $route = $this->printerManagement->assignRoute([
                 'outletId' => (int) $setting->outlet_id,
                 'printerProfileId' => (int) $profile->id,
                 'printType' => $printType,
@@ -110,7 +136,36 @@ class SettingPrinterSyncService
                 'priority' => 10 + $index,
                 'isActive' => true,
             ]);
+            $desiredKeys[] = $this->routeIdentityKey($route);
         }
+
+        $this->deleteOrphanRoutes((int) $profile->id, $desiredKeys);
+    }
+
+    /**
+     * @param  list<string>  $desiredKeys
+     */
+    private function deleteOrphanRoutes(int $profileId, array $desiredKeys): void
+    {
+        $existing = PrinterRoute::query()->where('printer_profile_id', $profileId)->get();
+        foreach ($existing as $route) {
+            if (! in_array($this->routeIdentityKey($route), $desiredKeys, true)) {
+                $route->delete();
+            }
+        }
+    }
+
+    private function routeIdentityKey(PrinterRoute $route): string
+    {
+        return implode('|', [
+            (int) $route->outlet_id,
+            (int) $route->printer_profile_id,
+            (string) $route->print_type,
+            (string) $route->route_scope,
+            $route->category !== null ? (string) $route->category : '',
+            $route->item_id !== null ? (string) $route->item_id : '',
+            $route->production_station_id !== null ? (string) $route->production_station_id : '',
+        ]);
     }
 
     private function profileCodeForSetting(SettingPrinter $setting): string
@@ -128,6 +183,7 @@ class SettingPrinterSyncService
         return match (strtolower($printerType)) {
             'cashier', 'receipt' => 'cashier',
             'bar' => 'bar',
+            'dessert' => 'dessert',
             default => 'kitchen',
         };
     }

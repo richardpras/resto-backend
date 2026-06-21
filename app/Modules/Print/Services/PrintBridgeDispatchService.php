@@ -23,22 +23,12 @@ class PrintBridgeDispatchService
             throw new RuntimeException('Simulated print delivery failure.');
         }
 
+        $profile = $this->resolvePreflight($job);
+
         $outletId = (int) $job->outlet_id;
-        if ($outletId < 1) {
-            throw new RuntimeException('Print job outlet is missing.');
-        }
-
-        $profile = $this->resolvePrinterProfile($job);
-        if ($profile !== null && ! $profile->is_active) {
-            throw new RuntimeException('Printer profile is inactive.');
-        }
-
-        if ($profile === null) {
-            throw new RuntimeException('No printer profile resolved for print job.');
-        }
-
         $device = $this->resolveBridgeDevice($outletId, $profile);
         $execution = $this->payloadBuilder->buildExecutionPayload($job, $profile);
+        $this->assertTransportEnabled((string) $execution['transport']);
         $this->assertTransportReady($execution);
 
         $idempotencyKey = 'print-job-'.$outletId.'-'.$job->id.'-attempt-'.max(1, (int) $job->attempts);
@@ -58,11 +48,41 @@ class PrintBridgeDispatchService
                 'port' => $execution['port'],
                 'devicePath' => $execution['devicePath'],
                 'bluetoothAddress' => $execution['bluetoothAddress'],
+                'sharePath' => $execution['sharePath'],
+                'printerName' => $execution['printerName'],
                 'document' => $execution['document'],
             ],
         );
 
         return $result['command'];
+    }
+
+    public function preflight(PrintJob $job): void
+    {
+        $profile = $this->resolvePreflight($job);
+        $execution = $this->payloadBuilder->buildExecutionPayload($job, $profile);
+        $this->assertTransportEnabled((string) $execution['transport']);
+        $this->assertTransportReady($execution);
+        $this->resolveBridgeDevice((int) $job->outlet_id, $profile);
+    }
+
+    private function resolvePreflight(PrintJob $job): PrinterProfile
+    {
+        $outletId = (int) $job->outlet_id;
+        if ($outletId < 1) {
+            throw new RuntimeException('Print job outlet is missing.');
+        }
+
+        $profile = $this->resolvePrinterProfile($job);
+        if ($profile !== null && ! $profile->is_active) {
+            throw new RuntimeException('Printer profile is inactive.');
+        }
+
+        if ($profile === null) {
+            throw new RuntimeException('No printer profile resolved for print job.');
+        }
+
+        return $profile;
     }
 
     private function resolvePrinterProfile(PrintJob $job): ?PrinterProfile
@@ -97,8 +117,26 @@ class PrintBridgeDispatchService
         return $this->hardwareBridge->resolveDefaultDeviceForOutlet($outletId);
     }
 
+    private function assertTransportEnabled(string $transport): void
+    {
+        if ($transport === 'lan') {
+            return;
+        }
+
+        $enabled = match ($transport) {
+            'usb' => (bool) config('print.transport.usb.enabled', false),
+            'bluetooth' => (bool) config('print.transport.bluetooth.enabled', false),
+            'shared' => (bool) config('print.transport.shared.enabled', false),
+            default => false,
+        };
+
+        if (! $enabled) {
+            throw new RuntimeException(sprintf('Print transport [%s] is disabled.', $transport));
+        }
+    }
+
     /**
-     * @param  array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string,document:array<string,mixed>}  $execution
+     * @param  array{transport:string,host:?string,port:?int,devicePath:?string,bluetoothAddress:?string,sharePath:?string,printerName:?string,document:array<string,mixed>}  $execution
      */
     private function assertTransportReady(array $execution): void
     {
@@ -109,8 +147,16 @@ class PrintBridgeDispatchService
         if ($transport === 'usb' && empty($execution['devicePath'])) {
             throw new RuntimeException('USB printer device path is not configured.');
         }
-        if ($transport === 'bluetooth' && empty($execution['bluetoothAddress'])) {
-            throw new RuntimeException('Bluetooth printer address is not configured.');
+        if ($transport === 'bluetooth') {
+            if (empty($execution['bluetoothAddress'])) {
+                throw new RuntimeException('Bluetooth printer address is not configured.');
+            }
+            if (empty($execution['devicePath'])) {
+                throw new RuntimeException('Bluetooth RFCOMM device path is not configured.');
+            }
+        }
+        if ($transport === 'shared' && empty($execution['sharePath']) && empty($execution['printerName'])) {
+            throw new RuntimeException('Windows shared printer path or printer name is not configured.');
         }
     }
 }

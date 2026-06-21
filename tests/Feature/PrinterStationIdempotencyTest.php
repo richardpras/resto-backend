@@ -22,14 +22,16 @@ class PrinterStationIdempotencyTest extends TestCase
         Bus::fake([ProcessPrintJob::class]);
     }
 
-    public function test_re_running_queue_kitchen_tickets_does_not_duplicate_identical_station_jobs(): void
+    public function test_re_running_queue_kitchen_tickets_does_not_duplicate_identical_category_jobs(): void
     {
         $outlet = $this->createOutlet();
         $stations = $this->provisionPrintStations($outlet);
         $kitchenProfile = $this->createKitchenProfile($outlet, 'kitchen-idem', 'kitchen');
         $barProfile = $this->createKitchenProfile($outlet, 'bar-idem', 'bar');
-        $this->createStationRoute($outlet, $kitchenProfile, $stations['kitchen']);
-        $this->createStationRoute($outlet, $barProfile, $stations['bar']);
+        $foodCategory = $this->ensureMenuCategory('Food');
+        $beverageCategory = $this->ensureMenuCategory('Beverage');
+        $this->createCategoryMapping($outlet, $foodCategory, $kitchenProfile);
+        $this->createCategoryMapping($outlet, $beverageCategory, $barProfile);
 
         $nasi = $this->createMenuItemForStation($outlet, 'Nasi Goreng', $stations['kitchen']);
         $esTeh = $this->createMenuItemForStation($outlet, 'Es Teh', $stations['bar'], 'Beverage');

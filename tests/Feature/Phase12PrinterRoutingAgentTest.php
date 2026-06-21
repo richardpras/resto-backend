@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Modules\Menu\Domain\MenuCategory;
+use App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
@@ -30,12 +32,12 @@ class Phase12PrinterRoutingAgentTest extends TestCase
     {
         $outlet = $this->createOutlet('P12-PA');
         $profile = $this->createProfile((int) $outlet->id, 'kitchen-main');
-        PrinterRoute::query()->create([
+        $category = $this->ensureCategory('food');
+        MenuCategoryPrinterMapping::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outlet->id,
+            'menu_category_id' => (int) $category->id,
             'printer_profile_id' => (int) $profile->id,
-            'print_type' => 'kitchen',
-            'category' => 'food',
             'priority' => 1,
             'is_active' => true,
         ]);
@@ -164,92 +166,53 @@ class Phase12PrinterRoutingAgentTest extends TestCase
         $this->assertSame($statusBeforeWrongOutletAttempt, (string) $jobA->fresh()->status);
     }
 
-    public function test_kitchen_routing_resolution_hierarchy_prefers_item_then_category_then_station_then_default(): void
+    public function test_kitchen_routing_uses_category_master_mapping(): void
     {
-        config(['print.category_station_map' => ['drinks' => 'bar']]);
-
         $outlet = $this->createOutlet('P12-HR');
-        $defaultProfile = $this->createProfile((int) $outlet->id, 'default-main');
-        $stationProfile = $this->createProfile((int) $outlet->id, 'station-bar');
         $categoryProfile = $this->createProfile((int) $outlet->id, 'category-drinks');
-        $itemProfile = $this->createProfile((int) $outlet->id, 'item-override');
+        $drinksCategory = $this->ensureCategory('drinks');
 
-        PrinterRoute::query()->create([
+        MenuCategoryPrinterMapping::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outlet->id,
-            'printer_profile_id' => (int) $defaultProfile->id,
-            'print_type' => 'kitchen',
-            'priority' => 100,
-            'is_active' => true,
-        ]);
-        PrinterRoute::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => (int) $outlet->id,
-            'printer_profile_id' => (int) $stationProfile->id,
-            'print_type' => 'kitchen',
-            'station' => 'bar',
-            'priority' => 50,
-            'is_active' => true,
-        ]);
-        PrinterRoute::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => (int) $outlet->id,
+            'menu_category_id' => (int) $drinksCategory->id,
             'printer_profile_id' => (int) $categoryProfile->id,
-            'print_type' => 'kitchen',
-            'category' => 'drinks',
-            'priority' => 20,
+            'priority' => 10,
             'is_active' => true,
         ]);
 
         $order = $this->createOrderWithCategorizedItem((int) $outlet->id, 'drinks');
-        $itemOverrideRoute = PrinterRoute::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => (int) $outlet->id,
-            'printer_profile_id' => (int) $itemProfile->id,
-            'print_type' => 'kitchen',
-            'priority' => 10,
-            'is_active' => true,
-            'meta' => [
-                'routeScope' => 'item',
-                'itemId' => (int) $order->items()->firstOrFail()->item_id,
-            ],
-        ]);
 
         app(PrinterRoutingService::class)->queueKitchenTicketsForOrder($order->fresh(['items']));
 
         /** @var PrintJob $job */
         $job = PrintJob::query()->where('outlet_id', (int) $outlet->id)->where('source_id', (int) $order->id)->where('type', 'kitchen')->firstOrFail();
-        $this->assertSame((int) $itemProfile->id, (int) $job->printer_profile_id);
-        $this->assertSame((int) $itemOverrideRoute->id, (int) $job->printer_route_id);
-        $this->assertSame('item_override', (string) data_get($job->printable_snapshot, 'route_resolution.resolution_layer'));
+        $this->assertSame((int) $categoryProfile->id, (int) $job->printer_profile_id);
+        $this->assertSame('category_master_mapping', (string) data_get($job->printable_snapshot, 'route_resolution.resolution_layer'));
         $this->assertSame('drinks', (string) data_get($job->printable_snapshot, 'route_resolution.source_category'));
-        $this->assertSame('bar', (string) data_get($job->printable_snapshot, 'route_resolution.resolved_station'));
     }
 
     public function test_routing_resolution_is_outlet_isolated_for_same_category(): void
     {
-        config(['print.category_station_map' => ['drinks' => 'bar']]);
-
         $outletA = $this->createOutlet('P12-RA');
         $outletB = $this->createOutlet('P12-RB');
         $profileA = $this->createProfile((int) $outletA->id, 'drinks-a');
         $profileB = $this->createProfile((int) $outletB->id, 'drinks-b');
+        $drinksCategory = $this->ensureCategory('drinks');
 
-        PrinterRoute::query()->create([
+        MenuCategoryPrinterMapping::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outletA->id,
+            'menu_category_id' => (int) $drinksCategory->id,
             'printer_profile_id' => (int) $profileA->id,
-            'print_type' => 'kitchen',
-            'category' => 'drinks',
             'priority' => 5,
             'is_active' => true,
         ]);
-        PrinterRoute::query()->create([
+        MenuCategoryPrinterMapping::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outletB->id,
+            'menu_category_id' => (int) $drinksCategory->id,
             'printer_profile_id' => (int) $profileB->id,
-            'print_type' => 'kitchen',
-            'category' => 'drinks',
             'priority' => 5,
             'is_active' => true,
         ]);
@@ -266,6 +229,23 @@ class Phase12PrinterRoutingAgentTest extends TestCase
         $jobB = PrintJob::query()->where('outlet_id', (int) $outletB->id)->where('source_id', (int) $orderB->id)->where('type', 'kitchen')->firstOrFail();
         $this->assertSame((int) $profileA->id, (int) $jobA->printer_profile_id);
         $this->assertSame((int) $profileB->id, (int) $jobB->printer_profile_id);
+    }
+
+    private function ensureCategory(string $name): MenuCategory
+    {
+        $existing = MenuCategory::query()->whereRaw('LOWER(name) = ?', [strtolower($name)])->first();
+        if ($existing instanceof MenuCategory) {
+            return $existing;
+        }
+
+        return MenuCategory::query()->create([
+            'tenant_id' => 1,
+            'code' => strtolower($name),
+            'name' => $name,
+            'name_en' => $name,
+            'name_id' => $name,
+            'is_active' => true,
+        ]);
     }
 
     private function createOutlet(string $prefix): Outlet
@@ -296,11 +276,13 @@ class Phase12PrinterRoutingAgentTest extends TestCase
 
     private function createOrderWithCategorizedItem(int $outletId, string $category): Order
     {
+        $menuCategory = $this->ensureCategory($category);
         $menu = MenuItem::query()->create([
             'tenant_id' => 1,
             'outlet_id' => $outletId,
             'name' => 'P12 Item '.uniqid(),
             'category' => $category,
+            'menu_category_id' => (int) $menuCategory->id,
             'price' => 10000,
             'available' => true,
         ]);

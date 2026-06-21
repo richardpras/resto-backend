@@ -17,7 +17,7 @@ class EloquentMenuRepository implements MenuRepositoryInterface
                     fn ($mapping) => $mapping->where('outlet_id', $outletId)->where('is_active', true)
                 )
             )
-            ->with(['recipes.ingredient', 'outletMappings', 'productionStation'])
+            ->with(['recipes.ingredient', 'outletMappings', 'productionStation', 'menuCategory'])
             ->latest('id')
             ->paginate($perPage);
     }
@@ -29,7 +29,7 @@ class EloquentMenuRepository implements MenuRepositoryInterface
 
     public function findWithRecipes(int $id): ?MenuItem
     {
-        return MenuItem::query()->with(['recipes.ingredient', 'outletMappings', 'productionStation'])->find($id);
+        return MenuItem::query()->with(['recipes.ingredient', 'outletMappings', 'productionStation', 'menuCategory'])->find($id);
     }
 
     public function create(array $attributes): MenuItem

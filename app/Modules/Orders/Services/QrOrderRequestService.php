@@ -179,6 +179,27 @@ class QrOrderRequestService
         return $this->qrOrderRequestRepository->paginateScoped($perPage, $allowed, $filters);
     }
 
+    /** @return array{count: int, ids: list<string>, entries: \Illuminate\Support\Collection<int, QrOrderRequest>} */
+    public function pendingSummary(User $user, int $outletId): array
+    {
+        $this->qrOrderExpiryService->expirePendingRequests();
+
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+        if (! in_array($outletId, $allowed, true)) {
+            throw ValidationException::withMessages([
+                'outletId' => ['The selected outletId is invalid.'],
+            ]);
+        }
+
+        $entries = $this->qrOrderRequestRepository->pendingSummaryScoped($allowed, $outletId);
+
+        return [
+            'count' => $entries->count(),
+            'ids' => $entries->pluck('id')->map(fn ($id) => (string) $id)->values()->all(),
+            'entries' => $entries,
+        ];
+    }
+
     public function callCashier(int $requestId, int $outletId, int $tableId, ?string $reason = null, ?string $guestSessionToken = null): QrOrderRequest
     {
         if (! $this->qrOrderingSettingsService->enableCallCashier()) {

@@ -45,6 +45,7 @@ use App\Modules\HR\Http\Controllers\PayrollRunV2Controller;
 use App\Modules\HR\Http\Controllers\PayrollController;
 use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Hardware\Http\Controllers\HardwareBridgeController;
+use App\Modules\Hardware\Http\Controllers\HardwarePairingController;
 use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\InventoryValuationController;
 use App\Modules\Inventory\Http\Controllers\InventoryConsumptionController;
@@ -81,6 +82,8 @@ use App\Modules\Menu\Http\Controllers\MenuForecastingController;
 use App\Modules\Menu\Http\Controllers\MenuOptimizationController;
 use App\Modules\Menu\Http\Controllers\MenuProductionController;
 use App\Modules\Menu\Http\Controllers\MenuProfitabilityController;
+use App\Modules\Menu\Http\Controllers\MenuCategoryController;
+use App\Modules\Menu\Http\Controllers\MenuCategoryPrinterMappingController;
 use App\Modules\Menu\Http\Controllers\MenuItemController;
 use App\Modules\Menu\Http\Controllers\MenuItemImageController;
 use App\Modules\Menu\Http\Controllers\PublicQrMenuController;
@@ -145,6 +148,21 @@ use App\Modules\UserManagement\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
+    Route::post('hardware/pairing/redeem', [HardwarePairingController::class, 'redeem'])
+        ->middleware('throttle:'.(string) config('hardware.pairing.redeem_rate_limit_per_minute', 10).',1');
+    Route::post('hardware/auth/refresh', [HardwarePairingController::class, 'refresh'])
+        ->middleware('throttle:30,1');
+
+    Route::middleware('auth.hardware.bridge')->group(function (): void {
+        Route::post('hardware/devices/register', [HardwareBridgeController::class, 'register']);
+        Route::post('hardware/devices/heartbeat', [HardwareBridgeController::class, 'heartbeat']);
+        Route::post('hardware/sessions/open', [HardwareBridgeController::class, 'openSession']);
+        Route::post('hardware/sessions/{session}/close', [HardwareBridgeController::class, 'closeSession']);
+        Route::get('hardware/commands/pull', [HardwareBridgeController::class, 'pullCommands']);
+        Route::post('hardware/commands/{command}/ack', [HardwareBridgeController::class, 'ack']);
+        Route::post('hardware/commands/{command}/nack', [HardwareBridgeController::class, 'nack']);
+    });
+
     Route::post('auth/login', [AuthController::class, 'login']);
 
     Route::prefix('ess')->middleware('ess.enabled')->group(function (): void {
@@ -183,6 +201,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('pos/bootstrap', [\App\Modules\Orders\Http\Controllers\PosBootstrapController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('pos/checkout-integrity-health', [\App\Modules\Orders\Http\Controllers\PosCheckoutIntegrityController::class, 'health'])->middleware(['auth:api', 'permission.any:pos.use,settings.manage']);
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments'])->middleware('auth:api');
     Route::get('orders/{order}/events', [OrderController::class, 'listEvents'])->middleware('auth:api');
@@ -200,6 +219,20 @@ Route::prefix('v1')->group(function (): void {
     Route::apiResource('menu-items', MenuItemController::class)
         ->only(['index', 'store', 'show', 'update'])
         ->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('menu-categories', [MenuCategoryController::class, 'index'])
+        ->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('menu-categories', [MenuCategoryController::class, 'store'])
+        ->middleware(['auth:api', 'permission:menu.manage']);
+    Route::put('menu-categories/{menuCategory}', [MenuCategoryController::class, 'update'])
+        ->whereNumber('menuCategory')
+        ->middleware(['auth:api', 'permission:menu.manage']);
+    Route::get('menu-category-printer-mappings', [MenuCategoryPrinterMappingController::class, 'index'])
+        ->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('menu-category-printer-mappings', [MenuCategoryPrinterMappingController::class, 'store'])
+        ->middleware(['auth:api', 'permission:menu.manage']);
+    Route::delete('menu-category-printer-mappings/{mapping}', [MenuCategoryPrinterMappingController::class, 'destroy'])
+        ->whereNumber('mapping')
+        ->middleware(['auth:api', 'permission:menu.manage']);
     Route::post('menu-items/{menuItem}/image', [MenuItemImageController::class, 'upload'])
         ->whereNumber('menuItem')
         ->middleware(['auth:api', 'permission:menu.manage']);
@@ -860,6 +893,7 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('printers', [PrinterSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
         Route::post('printers', [PrinterSettingsCrudController::class, 'store'])->middleware('permission:settings.update');
+        Route::post('printers/{printerId}/test', [PrinterSettingsCrudController::class, 'test'])->middleware('permission:settings.update');
         Route::patch('printers/{printerId}', [PrinterSettingsCrudController::class, 'update'])->middleware('permission:settings.update');
         Route::delete('printers/{printerId}', [PrinterSettingsCrudController::class, 'destroy'])->middleware('permission:settings.update');
 
@@ -1009,17 +1043,12 @@ Route::prefix('v1')->group(function (): void {
         Route::post('terminals/heartbeat', [TerminalDeviceController::class, 'heartbeat'])->middleware('permission:pos.use');
         Route::get('terminals', [TerminalDeviceController::class, 'index'])->middleware('permission:pos.use');
         Route::post('terminals/{terminal}/disable', [TerminalDeviceController::class, 'disable'])->middleware('permission:pos.use');
-        Route::post('hardware/devices/register', [HardwareBridgeController::class, 'register'])->middleware('permission:pos.use');
-        Route::post('hardware/devices/heartbeat', [HardwareBridgeController::class, 'heartbeat'])->middleware('permission:pos.use');
-        Route::post('hardware/sessions/open', [HardwareBridgeController::class, 'openSession'])->middleware('permission:pos.use');
-        Route::post('hardware/sessions/{session}/close', [HardwareBridgeController::class, 'closeSession'])->middleware('permission:pos.use');
-        Route::get('hardware/devices', [HardwareBridgeController::class, 'index'])->middleware('permission:pos.use');
-        Route::post('hardware/devices/{device}/disable', [HardwareBridgeController::class, 'disableDevice'])->middleware('permission:pos.use');
-        Route::post('hardware/devices/{device}/revoke', [HardwareBridgeController::class, 'revokeDevice'])->middleware('permission:pos.use');
+        Route::post('hardware/pairing/init', [HardwarePairingController::class, 'init'])->middleware('permission:settings.update');
+        Route::get('hardware/devices', [HardwareBridgeController::class, 'index'])->middleware('permission.any:pos.use,settings.view,settings.update');
+        Route::get('hardware/devices/summary', [HardwareBridgeController::class, 'summary'])->middleware('permission.any:pos.use,settings.view,settings.update');
+        Route::post('hardware/devices/{device}/disable', [HardwareBridgeController::class, 'disableDevice'])->middleware('permission:settings.update');
+        Route::post('hardware/devices/{device}/revoke', [HardwareBridgeController::class, 'revokeDevice'])->middleware('permission:settings.update');
         Route::post('hardware/commands/enqueue', [HardwareBridgeController::class, 'enqueueCommand'])->middleware('permission:pos.use');
-        Route::get('hardware/commands/pull', [HardwareBridgeController::class, 'pullCommands'])->middleware('permission:pos.use');
-        Route::post('hardware/commands/{command}/ack', [HardwareBridgeController::class, 'ack'])->middleware('permission:pos.use');
-        Route::post('hardware/commands/{command}/nack', [HardwareBridgeController::class, 'nack'])->middleware('permission:pos.use');
         Route::post('sync/operations/batch', [TerminalSyncController::class, 'batch'])->middleware('permission:pos.use');
         Route::post('payment-transactions/reconcile', [PaymentTransactionController::class, 'reconcile'])->middleware('permission:finance.reconcile');
         Route::post('payment-transactions/{transaction}/expire', [PaymentTransactionController::class, 'expire'])->middleware('permission:pos.use');
@@ -1060,8 +1089,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('print/routes', [PrinterRouteController::class, 'index'])->middleware('permission:settings.view');
         Route::post('print/routes', [PrinterRouteController::class, 'store'])->middleware('permission:settings.update');
         Route::delete('print/routes/{route}', [PrinterRouteController::class, 'destroy'])->middleware('permission:settings.update');
-        Route::get('print/queue/status', [PrintQueueController::class, 'status'])->middleware('permission:pos.use');
-        Route::post('print/queue/jobs/{printJob}/retry', [PrintQueueController::class, 'retry'])->middleware('permission:pos.use');
+        Route::get('print/queue/status', [PrintQueueController::class, 'status'])->middleware('permission.any:pos.use,settings.view,settings.update');
+        Route::post('print/queue/jobs/{printJob}/retry', [PrintQueueController::class, 'retry'])->middleware('permission.any:pos.use,settings.view,settings.update');
         Route::get('print/receipt-layouts', [ReceiptLayoutsController::class, 'index'])->middleware('permission:settings.view');
         Route::post('print/receipt-layouts', [ReceiptLayoutsController::class, 'store'])->middleware('permission:settings.update');
         Route::patch('print/receipt-layouts/{template}', [ReceiptLayoutsController::class, 'update'])->middleware('permission:settings.update');
@@ -1073,6 +1102,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('print/documents/{history}/reprint', [ReceiptDocumentController::class, 'reprint'])->middleware('permission:pos.use');
         Route::post('print/documents/{history}/defer', [ReceiptDocumentController::class, 'markDeferred'])->middleware('permission:pos.use');
         Route::get('qr-orders', [QrOrderController::class, 'index'])->middleware('permission.any:qr_orders.view,pos.use');
+        Route::get('qr-orders/pending-summary', [QrOrderController::class, 'pendingSummary'])->middleware('permission.any:qr_orders.view,pos.use');
         Route::get('qr-orders/customer-health', [QrOrderController::class, 'customerHealth'])->middleware('permission.any:qr_orders.view,pos.use');
         Route::get('qr-orders/search', [QrOrderController::class, 'search'])->middleware('permission.any:qr_orders.view,pos.use');
         Route::post('qr-orders/scan', [QrOrderController::class, 'scan'])->middleware('permission.any:qr_orders.view,pos.use');

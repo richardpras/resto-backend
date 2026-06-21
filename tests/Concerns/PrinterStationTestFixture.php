@@ -2,14 +2,16 @@
 
 namespace Tests\Concerns;
 
+use App\Models\Modules\Menu\Domain\MenuCategory;
+use App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Print\Domain\PrinterProfile;
-use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Production\Domain\ProductionStation;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Modules\Production\Services\ProductionStationProvisioner;
+use Illuminate\Support\Str;
 
 trait PrinterStationTestFixture
 {
@@ -39,21 +41,36 @@ trait PrinterStationTestFixture
         ]);
     }
 
-    protected function createStationRoute(
-        Outlet $outlet,
-        PrinterProfile $profile,
-        ProductionStation $station,
-        int $priority = 10,
-    ): PrinterRoute {
-        return PrinterRoute::query()->create([
+    protected function ensureMenuCategory(string $name): MenuCategory
+    {
+        $existing = MenuCategory::query()
+            ->whereRaw('LOWER(name) = ?', [strtolower($name)])
+            ->first();
+        if ($existing instanceof MenuCategory) {
+            return $existing;
+        }
+
+        return MenuCategory::query()->create([
             'tenant_id' => 1,
-            'outlet_id' => $outlet->id,
-            'printer_profile_id' => $profile->id,
-            'print_type' => 'kitchen',
-            'route_scope' => 'production_station',
-            'production_station_id' => $station->id,
-            'station_code' => strtolower((string) $station->code),
-            'station' => strtolower((string) $station->code),
+            'code' => Str::slug(strtolower($name), '_') ?: 'category',
+            'name' => $name,
+            'name_en' => $name,
+            'name_id' => $name,
+            'is_active' => true,
+        ]);
+    }
+
+    protected function createCategoryMapping(
+        Outlet $outlet,
+        MenuCategory $category,
+        PrinterProfile $profile,
+        int $priority = 10,
+    ): MenuCategoryPrinterMapping {
+        return MenuCategoryPrinterMapping::query()->create([
+            'tenant_id' => 1,
+            'outlet_id' => (int) $outlet->id,
+            'menu_category_id' => (int) $category->id,
+            'printer_profile_id' => (int) $profile->id,
             'priority' => $priority,
             'is_active' => true,
         ]);
@@ -65,11 +82,14 @@ trait PrinterStationTestFixture
         ProductionStation $station,
         string $category = 'Food',
     ): MenuItem {
+        $menuCategory = $this->ensureMenuCategory($category);
+
         return MenuItem::query()->create([
             'tenant_id' => 1,
             'outlet_id' => $outlet->id,
             'name' => $name,
             'category' => $category,
+            'menu_category_id' => (int) $menuCategory->id,
             'production_station_id' => $station->id,
             'price' => 10000,
             'available' => true,

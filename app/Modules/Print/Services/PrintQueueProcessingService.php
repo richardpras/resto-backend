@@ -2,7 +2,6 @@
 
 namespace App\Modules\Print\Services;
 
-use App\Jobs\Print\ProcessPrintJob;
 use App\Models\Modules\Print\Domain\PrintJob;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -14,9 +13,9 @@ class PrintQueueProcessingService
         private readonly PrintBridgeDispatchService $bridgeDispatch,
     ) {}
 
-    public function processJob(int $printJobId, int $outletId): void
+    public function processJob(int $printJobId, int $outletId, string $lockedBy = 'queue:print'): void
     {
-        DB::transaction(function () use ($printJobId, $outletId): void {
+        DB::transaction(function () use ($printJobId, $outletId, $lockedBy): void {
             $job = PrintJob::query()
                 ->whereKey($printJobId)
                 ->where('outlet_id', $outletId)
@@ -38,7 +37,7 @@ class PrintQueueProcessingService
 
             $job->attempts = (int) $job->attempts + 1;
             $job->locked_at = now();
-            $job->locked_by = 'queue:print';
+            $job->locked_by = $lockedBy;
             $job->last_attempt_at = now();
             $job->save();
             $this->stateService->appendEvent($job, 'processing', 'pending', [
@@ -84,7 +83,7 @@ class PrintQueueProcessingService
         $job->save();
         $this->stateService->appendEvent($job, 'retry_requested', 'pending');
         $this->stateService->emitLifecycle($job->fresh(), 'retry-requested');
-        ProcessPrintJob::dispatch((int) $job->id, $outletId);
+        app(PrintDispatchService::class)->dispatch((int) $job->id, $outletId);
 
         return $job;
     }

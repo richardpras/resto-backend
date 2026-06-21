@@ -3,9 +3,12 @@
 namespace Database\Seeders\Support;
 
 use App\Models\Modules\Kitchen\Domain\KitchenTicket;
+use App\Models\Modules\Menu\Domain\MenuCategory;
+use App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
+use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Production\Domain\ProductionStation;
 use App\Models\Modules\Settings\Domain\Outlet;
@@ -31,6 +34,8 @@ final class DemoProductionReadinessPatch
         self::seedInventoryConsumptionPolicy();
         self::seedOutletPaymentMethodConfigs();
         self::assignProductionStationsToActiveMenuItems();
+        self::linkMenuItemsToMasterCategories();
+        self::seedCategoryPrinterMappings();
         self::seedStationRoutingShowcase();
         self::seedKdsStatusShowcase();
         self::seedSoundAlertOrders();
@@ -129,6 +134,90 @@ final class DemoProductionReadinessPatch
             in_array($category, ['dessert'], true) => 'dessert',
             default => 'kitchen',
         };
+    }
+
+    private static function linkMenuItemsToMasterCategories(): void
+    {
+        MenuItem::query()
+            ->whereNull('menu_category_id')
+            ->each(function (MenuItem $item): void {
+                $name = trim((string) ($item->category ?? ''));
+                if ($name === '') {
+                    $name = 'Uncategorized';
+                }
+
+                $tenantId = $item->tenant_id !== null ? (int) $item->tenant_id : null;
+                $category = MenuCategory::query()
+                    ->when(
+                        $tenantId !== null,
+                        fn ($query) => $query->where('tenant_id', $tenantId),
+                        fn ($query) => $query->whereNull('tenant_id'),
+                    )
+                    ->whereRaw('LOWER(name) = ?', [strtolower($name)])
+                    ->first();
+
+                if (! $category instanceof MenuCategory) {
+                    $category = MenuCategory::query()->create([
+                        'tenant_id' => $tenantId,
+                        'code' => \Illuminate\Support\Str::slug(strtolower($name), '_') ?: 'uncategorized',
+                        'name' => $name,
+                        'name_en' => $name,
+                        'name_id' => $name,
+                        'is_active' => true,
+                    ]);
+                }
+
+                $item->menu_category_id = (int) $category->id;
+                $item->category = $name;
+                $item->save();
+            });
+    }
+
+    private static function seedCategoryPrinterMappings(): void
+    {
+        $categoryMap = [
+            'food' => 'kitchen',
+            'beverage' => 'bar',
+            'dessert' => 'dessert',
+            'bar' => 'bar',
+        ];
+
+        foreach (DemoSeederContext::outlets() as $outlet) {
+            $categories = MenuCategory::query()
+                ->get()
+                ->keyBy(fn (MenuCategory $category): string => strtolower((string) $category->name));
+
+            $profiles = PrinterProfile::query()
+                ->where('outlet_id', (int) $outlet->id)
+                ->get()
+                ->keyBy(fn (PrinterProfile $profile): string => strtolower((string) ($profile->station ?? '')));
+
+            if ($profiles->get('dessert') === null && $profiles->get('bakery') !== null) {
+                $categoryMap['dessert'] = 'bakery';
+            }
+
+            foreach ($categoryMap as $categoryName => $stationCode) {
+                $category = $categories->get(strtolower($categoryName));
+                $profile = $profiles->get(strtolower($stationCode));
+                if ($category === null || $profile === null) {
+                    continue;
+                }
+
+                MenuCategoryPrinterMapping::query()->updateOrCreate(
+                    [
+                        'outlet_id' => (int) $outlet->id,
+                        'menu_category_id' => (int) $category->id,
+                    ],
+                    [
+                        'tenant_id' => $category->tenant_id,
+                        'printer_profile_id' => (int) $profile->id,
+                        'priority' => 10,
+                        'is_active' => true,
+                        'meta' => ['seed' => 'demo-category-printer-mapping'],
+                    ],
+                );
+            }
+        }
     }
 
     private static function seedStationRoutingShowcase(): void

@@ -18,21 +18,20 @@ class StoreMenuItemRequest extends FormRequest
             'tenantId' => ['nullable', 'integer', 'min:1'],
             'outletId' => ['nullable', 'integer', 'min:1'],
             'name' => ['required', 'string', 'max:255'],
-            'category' => ['nullable', 'string', 'max:100'],
-            'emoji' => ['nullable', 'string', 'max:10'],
-            'price' => ['required', 'numeric', 'min:0'],
-            'available' => ['sometimes', 'boolean'],
-            'productionStationId' => [
-                'nullable',
+            'menuCategoryId' => [
+                'required',
                 'integer',
                 'min:1',
-                Rule::exists('production_stations', 'id')->where(function ($query): void {
-                    $outletId = $this->input('outletId');
-                    if (is_numeric($outletId) && (int) $outletId > 0) {
-                        $query->where('outlet_id', (int) $outletId);
+                Rule::exists('menu_categories', 'id')->where(function ($query): void {
+                    $tenantId = $this->input('tenantId');
+                    if (is_numeric($tenantId) && (int) $tenantId > 0) {
+                        $query->where('tenant_id', (int) $tenantId);
                     }
                 }),
             ],
+            'emoji' => ['nullable', 'string', 'max:10'],
+            'price' => ['required', 'numeric', 'min:0'],
+            'available' => ['sometimes', 'boolean'],
             'recipes' => ['sometimes', 'array'],
             'recipes.*.inventoryItemId' => [
                 'required_with:recipes',

@@ -3,6 +3,7 @@
 namespace App\Modules\Menu\Http\Resources;
 
 use App\Modules\Menu\Services\MenuImageService;
+use App\Support\AppLocale;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -32,11 +33,38 @@ class MenuItemResource extends JsonResource
         }
 
         $menuImageService = app(MenuImageService::class);
+        $locale = AppLocale::fromRequest($request);
+        $categoryDisplayName = $this->menuCategory !== null
+            ? ($locale === 'id'
+                ? ($this->menuCategory->name_id ?: ($this->menuCategory->name_en ?: $this->menuCategory->name))
+                : ($this->menuCategory->name_en ?: ($this->menuCategory->name_id ?: $this->menuCategory->name)))
+            : ($this->category ?? 'Uncategorized');
 
         return [
             'id' => (string) $this->id,
             'name' => $displayName,
-            'category' => $this->category,
+            'category' => $categoryDisplayName,
+            'menuCategory' => $this->whenLoaded('menuCategory', function () use ($locale) {
+                if ($this->menuCategory === null) {
+                    return null;
+                }
+                $displayName = $locale === 'id'
+                    ? ($this->menuCategory->name_id ?: ($this->menuCategory->name_en ?: $this->menuCategory->name))
+                    : ($this->menuCategory->name_en ?: ($this->menuCategory->name_id ?: $this->menuCategory->name));
+
+                return [
+                    'id' => (int) $this->menuCategory->id,
+                    'code' => (string) $this->menuCategory->code,
+                    'name' => (string) $this->menuCategory->name,
+                    'nameEn' => $this->menuCategory->name_en !== null ? (string) $this->menuCategory->name_en : null,
+                    'nameId' => $this->menuCategory->name_id !== null ? (string) $this->menuCategory->name_id : null,
+                    'displayName' => (string) $displayName,
+                    'description' => $this->menuCategory->description,
+                    'sortOrder' => (int) $this->menuCategory->sort_order,
+                    'isActive' => (bool) $this->menuCategory->is_active,
+                ];
+            }),
+            'menuCategoryId' => $this->menu_category_id !== null ? (int) $this->menu_category_id : null,
             'emoji' => $this->emoji,
             'imageUrl' => $this->image_path ? $menuImageService->publicUrl($this->resource) : null,
             'imageVersion' => (int) $this->image_version,

@@ -45,6 +45,7 @@ class QrOrderRequestResource extends JsonResource
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($item) => [
                 'id' => (string) $item->id,
                 'menuItemId' => (int) $item->menu_item_id,
+                'name' => (string) ($item->menuItem?->name ?? 'Menu Item'),
                 'qty' => (float) $item->qty,
                 'notes' => $item->notes,
             ])->values()),

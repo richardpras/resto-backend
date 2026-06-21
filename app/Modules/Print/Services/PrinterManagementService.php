@@ -2,17 +2,18 @@
 
 namespace App\Modules\Print\Services;
 
-use App\Models\Modules\Hardware\Domain\HardwareBridgeDevice;
 use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Production\Domain\ProductionStation;
+use App\Modules\Hardware\Services\HardwareBridgeService;
 use Illuminate\Support\Collection;
 
 class PrinterManagementService
 {
     public function __construct(
         private readonly PrintQueueProcessingService $queueProcessingService,
+        private readonly HardwareBridgeService $hardwareBridgeService,
     ) {}
 
     /**
@@ -83,6 +84,9 @@ class PrinterManagementService
             'retry_policy' => $payload['retryPolicy'] ?? null,
             'meta' => $payload['meta'] ?? null,
         ]);
+        if (! $profile->isDirty()) {
+            return $profile;
+        }
         $profile->save();
 
         return $profile;
@@ -172,8 +176,9 @@ class PrinterManagementService
      */
     public function queueStatus(int $outletId): array
     {
-        $pending = (int) PrintJob::query()->where('outlet_id', $outletId)->where('status', 'pending')->count();
-        $failed = (int) PrintJob::query()->where('outlet_id', $outletId)->where('status', 'failed')->count();
+        $counters = app(PrintDispatchService::class)->queueCounters($outletId);
+        $pending = (int) ($counters['pending'] ?? 0);
+        $failed = (int) ($counters['failed'] ?? 0);
         $awaitingAck = (int) PrintJob::query()
             ->where('outlet_id', $outletId)
             ->where('status', 'pending')
@@ -185,13 +190,7 @@ class PrinterManagementService
             ->whereDate('processed_at', now()->toDateString())
             ->count();
 
-        $bridgeConnected = HardwareBridgeDevice::query()
-            ->where('outlet_id', $outletId)
-            ->where('status', 'active')
-            ->whereNull('disabled_at')
-            ->whereNull('revoked_at')
-            ->where('last_seen_at', '>=', now()->subMinutes(max(1, (int) config('hardware.session_stale_after_minutes', 15))))
-            ->exists();
+        $bridgeConnected = $this->hardwareBridgeService->isBridgeOnlineForOutlet($outletId);
 
         $profiles = PrinterProfile::query()
             ->where('outlet_id', $outletId)
@@ -245,8 +244,12 @@ class PrinterManagementService
 
         return [
             'outletId' => $outletId,
+            'dispatchMode' => (string) ($counters['dispatchMode'] ?? 'queue_worker'),
             'pending' => $pending,
             'failed' => $failed,
+            'retried' => (int) ($counters['retried'] ?? 0),
+            'recoverable' => (int) ($counters['recoverable'] ?? 0),
+            'deadLetter' => (int) ($counters['deadLetter'] ?? 0),
             'awaitingAck' => $awaitingAck,
             'doneToday' => $doneToday,
             'bridgeConnected' => $bridgeConnected,

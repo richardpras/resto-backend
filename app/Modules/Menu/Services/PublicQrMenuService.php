@@ -25,6 +25,7 @@ class PublicQrMenuService
         }
 
         return MenuItem::query()
+            ->with('menuCategory')
             ->where('available', true)
             ->whereHas(
                 'outletMappings',

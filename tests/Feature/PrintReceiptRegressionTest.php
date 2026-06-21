@@ -47,7 +47,8 @@ class PrintReceiptRegressionTest extends TestCase
         ]);
 
         $kitchenProfile = $this->createKitchenProfile($outlet, 'kitchen-receipt', 'kitchen');
-        $this->createStationRoute($outlet, $kitchenProfile, $stations['kitchen']);
+        $foodCategory = $this->ensureMenuCategory('Food');
+        $this->createCategoryMapping($outlet, $foodCategory, $kitchenProfile);
 
         $rokok = $this->createMenuItemForStation($outlet, 'Rokok Marlboro', $stations['cashier'], 'Retail');
         $nasi = $this->createMenuItemForStation($outlet, 'Nasi Goreng', $stations['kitchen']);

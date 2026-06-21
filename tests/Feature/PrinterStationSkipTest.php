@@ -27,7 +27,8 @@ class PrinterStationSkipTest extends TestCase
         $outlet = $this->createOutlet();
         $stations = $this->provisionPrintStations($outlet);
         $kitchenProfile = $this->createKitchenProfile($outlet, 'kitchen-skip', 'kitchen');
-        $this->createStationRoute($outlet, $kitchenProfile, $stations['kitchen']);
+        $retailCategory = $this->ensureMenuCategory('Retail');
+        $this->createCategoryMapping($outlet, $retailCategory, $kitchenProfile);
 
         $rokok = $this->createMenuItemForStation($outlet, 'Rokok Marlboro', $stations['cashier'], 'Retail');
         $order = $this->createOrderWithMenuItems($outlet, [$rokok]);

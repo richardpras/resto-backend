@@ -6,11 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Modules\Orders\Http\Requests\AdjustQrOrderRequest;
 use App\Modules\Orders\Http\Requests\CallQrOrderCashierRequest;
 use App\Modules\Orders\Http\Requests\ConfirmQrOrderRequest;
+use App\Modules\Orders\Http\Requests\ListQrOrderPendingSummaryRequest;
 use App\Modules\Orders\Http\Requests\ListQrOrderRequestsRequest;
 use App\Modules\Orders\Http\Requests\RejectQrOrderRequest;
 use App\Modules\Orders\Http\Requests\ScanQrOrderRequest;
 use App\Modules\Orders\Http\Requests\SearchQrOrderRequest;
 use App\Modules\Orders\Http\Requests\StoreQrOrderRequest;
+use App\Modules\Orders\Http\Resources\QrOrderPendingSummaryEntryResource;
 use App\Modules\Orders\Http\Resources\QrOrderPosOpenResource;
 use App\Modules\Orders\Http\Resources\QrOrderPreviewResource;
 use App\Modules\Orders\Http\Resources\QrOrderRequestResource;
@@ -87,6 +89,25 @@ class QrOrderController extends Controller
                 'total' => $requests->total(),
                 'lastPage' => $requests->lastPage(),
                 'last_page' => $requests->lastPage(),
+            ],
+        ]);
+    }
+
+    public function pendingSummary(ListQrOrderPendingSummaryRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        $summary = $this->qrOrderRequestService->pendingSummary(
+            $user,
+            (int) $request->validated('outletId'),
+        );
+
+        return response()->json([
+            'data' => [
+                'count' => $summary['count'],
+                'ids' => $summary['ids'],
+                'entries' => QrOrderPendingSummaryEntryResource::collection(collect($summary['entries'])),
             ],
         ]);
     }

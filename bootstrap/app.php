@@ -22,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \App\Http\Middleware\EnsurePermission::class,
             'permission.any' => \App\Http\Middleware\EnsureAnyPermission::class,
             'ess.enabled' => \App\Http\Middleware\EnsureEmployeeSelfServiceEnabled::class,
+            'auth.hardware.bridge' => \App\Http\Middleware\AuthenticateHardwareBridge::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

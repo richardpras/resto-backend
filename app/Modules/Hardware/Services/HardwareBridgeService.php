@@ -21,6 +21,7 @@ use App\Models\Modules\Hardware\Domain\HardwareDeviceEvent;
 use App\Models\Modules\Hardware\Domain\HardwareDeviceSession;
 use App\Models\Modules\Hardware\Domain\PrinterDeviceProfile;
 use App\Models\User;
+use App\Modules\Hardware\Support\HardwareBridgeAuthContext;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
@@ -34,32 +35,39 @@ class HardwareBridgeService
 {
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
+        private readonly HardwareDeviceAuthService $deviceAuthService,
     ) {}
 
-    /** @param array<string,mixed> $data */
-    public function registerDevice(User $user, array $data): HardwareBridgeDevice
-    {
-        $outletId = (int) $data['outletId'];
-        $this->assertOutletAllowed($user, $outletId);
-
+    /**
+     * @param  array<string,mixed>|null  $capabilities
+     * @param  array<string,mixed>  $metadata
+     */
+    public function registerDeviceInternal(
+        int $outletId,
+        string $deviceKey,
+        ?string $displayLabel,
+        ?array $capabilities,
+        array $metadata = [],
+    ): HardwareBridgeDevice {
         $device = HardwareBridgeDevice::query()->updateOrCreate(
             [
                 'outlet_id' => $outletId,
-                'device_key' => trim((string) $data['deviceKey']),
+                'device_key' => trim($deviceKey),
             ],
             [
-                'display_label' => isset($data['displayLabel']) ? trim((string) $data['displayLabel']) : null,
-                'capabilities' => isset($data['capabilities']) && is_array($data['capabilities']) ? $data['capabilities'] : null,
-                'metadata' => $this->mergeOperationalMetadata([], isset($data['metadata']) && is_array($data['metadata']) ? $data['metadata'] : []),
+                'display_label' => $displayLabel !== null ? trim($displayLabel) : null,
+                'capabilities' => $capabilities,
+                'metadata' => $this->mergeOperationalMetadata([], $metadata),
                 'status' => 'active',
                 'disabled_at' => null,
                 'revoked_at' => null,
+                'last_seen_at' => now(),
             ]
         );
 
         event(new BridgeConnected($outletId, (int) $device->id, (string) $device->device_key));
         event(new BridgeLifecycleConnected($outletId, (int) $device->id, (string) $device->device_key));
-        if ((bool) data_get($data, 'metadata.bluetoothPaired', false)) {
+        if ((bool) data_get($metadata, 'bluetoothPaired', false)) {
             event(new BluetoothPrinterPaired($outletId, (int) $device->id, (string) $device->device_key));
         }
 
@@ -70,11 +78,47 @@ class HardwareBridgeService
     }
 
     /** @param array<string,mixed> $data */
-    public function heartbeat(User $user, array $data): HardwareBridgeDevice
+    public function registerDevice(User $user, array $data): HardwareBridgeDevice
+    {
+        return $this->registerDeviceForContext(HardwareBridgeAuthContext::fromUser($user), $data);
+    }
+
+    /** @param array<string,mixed> $data */
+    public function registerDeviceForContext(HardwareBridgeAuthContext $context, array $data): HardwareBridgeDevice
     {
         $outletId = (int) $data['outletId'];
-        $this->assertOutletAllowed($user, $outletId);
+        $context->assertOutletAllowed($outletId, $this->outletAccessResolver);
+        $deviceKey = trim((string) $data['deviceKey']);
+        if ($context->isDeviceAuth()) {
+            if ((int) $context->device->outlet_id !== $outletId || (string) $context->device->device_key !== $deviceKey) {
+                throw ValidationException::withMessages([
+                    'deviceKey' => ['The authenticated bridge device cannot register for another identity.'],
+                ]);
+            }
+        }
+
+        return $this->registerDeviceInternal(
+            $outletId,
+            $deviceKey,
+            isset($data['displayLabel']) ? trim((string) $data['displayLabel']) : null,
+            isset($data['capabilities']) && is_array($data['capabilities']) ? $data['capabilities'] : null,
+            isset($data['metadata']) && is_array($data['metadata']) ? $data['metadata'] : [],
+        );
+    }
+
+    /** @param array<string,mixed> $data */
+    public function heartbeat(User $user, array $data): HardwareBridgeDevice
+    {
+        return $this->heartbeatForContext(HardwareBridgeAuthContext::fromUser($user), $data);
+    }
+
+    /** @param array<string,mixed> $data */
+    public function heartbeatForContext(HardwareBridgeAuthContext $context, array $data): HardwareBridgeDevice
+    {
+        $outletId = (int) $data['outletId'];
+        $context->assertOutletAllowed($outletId, $this->outletAccessResolver);
         $device = $this->resolveUsableDevice($outletId, (string) $data['deviceKey']);
+        $context->assertDeviceMatches($device);
 
         $now = CarbonImmutable::now();
         $gapMinutes = max(1, (int) config('hardware.reconnect_gap_minutes', 30));
@@ -161,9 +205,16 @@ class HardwareBridgeService
     /** @param array<string,mixed> $data */
     public function openSession(User $user, array $data): HardwareDeviceSession
     {
+        return $this->openSessionForContext(HardwareBridgeAuthContext::fromUser($user), $data);
+    }
+
+    /** @param array<string,mixed> $data */
+    public function openSessionForContext(HardwareBridgeAuthContext $context, array $data): HardwareDeviceSession
+    {
         $outletId = (int) $data['outletId'];
-        $this->assertOutletAllowed($user, $outletId);
+        $context->assertOutletAllowed($outletId, $this->outletAccessResolver);
         $device = $this->resolveUsableDevice($outletId, (string) $data['deviceKey']);
+        $context->assertDeviceMatches($device);
 
         $runtimeState = HardwareRuntimeContract::normalizeRuntimeState(data_get($data, 'runtimeState'), 'connected');
         $session = HardwareDeviceSession::query()->create([
@@ -211,14 +262,13 @@ class HardwareBridgeService
     /** @param array<string,mixed> $data */
     public function closeSession(User $user, int $sessionId, array $data): HardwareDeviceSession
     {
-        $allowedOutletIds = $this->outletAccessResolver->allowedOutletIds($user);
-        $session = HardwareDeviceSession::query()
-            ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
-            ->whereKey($sessionId)
-            ->first();
-        if ($session === null) {
-            throw (new ModelNotFoundException)->setModel(HardwareDeviceSession::class, [(string) $sessionId]);
-        }
+        return $this->closeSessionForContext(HardwareBridgeAuthContext::fromUser($user), $sessionId, $data);
+    }
+
+    /** @param array<string,mixed> $data */
+    public function closeSessionForContext(HardwareBridgeAuthContext $context, int $sessionId, array $data): HardwareDeviceSession
+    {
+        $session = $this->resolveSessionForContext($context, $sessionId);
 
         $session->status = 'closed';
         $session->closed_at = now();
@@ -248,6 +298,168 @@ class HardwareBridgeService
             ->orderByDesc('last_seen_at')
             ->orderBy('id')
             ->get();
+    }
+
+    public function isBridgeOnlineForOutlet(int $outletId): bool
+    {
+        $graceSeconds = max(60, (int) config('hardware.bridge_online_grace_seconds', 120));
+
+        return HardwareBridgeDevice::query()
+            ->where('outlet_id', $outletId)
+            ->where('status', 'active')
+            ->whereNull('disabled_at')
+            ->whereNull('revoked_at')
+            ->where('last_seen_at', '>=', now()->subSeconds($graceSeconds))
+            ->exists();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listDeviceSummaries(User $user, int $outletId): array
+    {
+        return $this->listDevices($user, $outletId)
+            ->map(fn (HardwareBridgeDevice $device): array => $this->summarizeDevice($device))
+            ->values()
+            ->all();
+    }
+
+    /** @return array<string, mixed> */
+    public function summarizeDevice(HardwareBridgeDevice $device): array
+    {
+        $metadata = is_array($device->metadata) ? $device->metadata : [];
+        $capabilities = is_array($device->capabilities) ? $device->capabilities : [];
+        $provisioning = (array) ($metadata['provisioning'] ?? []);
+        $auth = (array) ($metadata['auth'] ?? []);
+        $tokenHealth = (array) ($auth['tokenHealth'] ?? []);
+        $rotation = (array) ($auth['rotation'] ?? []);
+        $watchdog = (array) ($metadata['watchdog'] ?? []);
+        $deployment = (array) ($metadata['deployment'] ?? []);
+        $updates = (array) ($metadata['updates'] ?? []);
+        $transportHints = $this->normalizeTransportHints($metadata, $capabilities);
+
+        return [
+            'id' => (int) $device->id,
+            'outletId' => (int) $device->outlet_id,
+            'deviceKey' => (string) $device->device_key,
+            'displayLabel' => $device->display_label,
+            'status' => (string) $device->status,
+            'lastSeenAt' => $device->last_seen_at?->toIso8601String(),
+            'revokedAt' => $device->revoked_at?->toIso8601String(),
+            'disabledAt' => $device->disabled_at?->toIso8601String(),
+            'reconnectCount' => (int) $device->reconnect_count,
+            'connectionHint' => $this->resolveConnectionHint($transportHints, $capabilities),
+            'transportHints' => $transportHints,
+            'provisioning' => [
+                'status' => (string) ($provisioning['status'] ?? ($provisioning['pairingTokenRef'] ?? null ? 'paired' : 'unpaired')),
+                'pairedAt' => isset($provisioning['pairedAt']) ? (string) $provisioning['pairedAt'] : null,
+                'pairedOutletId' => isset($provisioning['pairedOutletId']) ? (string) $provisioning['pairedOutletId'] : null,
+                'deviceFingerprint' => isset($auth['deviceFingerprint']) ? (string) $auth['deviceFingerprint'] : null,
+                'tokenHealth' => (string) ($tokenHealth['status'] ?? 'unknown'),
+                'tokenRotationDue' => (bool) ($rotation['rotationDue'] ?? false),
+            ],
+            'watchdog' => [
+                'state' => (string) ($watchdog['state'] ?? 'healthy'),
+                'restartCount' => (int) ($watchdog['restartCount'] ?? 0),
+                'crashCount' => (int) ($watchdog['crashCount'] ?? 0),
+                'stalledSpoolDetected' => (bool) ($watchdog['stalledSpoolDetected'] ?? false),
+                'freezeDetected' => (bool) ($watchdog['freezeDetected'] ?? false),
+            ],
+            'runtime' => [
+                'version' => (string) ($metadata['runtimeVersion'] ?? 'unknown'),
+                'deploymentMode' => (string) ($deployment['deploymentMode'] ?? 'headless'),
+                'serviceMode' => (string) ($deployment['serviceMode'] ?? 'unknown'),
+                'trayMode' => (string) ($deployment['trayMode'] ?? 'unknown'),
+                'updateChannel' => (string) ($updates['channel'] ?? 'stable'),
+                'updateAvailable' => (bool) ($updates['available'] ?? false),
+                'updateTargetVersion' => isset($updates['targetVersion']) ? (string) $updates['targetVersion'] : null,
+                'updateRestartRequired' => (bool) ($updates['restartRequired'] ?? false),
+            ],
+            'runtimeState' => HardwareRuntimeContract::normalizeRuntimeState(
+                isset($metadata['runtimeState']) ? (string) $metadata['runtimeState'] : null,
+                'connected'
+            ),
+            'capabilitiesSummary' => $this->summarizeCapabilities($capabilities, $metadata),
+        ];
+    }
+
+    /** @param array<string, mixed> $capabilities @param array<string, mixed> $metadata @return list<string> */
+    private function normalizeTransportHints(array $metadata, array $capabilities): array
+    {
+        $hints = [];
+        if (isset($metadata['transportHints']) && is_array($metadata['transportHints'])) {
+            foreach ($metadata['transportHints'] as $hint) {
+                if (is_string($hint) && trim($hint) !== '') {
+                    $hints[] = strtolower(trim($hint));
+                }
+            }
+        }
+        if ($capabilities['bluetooth'] ?? false) {
+            $hints[] = 'bluetooth';
+        }
+        if (($capabilities['lan'] ?? false) || ($capabilities['network'] ?? false)) {
+            $hints[] = 'lan';
+        }
+
+        return array_values(array_unique($hints));
+    }
+
+    /** @param list<string> $transportHints @param array<string, mixed> $capabilities */
+    private function resolveConnectionHint(array $transportHints, array $capabilities): string
+    {
+        foreach ($transportHints as $hint) {
+            if (str_contains($hint, 'bluetooth')) {
+                return 'bluetooth';
+            }
+            if (str_contains($hint, 'lan') || str_contains($hint, 'ethernet')) {
+                return 'lan';
+            }
+        }
+        if ($capabilities['bluetooth'] ?? false) {
+            return 'bluetooth';
+        }
+        if (($capabilities['lan'] ?? false) || ($capabilities['network'] ?? false)) {
+            return 'lan';
+        }
+
+        return 'unknown';
+    }
+
+    /** @param array<string, mixed> $capabilities @param array<string, mixed> $metadata @return array{transports: list<string>, capabilities: list<string>, spoolSupported: bool} */
+    private function summarizeCapabilities(array $capabilities, array $metadata): array
+    {
+        $capabilityNames = [];
+        foreach ($capabilities as $name => $value) {
+            if ($value === true) {
+                $capabilityNames[] = (string) $name;
+            }
+        }
+
+        $transports = [];
+        foreach (['transports', 'capabilities'] as $key) {
+            $bucket = $capabilities[$key] ?? data_get($metadata, $key);
+            if (! is_array($bucket)) {
+                continue;
+            }
+            foreach ($bucket as $entry) {
+                if (is_string($entry) && trim($entry) !== '') {
+                    $transports[] = trim($entry);
+                }
+            }
+        }
+
+        $spoolSupported = (bool) data_get($capabilities, 'spool.supported', false)
+            || (bool) data_get($metadata, 'spoolContract', false);
+
+        foreach ($capabilities as $name => $value) {
+            if (is_string($name) && str_contains(strtolower($name), 'spool') && (bool) $value) {
+                $spoolSupported = true;
+            }
+        }
+
+        return [
+            'transports' => array_values(array_unique($transports !== [] ? $transports : ['polling'])),
+            'capabilities' => array_values(array_unique($capabilityNames)),
+            'spoolSupported' => $spoolSupported,
+        ];
     }
 
     /** @param array<string,mixed> $data */
@@ -282,6 +494,7 @@ class HardwareBridgeService
             $device->status = 'revoked';
             $device->revoked_at = now();
             $device->disabled_at = null;
+            $this->deviceAuthService->revokeCredentials($device);
         }
 
         $device->save();
@@ -412,9 +625,16 @@ class HardwareBridgeService
      */
     public function pullCommands(User $user, array $filters): array
     {
+        return $this->pullCommandsForContext(HardwareBridgeAuthContext::fromUser($user), $filters);
+    }
+
+    /** @param array<string,mixed> $filters */
+    public function pullCommandsForContext(HardwareBridgeAuthContext $context, array $filters): array
+    {
         $outletId = (int) $filters['outletId'];
-        $this->assertOutletAllowed($user, $outletId);
+        $context->assertOutletAllowed($outletId, $this->outletAccessResolver);
         $device = $this->resolveUsableDevice($outletId, (string) $filters['deviceKey']);
+        $context->assertDeviceMatches($device);
         $afterCommandId = isset($filters['afterCommandId']) ? (int) $filters['afterCommandId'] : null;
         $limit = min(100, max(1, (int) ($filters['limit'] ?? config('hardware.pull_command_default_limit', 25))));
 
@@ -471,14 +691,13 @@ class HardwareBridgeService
     /** @param array<string,mixed> $data */
     public function acknowledgeCommand(User $user, int $commandId, bool $isAck, array $data): HardwareCommandLog
     {
-        $allowedOutletIds = $this->outletAccessResolver->allowedOutletIds($user);
-        $command = HardwareCommandLog::query()
-            ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
-            ->whereKey($commandId)
-            ->first();
-        if ($command === null) {
-            throw (new ModelNotFoundException)->setModel(HardwareCommandLog::class, [(string) $commandId]);
-        }
+        return $this->acknowledgeCommandForContext(HardwareBridgeAuthContext::fromUser($user), $commandId, $isAck, $data);
+    }
+
+    /** @param array<string,mixed> $data */
+    public function acknowledgeCommandForContext(HardwareBridgeAuthContext $context, int $commandId, bool $isAck, array $data): HardwareCommandLog
+    {
+        $command = $this->resolveCommandForContext($context, $commandId);
 
         if ($isAck && in_array(HardwareRuntimeContract::toSpoolStatus((string) $command->status), ['acknowledged', 'dead_letter'], true)) {
             return $command;
@@ -662,6 +881,52 @@ class HardwareBridgeService
         ], (array) ($merged['deployment'] ?? []));
 
         return $merged;
+    }
+
+    private function resolveCommandForContext(HardwareBridgeAuthContext $context, int $commandId): HardwareCommandLog
+    {
+        if ($context->device !== null) {
+            $command = HardwareCommandLog::query()
+                ->where('outlet_id', (int) $context->device->outlet_id)
+                ->where('hardware_bridge_device_id', (int) $context->device->id)
+                ->whereKey($commandId)
+                ->first();
+        } else {
+            $allowedOutletIds = $this->outletAccessResolver->allowedOutletIds($context->user);
+            $command = HardwareCommandLog::query()
+                ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
+                ->whereKey($commandId)
+                ->first();
+        }
+
+        if ($command === null) {
+            throw (new ModelNotFoundException)->setModel(HardwareCommandLog::class, [(string) $commandId]);
+        }
+
+        return $command;
+    }
+
+    private function resolveSessionForContext(HardwareBridgeAuthContext $context, int $sessionId): HardwareDeviceSession
+    {
+        if ($context->device !== null) {
+            $session = HardwareDeviceSession::query()
+                ->where('outlet_id', (int) $context->device->outlet_id)
+                ->where('hardware_bridge_device_id', (int) $context->device->id)
+                ->whereKey($sessionId)
+                ->first();
+        } else {
+            $allowedOutletIds = $this->outletAccessResolver->allowedOutletIds($context->user);
+            $session = HardwareDeviceSession::query()
+                ->whereIn('outlet_id', $allowedOutletIds === [] ? [-1] : $allowedOutletIds)
+                ->whereKey($sessionId)
+                ->first();
+        }
+
+        if ($session === null) {
+            throw (new ModelNotFoundException)->setModel(HardwareDeviceSession::class, [(string) $sessionId]);
+        }
+
+        return $session;
     }
 
     private function assertOutletAllowed(User $user, int $outletId): void

@@ -99,6 +99,11 @@ Schedule::command('qr-orders:expire-pending')
     ->withoutOverlapping()
     ->name('qr-orders-expire-pending');
 
+Schedule::command('print:process-pending')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->name('print-process-pending');
+
 Schedule::call(static function (): void {
     ProductionCheckService::recordSchedulerHeartbeat();
 })->everyMinute()->name('system-scheduler-heartbeat');

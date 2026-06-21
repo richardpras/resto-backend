@@ -5,11 +5,12 @@ namespace App\Events\Realtime;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Str;
 
-abstract class OutletRealtimeEvent implements ShouldBroadcast
+abstract class OutletRealtimeEvent implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     use Dispatchable;
     use Queueable;

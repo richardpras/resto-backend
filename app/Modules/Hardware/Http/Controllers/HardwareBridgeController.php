@@ -3,16 +3,20 @@
 namespace App\Modules\Hardware\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Modules\Hardware\Domain\HardwareBridgeDevice;
 use App\Models\User;
 use App\Modules\Hardware\Http\Requests\CloseHardwareSessionRequest;
 use App\Modules\Hardware\Http\Requests\EnqueueHardwareCommandRequest;
 use App\Modules\Hardware\Http\Requests\GetHardwareCommandsRequest;
 use App\Modules\Hardware\Http\Requests\HardwareCommandAcknowledgeRequest;
 use App\Modules\Hardware\Http\Requests\HardwareHeartbeatRequest;
+use App\Modules\Hardware\Http\Requests\ListHardwareDevicesSummaryRequest;
 use App\Modules\Hardware\Http\Requests\OpenHardwareSessionRequest;
 use App\Modules\Hardware\Http\Requests\RegisterHardwareDeviceRequest;
 use App\Modules\Hardware\Http\Requests\UpdateHardwareDeviceStateRequest;
+use App\Modules\Hardware\Http\Resources\HardwareBridgeDeviceSummaryResource;
 use App\Modules\Hardware\Services\HardwareBridgeService;
+use App\Modules\Hardware\Support\HardwareBridgeAuthContext;
 use App\Support\HardwareRuntimeContract;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,9 +30,8 @@ class HardwareBridgeController extends Controller
 
     public function register(RegisterHardwareDeviceRequest $request): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $device = $this->service->registerDevice($user, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $device = $this->service->registerDeviceForContext($context, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -40,9 +43,8 @@ class HardwareBridgeController extends Controller
 
     public function heartbeat(HardwareHeartbeatRequest $request): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $device = $this->service->heartbeat($user, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $device = $this->service->heartbeatForContext($context, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -54,9 +56,8 @@ class HardwareBridgeController extends Controller
 
     public function openSession(OpenHardwareSessionRequest $request): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $session = $this->service->openSession($user, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $session = $this->service->openSessionForContext($context, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -75,9 +76,8 @@ class HardwareBridgeController extends Controller
 
     public function closeSession(CloseHardwareSessionRequest $request, int $session): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $closed = $this->service->closeSession($user, $session, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $closed = $this->service->closeSessionForContext($context, $session, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -104,6 +104,24 @@ class HardwareBridgeController extends Controller
             'success' => true,
             'message' => 'Hardware bridge devices retrieved successfully.',
             'data' => $devices->map(fn ($device): array => $this->devicePayload($device))->values()->all(),
+            'meta' => null,
+        ]);
+    }
+
+    public function summary(ListHardwareDevicesSummaryRequest $request): JsonResponse
+    {
+        $user = $request->user('api');
+        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        $summaries = $this->service->listDeviceSummaries(
+            $user,
+            (int) $request->validated('outletId'),
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Hardware bridge device summaries retrieved successfully.',
+            'data' => HardwareBridgeDeviceSummaryResource::collection(collect($summaries)),
             'meta' => null,
         ]);
     }
@@ -169,9 +187,8 @@ class HardwareBridgeController extends Controller
 
     public function pullCommands(GetHardwareCommandsRequest $request): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $result = $this->service->pullCommands($user, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $result = $this->service->pullCommandsForContext($context, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -183,9 +200,8 @@ class HardwareBridgeController extends Controller
 
     public function ack(HardwareCommandAcknowledgeRequest $request, int $command): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $updated = $this->service->acknowledgeCommand($user, $command, true, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $updated = $this->service->acknowledgeCommandForContext($context, $command, true, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -197,9 +213,8 @@ class HardwareBridgeController extends Controller
 
     public function nack(HardwareCommandAcknowledgeRequest $request, int $command): JsonResponse
     {
-        $user = $request->user('api');
-        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $updated = $this->service->acknowledgeCommand($user, $command, false, $request->validated());
+        $context = $this->resolveAuthContext($request);
+        $updated = $this->service->acknowledgeCommandForContext($context, $command, false, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -207,6 +222,19 @@ class HardwareBridgeController extends Controller
             'data' => $this->commandPayload($updated),
             'meta' => null,
         ]);
+    }
+
+    private function resolveAuthContext(Request $request): HardwareBridgeAuthContext
+    {
+        $device = $request->attributes->get('hardware_bridge_device');
+        if ($device instanceof HardwareBridgeDevice) {
+            return HardwareBridgeAuthContext::fromDevice($device);
+        }
+
+        $user = $request->user('api');
+        abort_if(! $user instanceof User, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+
+        return HardwareBridgeAuthContext::fromUser($user);
     }
 
     private function devicePayload($device): array

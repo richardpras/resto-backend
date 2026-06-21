@@ -16,11 +16,10 @@ class UpdateMenuItemRequest extends FormRequest
     {
         return [
             'name' => ['sometimes', 'string', 'max:255'],
-            'category' => ['sometimes', 'string', 'max:100'],
+            'menuCategoryId' => ['sometimes', 'integer', 'min:1', Rule::exists('menu_categories', 'id')],
             'emoji' => ['sometimes', 'string', 'max:10'],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'available' => ['sometimes', 'boolean'],
-            'productionStationId' => ['nullable', 'integer', 'min:1', Rule::exists('production_stations', 'id')],
             'recipes' => ['sometimes', 'array'],
             'recipes.*.inventoryItemId' => [
                 'required_with:recipes',

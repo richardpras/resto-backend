@@ -109,6 +109,18 @@ class PrintBridgeIntegrationTest extends TestCase
             'manager' => '',
             'status' => 'active',
         ]);
+        $foodCategory = \App\Models\Modules\Menu\Domain\MenuCategory::query()->create([
+            'tenant_id' => 1,
+            'code' => 'food',
+            'name' => 'Food',
+            'is_active' => true,
+        ]);
+        $drinkCategory = \App\Models\Modules\Menu\Domain\MenuCategory::query()->create([
+            'tenant_id' => 1,
+            'code' => 'beverage',
+            'name' => 'Beverage',
+            'is_active' => true,
+        ]);
         $kitchen = PrinterProfile::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outlet->id,
@@ -129,25 +141,19 @@ class PrintBridgeIntegrationTest extends TestCase
             'ip_address' => '10.0.0.3',
             'is_active' => true,
         ]);
-        PrinterRoute::query()->create([
+        \App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outlet->id,
+            'menu_category_id' => (int) $foodCategory->id,
             'printer_profile_id' => (int) $kitchen->id,
-            'print_type' => 'kitchen',
-            'category' => 'Food',
-            'station' => 'kitchen',
-            'route_scope' => 'category',
             'priority' => 10,
             'is_active' => true,
         ]);
-        PrinterRoute::query()->create([
+        \App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping::query()->create([
             'tenant_id' => 1,
             'outlet_id' => (int) $outlet->id,
+            'menu_category_id' => (int) $drinkCategory->id,
             'printer_profile_id' => (int) $bar->id,
-            'print_type' => 'kitchen',
-            'category' => 'Beverage',
-            'station' => 'bar',
-            'route_scope' => 'category',
             'priority' => 10,
             'is_active' => true,
         ]);
@@ -171,6 +177,7 @@ class PrintBridgeIntegrationTest extends TestCase
             'outlet_id' => (int) $outlet->id,
             'name' => 'Burger',
             'category' => 'Food',
+            'menu_category_id' => (int) $foodCategory->id,
             'price' => 50,
             'available' => true,
         ]);
@@ -179,6 +186,7 @@ class PrintBridgeIntegrationTest extends TestCase
             'outlet_id' => (int) $outlet->id,
             'name' => 'Cola',
             'category' => 'Beverage',
+            'menu_category_id' => (int) $drinkCategory->id,
             'price' => 20,
             'available' => true,
         ]);

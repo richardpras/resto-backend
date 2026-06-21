@@ -676,19 +676,61 @@ class SettingsDomainService
     /** @return array<string, mixed> */
     private function printerToCamel(SettingPrinter $p): array
     {
+        $connection = strtolower((string) $p->connection);
         $base = [
             'id' => $p->id,
             'name' => $p->name,
             'printerType' => $p->printer_type,
             'connection' => $p->connection,
             'outletId' => (int) $p->outlet_id,
+            'printerProfileId' => $p->printer_profile_id !== null ? (int) $p->printer_profile_id : null,
         ];
-        if ($p->ip !== null && $p->ip !== '') {
-            $base['ip'] = $p->ip;
+
+        if ($connection === 'lan') {
+            $lanHost = (string) ($p->ip ?? '');
+            $lanPort = 9100;
+            if ($lanHost !== '' && str_contains($lanHost, ':')) {
+                [$hostPart, $portPart] = array_pad(explode(':', $lanHost, 2), 2, null);
+                if ($hostPart !== null && $hostPart !== '' && is_numeric($portPart)) {
+                    $lanHost = $hostPart;
+                    $lanPort = (int) $portPart;
+                }
+            }
+            if ($lanHost !== '') {
+                $base['ip'] = $lanHost;
+            }
+            $base['port'] = $lanPort;
+        } elseif ($connection === 'usb') {
+            if ($p->bluetooth_device !== null && $p->bluetooth_device !== '') {
+                $base['devicePath'] = $p->bluetooth_device;
+                $base['bluetoothDevice'] = $p->bluetooth_device;
+            }
+        } elseif (in_array($connection, ['bluetooth', 'bt'], true)) {
+            if ($p->bluetooth_device !== null && $p->bluetooth_device !== '') {
+                $base['bluetoothDevice'] = $p->bluetooth_device;
+                $base['devicePath'] = $p->bluetooth_device;
+                if (preg_match('/([0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5})/', (string) $p->bluetooth_device, $matches) === 1) {
+                    $base['bluetoothAddress'] = strtoupper($matches[1]);
+                }
+            }
+        } elseif (in_array($connection, ['shared', 'share', 'windows_share', 'windows'], true)) {
+            if ($p->bluetooth_device !== null && $p->bluetooth_device !== '') {
+                $base['sharePath'] = $p->bluetooth_device;
+                $base['bluetoothDevice'] = $p->bluetooth_device;
+            }
+            if ($p->ip !== null && $p->ip !== '') {
+                $base['sharePrinterName'] = $p->ip;
+                $base['ip'] = $p->ip;
+            }
+        } else {
+            if ($p->ip !== null && $p->ip !== '') {
+                $base['ip'] = $p->ip;
+            }
+            if ($p->bluetooth_device !== null && $p->bluetooth_device !== '') {
+                $base['bluetoothDevice'] = $p->bluetooth_device;
+            }
         }
-        if ($p->bluetooth_device !== null && $p->bluetooth_device !== '') {
-            $base['bluetoothDevice'] = $p->bluetooth_device;
-        }
+
         $cats = $p->assigned_categories;
         if (is_array($cats) && $cats !== []) {
             $base['assignedCategories'] = $cats;

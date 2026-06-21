@@ -15,6 +15,7 @@ class MenuItem extends Model
         'outlet_id',
         'name',
         'category',
+        'menu_category_id',
         'production_station_id',
         'emoji',
         'image_path',
@@ -29,6 +30,11 @@ class MenuItem extends Model
     public function productionStation(): BelongsTo
     {
         return $this->belongsTo(ProductionStation::class, 'production_station_id');
+    }
+
+    public function menuCategory(): BelongsTo
+    {
+        return $this->belongsTo(MenuCategory::class, 'menu_category_id');
     }
 
     public function recipes(): HasMany

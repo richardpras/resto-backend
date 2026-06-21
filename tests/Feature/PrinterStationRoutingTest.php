@@ -31,9 +31,13 @@ class PrinterStationRoutingTest extends TestCase
         $barProfile = $this->createKitchenProfile($outlet, 'bar-main', 'bar');
         $bakeryProfile = $this->createKitchenProfile($outlet, 'bakery-main', 'bakery');
 
-        $this->createStationRoute($outlet, $kitchenProfile, $stations['kitchen']);
-        $this->createStationRoute($outlet, $barProfile, $stations['bar']);
-        $this->createStationRoute($outlet, $bakeryProfile, $stations['bakery']);
+        $foodCategory = $this->ensureMenuCategory('Food');
+        $beverageCategory = $this->ensureMenuCategory('Beverage');
+        $dessertCategory = $this->ensureMenuCategory('Dessert');
+
+        $this->createCategoryMapping($outlet, $foodCategory, $kitchenProfile);
+        $this->createCategoryMapping($outlet, $beverageCategory, $barProfile);
+        $this->createCategoryMapping($outlet, $dessertCategory, $bakeryProfile);
 
         $nasi = $this->createMenuItemForStation($outlet, 'Nasi Goreng', $stations['kitchen']);
         $esTeh = $this->createMenuItemForStation($outlet, 'Es Teh', $stations['bar'], 'Beverage');
@@ -57,8 +61,10 @@ class PrinterStationRoutingTest extends TestCase
         $stations = $this->provisionPrintStations($outlet);
         $kitchenProfile = $this->createKitchenProfile($outlet, 'kitchen-items', 'kitchen');
         $barProfile = $this->createKitchenProfile($outlet, 'bar-items', 'bar');
-        $this->createStationRoute($outlet, $kitchenProfile, $stations['kitchen']);
-        $this->createStationRoute($outlet, $barProfile, $stations['bar']);
+        $foodCategory = $this->ensureMenuCategory('Food');
+        $beverageCategory = $this->ensureMenuCategory('Beverage');
+        $this->createCategoryMapping($outlet, $foodCategory, $kitchenProfile);
+        $this->createCategoryMapping($outlet, $beverageCategory, $barProfile);
 
         $nasi = $this->createMenuItemForStation($outlet, 'Nasi Goreng', $stations['kitchen']);
         $esTeh = $this->createMenuItemForStation($outlet, 'Es Teh', $stations['bar'], 'Beverage');
@@ -73,8 +79,7 @@ class PrinterStationRoutingTest extends TestCase
 
         $this->assertSame(['Nasi Goreng'], $kitchenItems);
         $this->assertSame(['Es Teh'], $barItems);
-        $this->assertSame('kitchen', data_get($kitchenJob->route_snapshot, 'stationCode'));
-        $this->assertSame('production_station', data_get($kitchenJob->route_snapshot, 'resolution_layer'));
+        $this->assertSame('category_master_mapping', data_get($kitchenJob->route_snapshot, 'resolution_layer'));
     }
 
     private function createOutlet(): Outlet
