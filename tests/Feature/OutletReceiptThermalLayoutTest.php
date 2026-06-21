@@ -1,0 +1,166 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Modules\Orders\Domain\Order;
+use App\Models\Modules\Orders\Domain\OrderItem;
+use App\Models\Modules\Print\Domain\ReceiptRenderHistory;
+use App\Models\Modules\Settings\Domain\Outlet;
+use App\Models\Modules\Settings\Domain\OutletReceiptSetting;
+use App\Modules\Print\Services\ReceiptDocumentService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\UserManagementApiFixture;
+use Tests\TestCase;
+
+class OutletReceiptThermalLayoutTest extends TestCase
+{
+    use RefreshDatabase;
+    use UserManagementApiFixture;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+        Artisan::call('passport:keys', ['--force' => true]);
+    }
+
+    public function test_customer_receipt_thermal_uses_outlet_receipt_settings(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = $this->createOutlet('Thermal Layout Outlet');
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
+        $this->seedReceiptSettings($outlet, showTaxBreakdown: true);
+
+        $order = $this->createPaidOrder($outlet, subtotal: 45000, tax: 4500, total: 49500);
+
+        $response = $this->postJson('/api/v1/print/documents/render', [
+            'outletId' => (int) $outlet->id,
+            'kind' => 'customer_receipt',
+            'sourceType' => 'order',
+            'sourceId' => (int) $order->id,
+            'issueFiscal' => false,
+            'queuePrint' => false,
+            'generatePdf' => false,
+            'forceRegenerate' => false,
+        ]);
+        $response->assertOk();
+
+        $history = ReceiptRenderHistory::query()->findOrFail((int) $response->json('data.id'));
+        $thermal = (string) $history->thermal_text;
+
+        $this->assertStringContainsString($outlet->name, $thermal);
+        $this->assertStringContainsString('Terima kasih sudah mampir', $thermal);
+        $this->assertStringContainsString('Sampai jumpa lagi', $thermal);
+        $this->assertStringContainsString('Order: '.$order->code, $thermal);
+        $this->assertStringContainsString('Nasi Goreng', $thermal);
+        $this->assertStringContainsString('Subtotal', $thermal);
+        $this->assertStringContainsString('Tax', $thermal);
+        $this->assertStringContainsString('TOTAL', $thermal);
+        $this->assertStringNotContainsString('RECEIPT', $thermal);
+        $this->assertStringNotContainsString('LOGO', $thermal);
+        $this->assertStringNotContainsString('[LOGO]', $thermal);
+    }
+
+    public function test_customer_receipt_hides_tax_line_when_show_tax_breakdown_disabled(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = $this->createOutlet('No Tax Line Outlet');
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
+        $this->seedReceiptSettings($outlet, showTaxBreakdown: false);
+
+        $order = $this->createPaidOrder($outlet, subtotal: 45000, tax: 4500, total: 49500);
+
+        $response = $this->postJson('/api/v1/print/documents/render', [
+            'outletId' => (int) $outlet->id,
+            'kind' => 'customer_receipt',
+            'sourceType' => 'order',
+            'sourceId' => (int) $order->id,
+            'issueFiscal' => false,
+            'queuePrint' => false,
+            'generatePdf' => false,
+            'forceRegenerate' => true,
+        ]);
+        $response->assertOk();
+
+        $history = ReceiptRenderHistory::query()->findOrFail((int) $response->json('data.id'));
+        $thermal = (string) $history->thermal_text;
+
+        $this->assertStringContainsString('Subtotal', $thermal);
+        $this->assertStringContainsString('TOTAL', $thermal);
+        $this->assertDoesNotMatchRegularExpression('/^Tax/m', $thermal);
+    }
+
+    public function test_branding_fingerprint_changes_when_receipt_settings_update(): void
+    {
+        $outlet = $this->createOutlet('Fingerprint Outlet');
+        $this->seedReceiptSettings($outlet, header: 'Header A');
+
+        $service = app(ReceiptDocumentService::class);
+        $first = $service->resolveReceiptBrandingFingerprint((int) $outlet->id);
+
+        OutletReceiptSetting::query()->where('outlet_id', $outlet->id)->update([
+            'receipt_header' => 'Header B',
+        ]);
+
+        $second = $service->resolveReceiptBrandingFingerprint((int) $outlet->id);
+
+        $this->assertNotSame($first, $second);
+    }
+
+    private function createOutlet(string $name): Outlet
+    {
+        return Outlet::query()->create([
+            'code' => 'thermal-'.uniqid(),
+            'name' => $name,
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+        ]);
+    }
+
+    private function seedReceiptSettings(Outlet $outlet, bool $showTaxBreakdown = true, string $header = 'Terima kasih sudah mampir'): void
+    {
+        OutletReceiptSetting::query()->create([
+            'outlet_id' => $outlet->id,
+            'receipt_header' => $header,
+            'receipt_footer' => 'Sampai jumpa lagi',
+            'show_logo' => true,
+            'show_tax_breakdown' => $showTaxBreakdown,
+        ]);
+    }
+
+    private function createPaidOrder(
+        Outlet $outlet,
+        float $subtotal = 45000,
+        float $tax = 4500,
+        float $total = 49500,
+    ): Order {
+        $order = Order::query()->create([
+            'tenant_id' => 1,
+            'outlet_id' => $outlet->id,
+            'code' => 'ORD-THERMAL-'.uniqid(),
+            'source' => 'pos',
+            'order_type' => 'Takeaway',
+            'status' => 'completed',
+            'payment_status' => 'paid',
+            'subtotal' => $subtotal,
+            'tax' => $tax,
+            'total' => $total,
+            'paid_total' => $total,
+            'balance_due' => 0,
+        ]);
+
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'item_id' => 1,
+            'name' => 'Nasi Goreng',
+            'qty' => 1,
+            'price' => $subtotal,
+            'line_total' => $subtotal,
+        ]);
+
+        return $order->fresh(['items']);
+    }
+}

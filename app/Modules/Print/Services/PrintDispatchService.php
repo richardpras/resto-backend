@@ -30,11 +30,58 @@ class PrintDispatchService
 
     public function dispatchAfterEnqueue(PrintJob $job): void
     {
-        if (! $job->wasRecentlyCreated) {
+        if ($job->wasRecentlyCreated) {
+            $this->dispatch((int) $job->id, (int) $job->outlet_id);
+
             return;
         }
 
-        $this->dispatch((int) $job->id, (int) $job->outlet_id);
+        if ($this->shouldRedispatch($job)) {
+            $prepared = $this->prepareForRedispatch($job);
+            $this->dispatch((int) $prepared->id, (int) $prepared->outlet_id);
+        }
+    }
+
+    public function shouldRedispatch(PrintJob $job): bool
+    {
+        if ((string) $job->status === 'done') {
+            return false;
+        }
+
+        if ((string) $job->recovery_state === 'awaiting_ack' && $job->hardware_command_log_id !== null) {
+            return false;
+        }
+
+        if ((string) $job->status === 'pending') {
+            return true;
+        }
+
+        if ((string) $job->status === 'failed' && $job->retryable) {
+            return true;
+        }
+
+        return (string) $job->recovery_state === 'dead_letter';
+    }
+
+    private function prepareForRedispatch(PrintJob $job): PrintJob
+    {
+        if ((string) $job->recovery_state === 'dead_letter'
+            || ((string) $job->status === 'failed' && ! $job->retryable)) {
+            $job->status = 'pending';
+            $job->retryable = true;
+            $job->recovery_state = 'none';
+            $job->next_retry_at = now();
+            $job->failed_at = null;
+            $job->last_error = null;
+            $job->hardware_command_log_id = null;
+            $job->locked_at = null;
+            $job->locked_by = null;
+            $job->save();
+
+            return $job->fresh() ?? $job;
+        }
+
+        return $job;
     }
 
     public function dispatch(int $printJobId, int $outletId): void

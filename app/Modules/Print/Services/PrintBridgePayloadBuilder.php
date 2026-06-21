@@ -147,6 +147,10 @@ class PrintBridgePayloadBuilder
      */
     private function buildReceiptDocument(array $snapshot, PrintJob $job): array
     {
+        if (is_array($snapshot['receipt_branding'] ?? null)) {
+            return $this->buildBrandedReceiptDocument($snapshot);
+        }
+
         $lines = [
             ['text' => 'RECEIPT', 'bold' => true, 'align' => 'center'],
             ['text' => str_repeat('-', 32), 'align' => 'center'],
@@ -166,6 +170,74 @@ class PrintBridgePayloadBuilder
         }
 
         $lines[] = ['text' => now()->format('Y-m-d H:i:s'), 'align' => 'center'];
+
+        return ['lines' => $lines, 'cut' => true];
+    }
+
+    /**
+     * @param  array<string,mixed>  $snapshot
+     * @return array<string,mixed>
+     */
+    private function buildBrandedReceiptDocument(array $snapshot): array
+    {
+        $width = 32;
+        $divider = str_repeat('-', $width);
+        /** @var array<string,mixed> $branding */
+        $branding = $snapshot['receipt_branding'];
+        $lines = [];
+
+        $outletName = trim((string) ($branding['outletName'] ?? ''));
+        if ($outletName !== '') {
+            $lines[] = ['text' => $outletName, 'bold' => true, 'align' => 'center'];
+        }
+
+        $header = trim((string) ($branding['header'] ?? ''));
+        if ($header !== '') {
+            foreach (preg_split("/\r\n|\n|\r/", $header) ?: [] as $headerLine) {
+                $trimmed = trim((string) $headerLine);
+                if ($trimmed !== '') {
+                    $lines[] = ['text' => $trimmed, 'align' => 'center'];
+                }
+            }
+        }
+
+        if ($code = data_get($snapshot, 'order_code')) {
+            $lines[] = ['text' => 'Order: '.$code];
+        }
+
+        $lines[] = ['text' => $divider, 'align' => 'center'];
+
+        /** @var list<array<string,mixed>> $items */
+        $items = is_array($snapshot['lines'] ?? null) ? $snapshot['lines'] : [];
+        foreach ($items as $row) {
+            $qty = number_format((float) ($row['qty'] ?? 0), 0);
+            $left = mb_substr((string) ($row['name'] ?? ''), 0, 18).' x'.$qty;
+            $amount = number_format((float) ($row['price'] ?? 0) * (float) ($row['qty'] ?? 0), 2, '.', ',');
+            $lines[] = ['text' => $left.str_repeat(' ', max(1, $width - mb_strlen($left) - mb_strlen($amount))).$amount];
+        }
+
+        $lines[] = ['text' => $divider, 'align' => 'center'];
+        $subtotal = number_format((float) ($snapshot['subtotal'] ?? 0), 2, '.', ',');
+        $lines[] = ['text' => 'Subtotal'.str_repeat(' ', max(1, $width - 8 - mb_strlen($subtotal))).$subtotal];
+
+        if ((bool) ($branding['showTaxBreakdown'] ?? false)) {
+            $tax = number_format((float) ($snapshot['tax'] ?? 0), 2, '.', ',');
+            $lines[] = ['text' => 'Tax'.str_repeat(' ', max(1, $width - 3 - mb_strlen($tax))).$tax];
+        }
+
+        $total = number_format((float) ($snapshot['total'] ?? data_get($snapshot, 'amount', 0)), 2, '.', ',');
+        $lines[] = ['text' => 'TOTAL'.str_repeat(' ', max(1, $width - 5 - mb_strlen($total))).$total, 'bold' => true];
+        $lines[] = ['text' => $divider, 'align' => 'center'];
+
+        $footer = trim((string) ($branding['footer'] ?? ''));
+        if ($footer !== '') {
+            foreach (preg_split("/\r\n|\n|\r/", $footer) ?: [] as $footerLine) {
+                $trimmed = trim((string) $footerLine);
+                if ($trimmed !== '') {
+                    $lines[] = ['text' => $trimmed, 'align' => 'center'];
+                }
+            }
+        }
 
         return ['lines' => $lines, 'cut' => true];
     }

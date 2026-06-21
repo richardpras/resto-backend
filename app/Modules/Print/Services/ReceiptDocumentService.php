@@ -10,6 +10,7 @@ use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Print\Domain\ReceiptRenderHistory;
+use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\User;
 use App\Modules\Print\Support\ReceiptDocumentKind;
 use App\Modules\Settings\Support\OutletAccessResolver;
@@ -52,6 +53,7 @@ class ReceiptDocumentService
         $force = (bool) ($options['forceRegenerate'] ?? false);
 
         $template = $this->templateResolver->resolve($outletId, $kind, null);
+        $brandingFingerprint = $this->resolveReceiptBrandingFingerprint($outletId);
 
         $fingerprintSeed = implode('|', [
             (string) $outletId,
@@ -61,6 +63,7 @@ class ReceiptDocumentService
             (string) ($orderSplitId ?? 0),
             (string) $template->id,
             (string) $template->version,
+            $brandingFingerprint,
         ]);
         $fingerprint = hash('sha256', $force ? ($fingerprintSeed.'|'.uniqid('', true)) : $fingerprintSeed);
 
@@ -322,7 +325,32 @@ class ReceiptDocumentService
             ])->values()->all(),
             'lines' => $lines,
             'split' => $splitPayload,
+            'receipt_branding' => $this->resolveReceiptBranding($outletId),
         ];
+    }
+
+    /**
+     * @return array{outletName:string,header:string,footer:string,showTaxBreakdown:bool}
+     */
+    public function resolveReceiptBranding(int $outletId): array
+    {
+        /** @var Outlet|null $outlet */
+        $outlet = Outlet::query()->with('receiptSetting')->find($outletId);
+        $setting = $outlet?->receiptSetting;
+
+        return [
+            'outletName' => (string) ($outlet?->name ?? ''),
+            'header' => (string) ($setting?->receipt_header ?? ''),
+            'footer' => (string) ($setting?->receipt_footer ?? ''),
+            'showTaxBreakdown' => (bool) ($setting?->show_tax_breakdown ?? false),
+        ];
+    }
+
+    public function resolveReceiptBrandingFingerprint(int $outletId): string
+    {
+        $branding = $this->resolveReceiptBranding($outletId);
+
+        return hash('sha256', json_encode($branding, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
     }
 
     /**
@@ -374,6 +402,10 @@ class ReceiptDocumentService
      */
     private function buildThermalLines(ReceiptDocumentKind $kind, array $context, int $width): array
     {
+        if ($this->usesBrandedReceiptLayout($kind, $context)) {
+            return $this->buildBrandedCustomerReceiptLines($context, $width);
+        }
+
         $divider = str_repeat('-', $width);
         $lines = [];
         $title = match ($kind) {
@@ -427,6 +459,108 @@ class ReceiptDocumentService
         }
 
         return array_slice($lines, 0, 256);
+    }
+
+    /**
+     * @param  array<string,mixed>  $context
+     * @return list<string>
+     */
+    private function buildBrandedCustomerReceiptLines(array $context, int $width): array
+    {
+        $divider = str_repeat('-', $width);
+        /** @var array<string,mixed> $branding */
+        $branding = is_array($context['receipt_branding'] ?? null) ? $context['receipt_branding'] : [];
+        $lines = [];
+
+        $outletName = trim((string) ($branding['outletName'] ?? ''));
+        if ($outletName !== '') {
+            $lines[] = $this->centerThermalLine($outletName, $width);
+        }
+
+        $header = trim((string) ($branding['header'] ?? ''));
+        if ($header !== '') {
+            foreach (preg_split("/\r\n|\n|\r/", $header) ?: [] as $headerLine) {
+                $trimmed = trim((string) $headerLine);
+                if ($trimmed !== '') {
+                    $lines[] = $this->centerThermalLine($trimmed, $width);
+                }
+            }
+        }
+
+        if ($code = ($context['order_code'] ?? null)) {
+            $lines[] = 'Order: '.$code;
+        }
+        if ($num = ($context['fiscal_invoice_number'] ?? null)) {
+            $lines[] = 'Invoice: '.$num;
+        }
+
+        $lines[] = $divider;
+
+        foreach ($context['lines'] ?? [] as $row) {
+            $qty = number_format((float) ($row['qty'] ?? 0), 0);
+            $left = mb_substr((string) ($row['name'] ?? ''), 0, max(8, $width - 14)).' x'.$qty;
+            $amount = $this->money((float) ($row['price'] ?? 0) * (float) ($row['qty'] ?? 0));
+            $lines[] = $this->formatThermalColumns($left, $amount, $width);
+        }
+
+        if (! empty($context['split'])) {
+            $lines[] = '-- SPLIT '.$this->sanitize((string) $context['split']['label']).' --';
+            foreach ($context['split']['items'] ?? [] as $chunk) {
+                $lines[] = ($chunk['label'] ?? '').' × '.$this->sanitize((string) ($chunk['qty'] ?? ''));
+            }
+        }
+
+        $lines[] = $divider;
+        $lines[] = $this->formatThermalColumns('Subtotal', $this->money((float) ($context['subtotal'] ?? 0.0)), $width);
+
+        if ((bool) ($branding['showTaxBreakdown'] ?? false)) {
+            $lines[] = $this->formatThermalColumns('Tax', $this->money((float) ($context['tax'] ?? 0.0)), $width);
+        }
+
+        $lines[] = $this->formatThermalColumns('TOTAL', $this->money((float) ($context['total'] ?? 0.0)), $width);
+        $lines[] = $divider;
+
+        $footer = trim((string) ($branding['footer'] ?? ''));
+        if ($footer !== '') {
+            foreach (preg_split("/\r\n|\n|\r/", $footer) ?: [] as $footerLine) {
+                $trimmed = trim((string) $footerLine);
+                if ($trimmed !== '') {
+                    $lines[] = $this->centerThermalLine($trimmed, $width);
+                }
+            }
+        }
+
+        return array_slice($lines, 0, 256);
+    }
+
+    /**
+     * @param  array<string,mixed>  $context
+     */
+    private function usesBrandedReceiptLayout(ReceiptDocumentKind $kind, array $context): bool
+    {
+        if (! in_array($kind, [ReceiptDocumentKind::CustomerReceipt, ReceiptDocumentKind::FiscalInvoice], true)) {
+            return false;
+        }
+
+        return is_array($context['receipt_branding'] ?? null);
+    }
+
+    private function centerThermalLine(string $text, int $width): string
+    {
+        $text = mb_substr($text, 0, $width);
+        $pad = max(0, (int) floor(($width - mb_strlen($text)) / 2));
+
+        return str_repeat(' ', $pad).$text;
+    }
+
+    private function formatThermalColumns(string $left, string $right, int $width): string
+    {
+        $rightLen = mb_strlen($right);
+        $leftMax = max(1, $width - $rightLen - 1);
+        $left = mb_substr($left, 0, $leftMax);
+        $pad = max(1, $width - mb_strlen($left) - mb_strlen($right));
+
+        return $left.str_repeat(' ', $pad).$right;
     }
 
     /**

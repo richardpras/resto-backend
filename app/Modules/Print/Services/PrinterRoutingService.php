@@ -8,6 +8,7 @@ use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
+use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -126,7 +127,17 @@ class PrinterRoutingService
             return;
         }
 
+        $order->loadMissing('items');
+
         ['route' => $route, 'resolvedProfileId' => $resolvedProfileId] = $this->resolveReceiptRouting($outletId);
+
+        $lines = $order->items->map(fn ($row): array => [
+            'name' => (string) $row->name,
+            'qty' => (float) $row->qty,
+            'price' => (float) $row->price,
+        ])->values()->all();
+
+        $branding = $this->resolveReceiptBranding($outletId);
 
         $this->enqueuePrintJob(
             outletId: $outletId,
@@ -136,8 +147,14 @@ class PrinterRoutingService
             route: $route,
             printableSnapshot: [
                 'order_id' => (int) $order->id,
+                'order_code' => (string) $order->code,
                 'table_name' => $order->table_name,
                 'amount' => (float) $order->paid_total,
+                'subtotal' => (float) $order->subtotal,
+                'tax' => (float) $order->tax,
+                'total' => (float) $order->total,
+                'lines' => $lines,
+                'receipt_branding' => $branding,
                 'reason' => $reason,
             ],
             idempotencyKey: $reason.'-'.(int) $order->id,
@@ -147,6 +164,11 @@ class PrinterRoutingService
 
     public function ensureKitchenPrintJobsForOrder(Order $order): void
     {
+        $this->syncKitchenPrintJobsForOrder($order);
+    }
+
+    public function syncKitchenPrintJobsForOrder(Order $order): void
+    {
         $status = (string) $order->status;
         if (! in_array($status, ['confirmed', 'completed'], true)) {
             return;
@@ -154,17 +176,6 @@ class PrinterRoutingService
 
         $outletId = (int) ($order->outlet_id ?? 0);
         if ($outletId < 1) {
-            return;
-        }
-
-        $hasKitchenJobs = PrintJob::query()
-            ->where('outlet_id', $outletId)
-            ->where('source_type', 'order')
-            ->where('source_id', (int) $order->id)
-            ->where('type', 'kitchen')
-            ->exists();
-
-        if ($hasKitchenJobs) {
             return;
         }
 
@@ -384,5 +395,22 @@ class PrinterRoutingService
         }
 
         return array_merge($base, $routeResolutionMeta);
+    }
+
+    /**
+     * @return array{outletName:string,header:string,footer:string,showTaxBreakdown:bool}
+     */
+    private function resolveReceiptBranding(int $outletId): array
+    {
+        /** @var Outlet|null $outlet */
+        $outlet = Outlet::query()->with('receiptSetting')->find($outletId);
+        $setting = $outlet?->receiptSetting;
+
+        return [
+            'outletName' => (string) ($outlet?->name ?? ''),
+            'header' => (string) ($setting?->receipt_header ?? ''),
+            'footer' => (string) ($setting?->receipt_footer ?? ''),
+            'showTaxBreakdown' => (bool) ($setting?->show_tax_breakdown ?? false),
+        ];
     }
 }

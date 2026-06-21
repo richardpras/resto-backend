@@ -420,6 +420,14 @@ class OrderService
                 $fresh = $this->orderRepository->findWithRelations($order->id) ?? $fresh;
                 $this->orderPromotionService->syncAppliedPromotionForOrder($fresh);
                 $fresh = $this->orderRepository->findWithRelations($order->id) ?? $fresh;
+
+                if (
+                    in_array((string) $fresh->status, ['confirmed', 'completed'], true)
+                    && (string) $fresh->payment_status !== 'paid'
+                    && (string) $fresh->status !== 'cancelled'
+                ) {
+                    $this->printerRoutingService->syncKitchenPrintJobsForOrder($fresh);
+                }
             }
 
             $this->auditLogService->log(
