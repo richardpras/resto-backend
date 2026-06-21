@@ -179,4 +179,12 @@ final class DemoPatch03Support
             default => (string) $outlet->code,
         };
     }
+
+    /**
+     * Deterministic demo surrogate id within signed 32-bit INT (MySQL INT on shared hosting).
+     */
+    public static function surrogateId(string $key): int
+    {
+        return crc32($key) & 0x7FFFFFFF;
+    }
 }

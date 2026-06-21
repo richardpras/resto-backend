@@ -92,7 +92,7 @@ final class DemoInventoryProcurementReadinessPatch
                 [
                     'outlet_id' => $outlet->id,
                     'entity_type' => 'inventory',
-                    'entity_id' => abs(crc32("{$prefix}-{$eventType}")),
+                    'entity_id' => DemoPatch03Support::surrogateId("{$prefix}-{$eventType}"),
                     'event_type' => $eventType,
                 ],
                 [
@@ -182,7 +182,7 @@ final class DemoInventoryProcurementReadinessPatch
             [
                 'outlet_id' => $outlet->id,
                 'source_type' => 'shift_close_demo_03',
-                'source_id' => abs(crc32($prefix)),
+                'source_id' => DemoPatch03Support::surrogateId($prefix),
             ],
             [
                 'error_code' => AccountingPostingFailure::ERROR_POSTING,
@@ -205,7 +205,7 @@ final class DemoInventoryProcurementReadinessPatch
             [
                 'type' => 'receipt',
                 'source_type' => 'order',
-                'source_id' => $order?->id ?? abs(crc32($prefix)),
+                'source_id' => $order?->id ?? DemoPatch03Support::surrogateId("{$prefix}-print-retry"),
                 'status' => 'failed',
                 'content' => ['demoPatch' => '03', 'retry' => true],
                 'last_error' => 'Printer unreachable — demo retry job',
