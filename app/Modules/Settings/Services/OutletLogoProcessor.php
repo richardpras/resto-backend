@@ -21,6 +21,8 @@ class OutletLogoProcessor
 
     public const THERMAL_WIDTH_80 = 576;
 
+    public const THERMAL_SCALE  = 0.5;
+
     /**
      * @return array{
      *     display: array{binary:string,extension:string,mime:string,width:int,height:int,bytes:int},
@@ -57,8 +59,14 @@ class OutletLogoProcessor
         imagedestroy($displayImage);
 
         $thermal = [
-            '58' => $this->buildThermalRaster($flattened, self::THERMAL_WIDTH_58),
-            '80' => $this->buildThermalRaster($flattened, self::THERMAL_WIDTH_80),
+            '58' => $this->buildThermalRaster(
+                $flattened,
+                (int) round(self::THERMAL_WIDTH_58 * self::THERMAL_SCALE),
+            ),
+            '80' => $this->buildThermalRaster(
+                $flattened,
+                (int) round(self::THERMAL_WIDTH_80 * self::THERMAL_SCALE),
+            ),
         ];
 
         imagedestroy($flattened);
