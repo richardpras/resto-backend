@@ -65,6 +65,7 @@ class OrderService
         private readonly PosCheckoutIntegrityService $posCheckoutIntegrityService,
         private readonly OrderCodeAllocationService $orderCodeAllocationService,
         private readonly OrderPromotionService $orderPromotionService,
+        private readonly PosSessionOrderLockService $posSessionOrderLockService,
     ) {}
 
     /** @var array<string, mixed>|null */
@@ -502,6 +503,7 @@ class OrderService
     {
         $paymentStatus = (string) $order->payment_status;
         if (! in_array($paymentStatus, ['unpaid', 'partial'], true)) {
+            $this->posSessionOrderLockService->assertNotLockedByClosedSession($order);
             throw ValidationException::withMessages([
                 'paymentStatus' => ['Order is no longer editable (payment status is '.$paymentStatus.').'],
             ]);
@@ -532,6 +534,8 @@ class OrderService
                 return null;
             }
         }
+
+        $this->posSessionOrderLockService->assertNotLockedByClosedSession($order);
 
         $this->orderRepository->update($order, ['status' => $status]);
         if ($status === 'cancelled') {
@@ -752,24 +756,22 @@ class OrderService
             return (int) $session->id;
         }
 
-        if ($serviceMode === 'dine_in' && $data->outletId !== null) {
+        if ($data->outletId !== null) {
             $session = PosSession::query()
                 ->where('outlet_id', $data->outletId)
                 ->where('status', 'open')
                 ->latest('id')
                 ->first();
 
-            if ($session === null) {
-                if ($strict) {
-                    throw ValidationException::withMessages([
-                        'posSessionId' => ['Dine-in orders require an open POS session for the outlet.'],
-                    ]);
-                }
-
-                return null;
+            if ($session !== null) {
+                return (int) $session->id;
             }
 
-            return (int) $session->id;
+            if ($serviceMode === 'dine_in' && $strict) {
+                throw ValidationException::withMessages([
+                    'posSessionId' => ['Dine-in orders require an open POS session for the outlet.'],
+                ]);
+            }
         }
 
         return null;

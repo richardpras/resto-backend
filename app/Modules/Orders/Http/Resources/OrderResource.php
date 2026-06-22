@@ -34,6 +34,7 @@ class OrderResource extends JsonResource
             'discountAmount' => (float) ($this->discount_amount ?? 0),
             'balanceDue' => max(0.0, (float) $this->total - (float) ($this->paid_total ?? 0)),
             'paymentStatus' => $this->payment_status,
+            'pendingRecoveryCount' => (int) ($this->pending_recovery_count ?? $this->countPendingRecoveryItems()),
             'kitchenStatus' => $this->kitchen_status ?? 'queued',
             'isPosted' => (bool) $this->is_posted,
             'customerName' => $this->customer_name,
@@ -117,6 +118,15 @@ class OrderResource extends JsonResource
                 fn () => $this->buildPromotionPreviewArray(),
             ),
         ];
+    }
+
+    private function countPendingRecoveryItems(): int
+    {
+        if ($this->relationLoaded('items')) {
+            return $this->items->where('recovery_status', 'recovery_pending')->count();
+        }
+
+        return 0;
     }
 
     private function resolveLivePromotionDiscount(): float

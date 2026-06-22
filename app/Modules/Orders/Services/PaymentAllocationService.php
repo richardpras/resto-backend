@@ -182,10 +182,15 @@ class PaymentAllocationService
 
     public function recomputePaymentStatus(Order $order): void
     {
-        $paidTotal = (float) Payment::query()
+        $paid = (float) Payment::query()
             ->where('order_id', $order->id)
-            ->where('status', '!=', 'void')
+            ->where('status', 'paid')
             ->sum('amount');
+        $refunded = (float) Payment::query()
+            ->where('order_id', $order->id)
+            ->where('status', 'refund')
+            ->sum('amount');
+        $paidTotal = max(0, round($paid - $refunded, 2));
         $paymentStatus = $paidTotal >= (float) $order->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
         $status = $paymentStatus === 'paid' && (string) $order->status !== 'cancelled'
             ? 'completed'

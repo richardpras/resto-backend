@@ -8,6 +8,7 @@ use App\Models\Modules\Orders\Domain\OrderItemRecoveryEvent;
 use App\Models\User;
 use App\Modules\Orders\Events\OrderLifecycleChanged;
 use App\Modules\Orders\Repositories\OrderRepositoryInterface;
+use App\Modules\Notifications\Services\Adapters\OrderRecoveryNotificationAdapter;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
@@ -30,6 +31,7 @@ class OrderItemRecoveryService
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly PosAuditLogService $auditLogService,
+        private readonly OrderRecoveryNotificationAdapter $recoveryNotificationAdapter,
     ) {}
 
     /**
@@ -44,6 +46,30 @@ class OrderItemRecoveryService
             ->orderByDesc('id')
             ->limit(200)
             ->get();
+    }
+
+    /**
+     * Count distinct orders with at least one recovery_pending line (outlet-scoped).
+     */
+    public function countRecoveryPendingOrders(?User $user, ?int $outletId = null): int
+    {
+        if ($user === null) {
+            return 0;
+        }
+
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+
+        return (int) Order::query()
+            ->whereIn('outlet_id', $allowed === [] ? [-1] : $allowed)
+            ->when($outletId !== null && $outletId > 0, function ($query) use ($outletId, $allowed): void {
+                if (! in_array($outletId, $allowed, true)) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->where('outlet_id', $outletId);
+                }
+            })
+            ->whereHas('items', fn ($q) => $q->where('recovery_status', 'recovery_pending'))
+            ->count();
     }
 
     /**
@@ -76,6 +102,10 @@ class OrderItemRecoveryService
             );
 
             $this->broadcastOrder($order->fresh());
+
+            if ($normalized === 'recovery_pending') {
+                $this->recoveryNotificationAdapter->notifyRecoveryEscalated($order, $item->fresh(), $reason);
+            }
 
             return $item->fresh();
         });

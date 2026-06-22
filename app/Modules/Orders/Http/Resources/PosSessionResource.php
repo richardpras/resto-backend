@@ -18,6 +18,8 @@ class PosSessionResource extends JsonResource
             'status' => (string) $this->status,
             'openingCash' => (float) $this->opening_cash,
             'closingCash' => $this->closing_cash !== null ? (float) $this->closing_cash : null,
+            'expectedCash' => $this->expected_cash !== null ? (float) $this->expected_cash : null,
+            'actualCash' => $this->actual_cash !== null ? (float) $this->actual_cash : null,
             'cashVariance' => $this->cash_variance !== null ? (float) $this->cash_variance : null,
             'openedAt' => $this->opened_at?->toIso8601String(),
             'closedAt' => $this->closed_at?->toIso8601String(),

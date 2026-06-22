@@ -67,6 +67,7 @@ class OrderController extends Controller
                 'date_from' => $request->validated('dateFrom'),
                 'date_to' => $request->validated('dateTo'),
                 'has_voided_payment' => $request->validated('hasVoidedPayment'),
+                'has_recovery_pending' => $request->validated('hasRecoveryPending'),
             ]
         );
 

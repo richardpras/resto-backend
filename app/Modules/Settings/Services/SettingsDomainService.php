@@ -132,6 +132,9 @@ class SettingsDomainService
             'invoice_prefix' => $data['invoicePrefix'] ?? null,
             'order_prefix' => $data['orderPrefix'] ?? null,
         ];
+        if (array_key_exists('defaultCashFloat', $data)) {
+            $payload['default_cash_float'] = round((float) $data['defaultCashFloat'], 2);
+        }
 
         if (array_key_exists('code', $data) && $data['code'] !== null) {
             $c = trim((string) $data['code']);
@@ -161,6 +164,9 @@ class SettingsDomainService
             'invoice_prefix' => $data['invoicePrefix'] ?? null,
             'order_prefix' => $data['orderPrefix'] ?? null,
         ];
+        if (array_key_exists('defaultCashFloat', $data)) {
+            $payload['default_cash_float'] = round((float) $data['defaultCashFloat'], 2);
+        }
 
         if (array_key_exists('code', $data) && $data['code'] !== null) {
             $c = trim((string) $data['code']);
@@ -659,6 +665,7 @@ class SettingsDomainService
             'status' => $o->status ?? 'active',
             'invoicePrefix' => $o->invoice_prefix,
             'orderPrefix' => $o->order_prefix,
+            'defaultCashFloat' => round((float) ($o->default_cash_float ?? 500000), 2),
             'hasLogo' => $this->outletLogoService->hasLogo($o),
             'logoVersion' => (int) ($o->logo_version ?? 0),
         ];

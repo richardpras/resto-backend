@@ -29,6 +29,7 @@ class PosBootstrapService
         return [
             'merchant' => $this->posMerchantSnapshot(),
             'system' => $this->posSystemSnapshot(),
+            'defaultCashFloat' => $this->posSessionService->defaultCashFloatForOutlet($outletId),
             'menuItems' => [
                 'data' => MenuItemResource::collection($menuItems->getCollection())->resolve(),
                 'meta' => [

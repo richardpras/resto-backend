@@ -187,6 +187,8 @@ Route::prefix('v1')->group(function (): void {
     Route::get('qr/legacy-resolve', [TableQrController::class, 'resolveLegacy']);
 
     Route::get('orders/next-code', [OrderController::class, 'nextCode'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('orders/recovery-pending-count', [OrderItemRecoveryController::class, 'recoveryPendingCount'])->middleware(['auth:api', 'permission:orders.recovery.read']);
+    Route::get('orders/recovery-summary', [\App\Modules\Orders\Http\Controllers\OrderRecoveryReportingController::class, 'summary'])->middleware(['auth:api', 'permission:orders.recovery.read']);
     Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/status', [OrderController::class, 'updateStatus'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}', [OrderController::class, 'update'])->middleware(['auth:api', 'permission:pos.use']);
@@ -598,7 +600,7 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('permission.any:payroll.manage,attendance.view');
         Route::patch('attendance/{attendance}', [AttendanceRecordController::class, 'update'])
             ->middleware('permission.any:payroll.manage,attendance.manage');
-        Route::post('attendance', [AttendanceController::class, 'store'])
+        Route::post('attendance', [AttendanceRecordController::class, 'store'])
             ->middleware('permission.any:payroll.manage,attendance.manage');
         Route::delete('attendance/{attendance}', [AttendanceController::class, 'destroy'])
             ->middleware('permission.any:payroll.manage,attendance.manage');
@@ -1020,6 +1022,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('orders/{order}/items/{orderItem}/recovery/approve', [OrderItemRecoveryController::class, 'approve'])->middleware('permission:orders.recovery.approve');
         Route::post('orders/{order}/items/{orderItem}/recovery/settlement/preview', [OrderItemRecoverySettlementController::class, 'preview'])->middleware('permission:orders.recovery.approve');
         Route::post('orders/{order}/items/{orderItem}/recovery/settlement/record', [OrderItemRecoverySettlementController::class, 'record'])->middleware('permission:orders.recovery.approve');
+        Route::post('orders/{order}/items/{orderItem}/recovery/refund/execute', [OrderItemRecoveryController::class, 'executeRefund'])->middleware('permission:orders.refund.execute');
 
         Route::get('tables', [TableMasterController::class, 'index'])->middleware('permission:tables.view');
         Route::get('tables/qr/export', [TableQrController::class, 'export'])->middleware('permission:tables.manage');
@@ -1034,6 +1037,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('tables/{table}/qr/enable', [TableQrController::class, 'enable'])->middleware('permission:tables.manage');
         Route::post('tables/{table}/qr/disable', [TableQrController::class, 'disable'])->middleware('permission:tables.manage');
         Route::post('pos-sessions/open', [PosSessionController::class, 'open'])->middleware('permission:pos.use');
+        Route::get('pos-sessions/{id}/close-preview', [PosSessionController::class, 'closePreview'])->middleware('permission:pos.use');
         Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
         Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
         Route::get('payments/health', [PaymentHealthController::class, 'show'])->middleware('permission:settings.manage');

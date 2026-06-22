@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Modules\Accounting\Domain\AccountingSetting;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\PosEventLog;
+use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\ShiftClose\Domain\ShiftCloseRun;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -45,25 +46,20 @@ class ShiftCloseEngineTest extends TestCase
             ->getJson('/api/v1/shift-close/preflight?outletId='.(int) $outlet->id)
             ->assertOk()
             ->assertJsonPath('data.checks.openBills', 1)
-            ->assertJsonPath('data.severity', 'warning')
-            ->assertJsonPath('data.ready', true);
+            ->assertJsonPath('data.severity', 'healthy')
+            ->assertJsonPath('data.ready', true)
+            ->assertJsonMissingPath('data.warnings.0');
     }
 
     public function test_run_requires_confirm_when_warnings_present(): void
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet('Confirm Warn');
-        Order::query()->create([
-            'tenant_id' => 1,
+        PosSession::query()->create([
             'outlet_id' => (int) $outlet->id,
-            'code' => 'WARN-'.uniqid(),
-            'source' => 'pos',
-            'order_type' => 'Dine In',
-            'status' => 'completed',
-            'payment_status' => 'partial',
-            'total' => 10000,
-            'subtotal' => 10000,
-            'tax' => 0,
-            'paid_total' => 2000,
+            'opened_by_user_id' => (int) $user->id,
+            'status' => 'open',
+            'opening_cash' => 500000,
+            'opened_at' => now(),
         ]);
 
         $this->actingAs($user, 'api')
@@ -73,7 +69,7 @@ class ShiftCloseEngineTest extends TestCase
         $this->actingAs($user, 'api')
             ->postJson('/api/v1/shift-close/run', ['outletId' => (int) $outlet->id, 'confirm' => true])
             ->assertOk()
-            ->assertJsonPath('data.preflight.checks.openBills', 1);
+            ->assertJsonPath('data.preflight.checks.openPosSession', 1);
     }
 
     public function test_open_bill_block_policy_prevents_run(): void

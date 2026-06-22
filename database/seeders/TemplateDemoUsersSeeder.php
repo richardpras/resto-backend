@@ -36,6 +36,7 @@ class TemplateDemoUsersSeeder extends Seeder
             'orders.recovery.read',
             'orders.recovery.request',
             'orders.recovery.approve',
+            'orders.refund.execute',
         ];
 
         /** @see web/src/stores/authStore.ts ROLE_PERMS.Cashier */

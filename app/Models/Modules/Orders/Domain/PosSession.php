@@ -19,6 +19,8 @@ class PosSession extends Model
         'opening_cash',
         'closing_cash',
         'cash_variance',
+        'expected_cash',
+        'actual_cash',
         'opened_at',
         'closed_at',
         'notes',
@@ -28,6 +30,8 @@ class PosSession extends Model
         'opening_cash' => 'decimal:2',
         'closing_cash' => 'decimal:2',
         'cash_variance' => 'decimal:2',
+        'expected_cash' => 'decimal:2',
+        'actual_cash' => 'decimal:2',
         'opened_at' => 'datetime',
         'closed_at' => 'datetime',
     ];

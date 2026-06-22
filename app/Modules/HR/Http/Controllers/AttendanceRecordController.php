@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Modules\HR\Domain\AttendanceImportBatch;
 use App\Modules\HR\Http\Resources\AttendanceImportBatchResource;
 use App\Modules\HR\Http\Resources\AttendanceRecordResource;
+use App\Modules\HR\Http\Requests\StoreAttendanceRecordRequest;
 use App\Modules\HR\Services\AttendanceImportService;
 use App\Modules\HR\Services\AttendanceRecordCorrectionService;
+use App\Modules\HR\Services\AttendanceRecordManualService;
 use App\Modules\HR\Services\AttendanceRecordQueryService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +21,7 @@ class AttendanceRecordController extends Controller
         private readonly AttendanceRecordQueryService $queryService,
         private readonly AttendanceImportService $importService,
         private readonly AttendanceRecordCorrectionService $correctionService,
+        private readonly AttendanceRecordManualService $manualService,
         private readonly OutletAccessResolver $outletAccessResolver,
     ) {}
 
@@ -45,6 +48,16 @@ class AttendanceRecordController extends Controller
         return response()->json([
             'data' => new AttendanceRecordResource($row),
         ]);
+    }
+
+    public function store(StoreAttendanceRecordRequest $request): JsonResponse
+    {
+        $row = $this->manualService->create($this->resolveUser(), $request->validated());
+
+        return response()->json([
+            'message' => 'Attendance record created.',
+            'data' => new AttendanceRecordResource($row),
+        ], Response::HTTP_CREATED);
     }
 
     public function import(): JsonResponse

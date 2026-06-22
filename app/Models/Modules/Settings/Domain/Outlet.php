@@ -22,6 +22,11 @@ class Outlet extends Model
         'logo_version',
         'invoice_prefix',
         'order_prefix',
+        'default_cash_float',
+    ];
+
+    protected $casts = [
+        'default_cash_float' => 'decimal:2',
     ];
 
     public function receiptSetting(): HasOne

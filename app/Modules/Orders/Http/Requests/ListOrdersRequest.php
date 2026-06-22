@@ -27,6 +27,7 @@ class ListOrdersRequest extends FormRequest
             'dateFrom' => ['nullable', 'date'],
             'dateTo' => ['nullable', 'date', 'after_or_equal:dateFrom'],
             'hasVoidedPayment' => ['nullable', 'boolean'],
+            'hasRecoveryPending' => ['nullable', 'boolean'],
         ];
     }
 }

@@ -20,6 +20,7 @@ class EloquentOrderRepository implements OrderRepositoryInterface
         $dateFrom = $filters['date_from'] ?? null;
         $dateTo = $filters['date_to'] ?? null;
         $hasVoidedPayment = $filters['has_voided_payment'] ?? null;
+        $hasRecoveryPending = $filters['has_recovery_pending'] ?? null;
 
         return Order::query()
             ->when($tenantId > 0, fn ($query) => $query->where('tenant_id', $tenantId))
@@ -49,6 +50,12 @@ class EloquentOrderRepository implements OrderRepositoryInterface
                     'payments',
                     fn ($q) => $q->where('status', 'void')
                 ))
+            ->when($hasRecoveryPending === true || $hasRecoveryPending === 1 || $hasRecoveryPending === '1' || $hasRecoveryPending === 'true',
+                fn ($query) => $query->whereHas(
+                    'items',
+                    fn ($q) => $q->where('recovery_status', 'recovery_pending')
+                ))
+            ->withCount(['items as pending_recovery_count' => fn ($q) => $q->where('recovery_status', 'recovery_pending')])
             ->with(['items', 'payments.allocations', 'splits.items', 'orderVoucher.voucher', 'orderPromotion.promotion', 'member'])
             ->latest('id')
             ->paginate($perPage);

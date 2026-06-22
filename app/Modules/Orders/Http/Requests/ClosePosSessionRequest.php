@@ -11,10 +11,20 @@ class ClosePosSessionRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if (! $this->has('actualCash') && $this->has('closingCash')) {
+            $this->merge([
+                'actualCash' => $this->input('closingCash'),
+            ]);
+        }
+    }
+
     public function rules(): array
     {
         return [
-            'closingCash' => ['required', 'numeric', 'min:0'],
+            'actualCash' => ['required_without:closingCash', 'nullable', 'numeric', 'min:0'],
+            'closingCash' => ['required_without:actualCash', 'nullable', 'numeric', 'min:0'],
             'closedAt' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],

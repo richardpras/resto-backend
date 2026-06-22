@@ -81,6 +81,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'orders.recovery.read', 'name' => 'View order item recovery timeline'],
             ['code' => 'orders.recovery.request', 'name' => 'Report order item recovery issues'],
             ['code' => 'orders.recovery.approve', 'name' => 'Approve order item recovery resolutions'],
+            ['code' => 'orders.refund.execute', 'name' => 'Execute manager-approved cash refunds'],
             ['code' => 'finance.reconcile', 'name' => 'Run payment reconciliation'],
             ['code' => 'finance.shift_close', 'name' => 'Run shift close financial posting'],
             ['code' => 'employee.portal', 'name' => 'Employee self service portal'],

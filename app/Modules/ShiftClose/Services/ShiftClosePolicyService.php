@@ -11,6 +11,6 @@ class ShiftClosePolicyService
         $row = SystemSetting::query()->first();
         $policy = $row?->shift_close_open_bill_policy;
 
-        return in_array($policy, ['warn', 'block', 'ignore'], true) ? (string) $policy : 'warn';
+        return in_array($policy, ['warn', 'block', 'ignore'], true) ? (string) $policy : 'ignore';
     }
 }

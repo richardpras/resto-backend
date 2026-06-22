@@ -37,6 +37,16 @@ class PosSessionController extends Controller
         ]);
     }
 
+    public function closePreview(int $id): JsonResponse
+    {
+        $user = request()->user();
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED);
+
+        return response()->json([
+            'data' => $this->service->previewClose($user, $id),
+        ]);
+    }
+
     public function current(CurrentPosSessionRequest $request): JsonResponse
     {
         $outletId = (int) $request->validated('outletId');
@@ -44,6 +54,9 @@ class PosSessionController extends Controller
 
         return response()->json([
             'data' => $session !== null ? new PosSessionResource($session) : null,
+            'meta' => [
+                'defaultCashFloat' => $this->service->defaultCashFloatForOutlet($outletId),
+            ],
         ]);
     }
 }
