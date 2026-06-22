@@ -8,6 +8,7 @@ use App\Models\Modules\HR\Domain\AttendanceAuditLog;
 use App\Models\Modules\HR\Domain\PayrollRunAudit;
 use App\Models\Modules\Orders\Domain\PosEventLog;
 use App\Models\Modules\Print\Domain\PrintReprintAudit;
+use App\Models\Modules\UserManagement\Domain\UserManagementAuditLog;
 use App\Models\User;
 use App\Modules\System\DTO\UnifiedAuditRecord;
 use Carbon\Carbon;
@@ -213,6 +214,10 @@ final class AuditCenterService
       $records = $records->merge($this->collectPrintReprints($filters, $limit));
     }
 
+    if ($this->shouldIncludeUserManagementSource($filters)) {
+      $records = $records->merge($this->collectUserManagementAudits($filters, $limit));
+    }
+
     return $records;
   }
 
@@ -242,6 +247,10 @@ final class AuditCenterService
 
     if ($this->shouldIncludeDedicatedSource($filters, 'print_reprint')) {
       $count += $this->applyPrintFilters(PrintReprintAudit::query(), $filters)->count();
+    }
+
+    if ($this->shouldIncludeUserManagementSource($filters)) {
+      $count += $this->applyUserManagementFilters(UserManagementAuditLog::query(), $filters)->count();
     }
 
     return $count;
@@ -508,6 +517,9 @@ final class AuditCenterService
       'attendance' => 'attendance_audit_logs',
       'gift_card_issuance' => 'gift_card',
       'print_reprint' => 'print_reprint_audits',
+      'user' => 'user_management_audit_logs',
+      'role' => 'user_management_audit_logs',
+      'permission' => 'user_management_audit_logs',
     ];
 
     if (isset($dedicatedTypes[$entityType])) {
@@ -531,6 +543,106 @@ final class AuditCenterService
   }
 
   /**
+   * @param  array<string, mixed>  $filters
+   */
+  private function shouldIncludeUserManagementSource(array $filters): bool
+  {
+    $filterEntityType = isset($filters['entityType']) ? (string) $filters['entityType'] : null;
+    if ($filterEntityType === null) {
+      return true;
+    }
+
+    return in_array($filterEntityType, ['user', 'role', 'permission'], true);
+  }
+
+  /**
+   * @param  array<string, mixed>  $filters
+   * @return Collection<int, UnifiedAuditRecord>
+   */
+  private function collectUserManagementAudits(array $filters, int $limit): Collection
+  {
+    $rows = $this->applyUserManagementFilters(UserManagementAuditLog::query()->with(['actor', 'targetUser']), $filters)
+      ->orderByDesc('created_at')
+      ->orderByDesc('id')
+      ->limit($limit)
+      ->get();
+
+    return $rows->map(function (UserManagementAuditLog $row): UnifiedAuditRecord {
+      $before = is_array($row->before_json) ? $row->before_json : [];
+      $after = is_array($row->after_json) ? $row->after_json : [];
+      $metadata = is_array($row->metadata) ? $row->metadata : [];
+
+      return $this->buildRecord(
+        'user_mgmt:'.$row->id,
+        'user_management',
+        (string) $row->entity_type,
+        (int) $row->entity_id,
+        (string) $row->action,
+        $row->actor_user_id !== null ? (int) $row->actor_user_id : null,
+        $row->actor?->name,
+        null,
+        $row->created_at?->toIso8601String() ?? now()->toIso8601String(),
+        $before,
+        $after,
+        array_merge($metadata, [
+          'source' => 'user_management_audit_logs',
+          'targetUserId' => $row->target_user_id,
+          'targetUserName' => $row->targetUser?->name,
+        ]),
+      );
+    });
+  }
+
+  /**
+   * @param  Builder<UserManagementAuditLog>  $query
+   * @param  array<string, mixed>  $filters
+   * @return Builder<UserManagementAuditLog>
+   */
+  private function applyUserManagementFilters(Builder $query, array $filters): Builder
+  {
+    if (isset($filters['entityType']) && is_string($filters['entityType']) && $filters['entityType'] !== '') {
+      $query->where('entity_type', (string) $filters['entityType']);
+    }
+
+    if (isset($filters['entityId']) && (int) $filters['entityId'] > 0) {
+      $query->where('entity_id', (int) $filters['entityId']);
+    }
+
+    if (isset($filters['userId']) && (int) $filters['userId'] > 0) {
+      $query->where('actor_user_id', (int) $filters['userId']);
+    }
+
+    if (isset($filters['action']) && is_string($filters['action']) && $filters['action'] !== '') {
+      $query->where('action', 'like', '%'.$filters['action'].'%');
+    }
+
+    if (isset($filters['module']) && (string) $filters['module'] !== '' && (string) $filters['module'] !== 'user_management') {
+      $query->whereRaw('1 = 0');
+    }
+
+    $this->applyDateRange($query, 'created_at', $filters);
+
+    if (isset($filters['search']) && is_string($filters['search']) && $filters['search'] !== '') {
+      $term = '%'.$filters['search'].'%';
+      $query->where(function (Builder $q) use ($term, $filters): void {
+        $q->where('action', 'like', $term)
+          ->orWhere('entity_type', 'like', $term)
+          ->orWhere('before_json', 'like', $term)
+          ->orWhere('after_json', 'like', $term)
+          ->orWhere('metadata', 'like', $term);
+
+        if (is_numeric($filters['search'])) {
+          $q->orWhere('entity_id', (int) $filters['search'])
+            ->orWhere('target_user_id', (int) $filters['search'])
+            ->orWhere('actor_user_id', (int) $filters['search']);
+        }
+      });
+    }
+
+    return $query;
+  }
+
+  /**
    * @param  Builder<PosEventLog>  $query
    * @param  array<string, mixed>  $filters
    * @return Builder<PosEventLog>
@@ -547,7 +659,7 @@ final class AuditCenterService
 
     if (isset($filters['entityType']) && is_string($filters['entityType']) && $filters['entityType'] !== '') {
       $entityType = (string) $filters['entityType'];
-      if (! in_array($entityType, ['payroll_run', 'attendance', 'gift_card_issuance', 'print_reprint'], true)) {
+      if (! in_array($entityType, ['payroll_run', 'attendance', 'gift_card_issuance', 'print_reprint', 'user', 'role', 'permission'], true)) {
         $query->where('entity_type', $entityType);
       }
     }
@@ -801,6 +913,7 @@ final class AuditCenterService
       'menu' => ['menu_item', 'dashboard_snapshot', 'forecast_snapshot', 'automation_alert', 'menu_intelligence', 'outlet'],
       'gift_cards' => ['gift_card_issuance', 'gift_card'],
       'notifications' => ['automation_alert'],
+      'user_management' => ['user', 'role', 'permission'],
     ];
 
     if (isset($entityMap[$module])) {
@@ -892,6 +1005,13 @@ final class AuditCenterService
 
     if (str_contains($eventType, 'notification')) {
       return 'notifications';
+    }
+
+    if (in_array($entityType, ['user', 'role', 'permission'], true)
+      || str_starts_with($eventType, 'user.')
+      || str_starts_with($eventType, 'role.')
+      || str_starts_with($eventType, 'permission.')) {
+      return 'user_management';
     }
 
     if (in_array($entityType, ['order', 'session', 'split', 'kitchen_ticket', 'qr_request', 'print_reprint'], true)) {

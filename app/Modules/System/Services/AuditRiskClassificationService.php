@@ -32,6 +32,8 @@ final class AuditRiskClassificationService
         'role_updated',
         'permission_granted',
         'permission_revoked',
+        'user.pin_set',
+        'user.pin_cleared',
         'inventory_valuation_rebuilt',
         'inventory.movement.recorded',
         'gift_card_reconciliation_override',

@@ -24,7 +24,7 @@ class PermissionController extends Controller
 
     public function store(StorePermissionRequest $request): JsonResponse
     {
-        $permission = $this->service->createPermission($request->validated());
+        $permission = $this->service->createPermission($request->user(), $request->validated());
 
         return response()->json([
             'message' => 'Permission created successfully.',

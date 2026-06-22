@@ -146,6 +146,7 @@ use App\Modules\UserManagement\Http\Controllers\PermissionController;
 use App\Modules\UserManagement\Http\Controllers\PositionController;
 use App\Modules\UserManagement\Http\Controllers\RoleController;
 use App\Modules\UserManagement\Http\Controllers\UserController;
+use App\Modules\UserManagement\Http\Controllers\UserManagementAuditLogController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -874,6 +875,9 @@ Route::prefix('v1')->group(function (): void {
         Route::put('users/{user}/screen-pin', [UserController::class, 'adminSetScreenPin'])->middleware('permission:users.assign_roles');
         Route::delete('users/{user}/screen-pin', [UserController::class, 'adminClearScreenPin'])->middleware('permission:users.assign_roles');
         Route::post('users/{user}/roles', [UserController::class, 'assignRoles'])->middleware('permission:users.assign_roles');
+
+        Route::get('user-management/audit-logs', [UserManagementAuditLogController::class, 'index'])
+            ->middleware('permission:users.view');
 
         Route::get('roles', [RoleController::class, 'index'])->middleware('permission:roles.view');
         Route::post('roles', [RoleController::class, 'store'])->middleware('permission:roles.create');

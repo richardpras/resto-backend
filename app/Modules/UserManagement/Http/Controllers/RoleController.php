@@ -25,7 +25,7 @@ class RoleController extends Controller
 
     public function store(StoreRoleRequest $request): JsonResponse
     {
-        $role = $this->service->createRole($request->validated());
+        $role = $this->service->createRole($request->user(), $request->validated());
 
         return response()->json([
             'message' => 'Role created successfully.',
@@ -35,7 +35,7 @@ class RoleController extends Controller
 
     public function assignPermissions(AssignRolePermissionsRequest $request, int $role): JsonResponse
     {
-        $updated = $this->service->assignPermissions($role, $request->validated('permissionIds'));
+        $updated = $this->service->assignPermissions($request->user(), $role, $request->validated('permissionIds'));
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'Role not found');
 
         return response()->json([

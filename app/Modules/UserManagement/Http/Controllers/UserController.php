@@ -26,7 +26,7 @@ class UserController extends Controller
 
     public function store(StoreUserRequest $request): JsonResponse
     {
-        $user = $this->service->createUser($request->validated());
+        $user = $this->service->createUser($request->user(), $request->validated());
 
         return response()->json([
             'message' => 'User created successfully.',
@@ -36,7 +36,7 @@ class UserController extends Controller
 
     public function assignRoles(AssignUserRolesRequest $request, int $user): JsonResponse
     {
-        $updated = $this->service->assignRoles($user, $request->validated('roleIds'));
+        $updated = $this->service->assignRoles($request->user(), $user, $request->validated('roleIds'));
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
 
         return response()->json([
@@ -47,7 +47,7 @@ class UserController extends Controller
 
     public function adminSetScreenPin(AdminSetUserScreenPinRequest $request, int $user): JsonResponse
     {
-        $updated = $this->service->adminSetUserScreenPin($user, $request->validated('pin'));
+        $updated = $this->service->adminSetUserScreenPin($request->user(), $user, $request->validated('pin'));
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
 
         return response()->json([
@@ -58,7 +58,7 @@ class UserController extends Controller
 
     public function adminClearScreenPin(int $user): JsonResponse
     {
-        $updated = $this->service->adminClearUserScreenPin($user);
+        $updated = $this->service->adminClearUserScreenPin($request->user(), $user);
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
 
         return response()->json([
