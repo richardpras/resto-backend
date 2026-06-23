@@ -109,7 +109,7 @@ class EmployeeService
     {
         $employee = $this->find($user, $employeeId);
         abort_if(
-            $employee->payrolls()->exists() || $employee->attendances()->exists(),
+            $employee->payrollRunItemsV2()->exists() || $employee->attendanceRecords()->exists(),
             Response::HTTP_CONFLICT,
             'Employee cannot be deleted while payroll or attendance records exist.',
         );

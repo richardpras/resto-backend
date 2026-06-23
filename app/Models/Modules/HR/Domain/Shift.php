@@ -2,9 +2,7 @@
 
 namespace App\Models\Modules\HR\Domain;
 
-use App\Models\Modules\HR\Domain\Attendance;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Shift extends Model
 {
@@ -25,9 +23,4 @@ class Shift extends Model
     protected $casts = [
         'active' => 'boolean',
     ];
-
-    public function attendances(): HasMany
-    {
-        return $this->hasMany(Attendance::class);
-    }
 }

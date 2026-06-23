@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Tests\Concerns\FinalizedPayrollRunFixture;
 use Tests\Concerns\HrmApiFixture;
+use Tests\Concerns\RendersPendingPayslips;
 use Tests\TestCase;
 
 class PayslipGenerationTest extends TestCase
@@ -15,6 +16,7 @@ class PayslipGenerationTest extends TestCase
     use FinalizedPayrollRunFixture;
     use HrmApiFixture;
     use RefreshDatabase;
+    use RendersPendingPayslips;
 
     protected function setUp(): void
     {
@@ -34,12 +36,17 @@ class PayslipGenerationTest extends TestCase
 
         $this->assertSame(1, (int) $res->json('meta.count'));
         $data = $res->json('data.0');
-        $this->assertSame('generated', $data['status']);
-        $this->assertTrue($data['pdfAvailable']);
+        $this->assertSame('draft', $data['status']);
+        $this->assertFalse($data['pdfAvailable']);
         $this->assertStringContainsString('PS-', $data['payslipNo']);
+        $this->assertSame('queued', $res->json('meta.generation.phase'));
+
+        $this->renderPendingPayslipsForRun($run->id);
 
         $payslip = PayrollPayslip::query()->where('payroll_run_id', $run->id)->first();
         $this->assertNotNull($payslip);
+        $this->assertSame(PayrollPayslip::STATUS_GENERATED, $payslip->status);
+        $this->assertNotNull($payslip->pdf_path);
         $this->assertEquals((int) $employee->id, (int) $payslip->employee_id);
         $this->assertNotNull($payslip->breakdown_json['calculation']);
     }

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\HrmApiFixture;
 use Tests\Concerns\LockedPayrollPreparationFixture;
+use Tests\Concerns\RendersPendingPayslips;
 use Tests\TestCase;
 
 class BPJSPayslipTest extends TestCase
@@ -19,6 +20,7 @@ class BPJSPayslipTest extends TestCase
     use HrmApiFixture;
     use LockedPayrollPreparationFixture;
     use RefreshDatabase;
+    use RendersPendingPayslips;
 
     protected function setUp(): void
     {
@@ -33,6 +35,7 @@ class BPJSPayslipTest extends TestCase
     public function test_payslip_breakdown_includes_bpjs_and_pdf_mentions_employer_section(): void
     {
         [$employee, $period] = $this->seedLockedPreparationWithEmployee();
+        $this->grantHrmApiUserOutletAccess((int) $period->outlet_id);
 
         BpjsConfig::query()->create([
             'effective_date' => '2026-01-01',
@@ -68,6 +71,7 @@ class BPJSPayslipTest extends TestCase
         $this->patchJson('/api/v1/payroll-runs-v2/'.$runId.'/finalize')->assertOk();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $runId])->assertCreated();
+        $this->renderPendingPayslipsForRun($runId);
 
         $payslip = PayrollPayslip::query()->where('payroll_run_id', $runId)->first();
         $calc = $payslip->breakdown_json['calculation'] ?? [];

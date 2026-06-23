@@ -55,7 +55,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'promotions.manage', 'name' => 'Manage promotions'],
             ['code' => 'payroll.manage', 'name' => 'Manage payroll (web)'],
             ['code' => 'payroll.view', 'name' => 'View payroll'],
-            ['code' => 'payroll.create', 'name' => 'Create legacy payroll entries'],
+            ['code' => 'payroll.create', 'name' => 'Create payroll preparation and runs'],
             ['code' => 'employees.view', 'name' => 'View employees (HRM)'],
             ['code' => 'employees.manage', 'name' => 'Manage employees (HRM)'],
             ['code' => 'attendance.view', 'name' => 'View attendance (HRM)'],

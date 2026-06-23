@@ -48,6 +48,7 @@ class OutletPaymentMethodConfigController extends Controller
             'configs.*.provider' => ['nullable', 'string', 'max:64'],
             'configs.*.settings' => ['sometimes', 'array'],
             'configs.*.settings.instructions' => ['sometimes', 'string', 'max:2000'],
+            'configs.*.chartAccountId' => ['sometimes', 'nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         return response()->json([

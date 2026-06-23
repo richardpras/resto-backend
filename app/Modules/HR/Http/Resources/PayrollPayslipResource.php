@@ -29,6 +29,7 @@ class PayrollPayslipResource extends JsonResource
             'pdfPath' => $this->pdf_path,
             'pdfAvailable' => $this->pdf_path !== null,
             'status' => $this->status,
+            'renderError' => $this->render_error,
             'publishedAt' => $this->published_at?->toIso8601String(),
             'breakdownJson' => $this->when($request->routeIs('*.show'), $this->breakdown_json),
             'employee' => $employee ? [

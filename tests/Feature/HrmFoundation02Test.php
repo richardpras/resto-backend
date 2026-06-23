@@ -3,7 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Modules\HR\Domain\Employee;
-use App\Models\Modules\HR\Domain\Loan;
+use App\Models\Modules\HR\Domain\EmployeeLoan;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
@@ -68,7 +68,7 @@ class HrmFoundation02Test extends TestCase
         $this->assertSame('Waiter', $employee->json('data.position'));
     }
 
-    public function test_loans_list_is_scoped_to_user_outlets(): void
+    public function test_employee_loans_list_is_scoped_to_user_outlets(): void
     {
         $this->seedHrmPermissions();
 
@@ -108,7 +108,7 @@ class HrmFoundation02Test extends TestCase
             'base_salary' => 0,
             'status' => 'active',
         ]);
-        Employee::query()->create([
+        $empB = Employee::query()->create([
             'outlet_id' => $outletB->id,
             'employee_no' => 'EMP-B',
             'full_name' => 'B',
@@ -117,25 +117,33 @@ class HrmFoundation02Test extends TestCase
             'status' => 'active',
         ]);
 
-        Loan::query()->create([
+        EmployeeLoan::query()->create([
+            'outlet_id' => $outletA->id,
             'employee_id' => $empA->id,
-            'amount' => 100000,
-            'installments' => 2,
-            'start_date' => '2026-01-01',
-            'status' => 'active',
+            'loan_no' => 'LN-A-001',
+            'principal_amount' => 100000,
+            'installment_amount' => 50000,
+            'total_installments' => 2,
+            'paid_installments' => 0,
+            'remaining_balance' => 100000,
+            'status' => EmployeeLoan::STATUS_ACTIVE,
         ]);
-        Loan::query()->create([
-            'employee_id' => Employee::query()->where('employee_no', 'EMP-B')->value('id'),
-            'amount' => 200000,
-            'installments' => 2,
-            'start_date' => '2026-01-01',
-            'status' => 'active',
+        EmployeeLoan::query()->create([
+            'outlet_id' => $outletB->id,
+            'employee_id' => $empB->id,
+            'loan_no' => 'LN-B-001',
+            'principal_amount' => 200000,
+            'installment_amount' => 100000,
+            'total_installments' => 2,
+            'paid_installments' => 0,
+            'remaining_balance' => 200000,
+            'status' => EmployeeLoan::STATUS_ACTIVE,
         ]);
 
         $this->assignUserToOutlets($scopedUser, [(int) $outletA->id]);
         \Laravel\Passport\Passport::actingAs($scopedUser);
 
-        $this->getJson('/api/v1/loans')
+        $this->getJson('/api/v1/employee-loans')
             ->assertOk()
             ->assertJsonCount(1, 'data');
     }
@@ -146,6 +154,6 @@ class HrmFoundation02Test extends TestCase
         \Laravel\Passport\Passport::actingAs($user);
 
         $this->getJson('/api/v1/hr/employees')->assertForbidden();
-        $this->getJson('/api/v1/loans')->assertForbidden();
+        $this->getJson('/api/v1/employee-loans')->assertForbidden();
     }
 }

@@ -32,7 +32,8 @@ trait FinalizedPayrollRunFixture
             'review_required' => false,
         ]);
 
-        $this->actingAsHrmApiAdministrator();
+        $user = $this->actingAsHrmApiAdministrator();
+        $this->grantHrmApiUserOutletAccess((int) $period->outlet_id);
 
         $runRes = $this->postJson('/api/v1/payroll-runs-v2', [
             'payrollPreparationPeriodId' => $period->id,

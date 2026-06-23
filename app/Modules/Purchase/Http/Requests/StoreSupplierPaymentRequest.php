@@ -19,6 +19,7 @@ class StoreSupplierPaymentRequest extends FormRequest
             'outletId' => ['nullable', 'integer', 'exists:outlets,id'],
             'paymentDate' => ['required', 'date'],
             'paymentMethod' => ['nullable', Rule::in(['cash', 'bank_transfer', 'giro', 'check', 'other'])],
+            'bankAccountId' => ['nullable', 'string', 'max:64', 'exists:bank_accounts,id'],
             'referenceNo' => ['nullable', 'string', 'max:100'],
             'notes' => ['nullable', 'string'],
             'amount' => ['required', 'numeric', 'gt:0'],

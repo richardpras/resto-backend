@@ -11,6 +11,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 class PayslipService
 {
@@ -123,17 +124,188 @@ class PayslipService
                     $periodMonth,
                 );
 
-                $path = $this->pdfService->renderAndStore($payslip);
-                $payslip->update([
-                    'pdf_path' => $path,
-                    'status' => PayrollPayslip::STATUS_GENERATED,
-                ]);
-
-                $created->push($payslip->refresh()->load(['employee', 'payrollPeriod']));
+                $created->push($payslip->load(['employee', 'payrollPeriod']));
             }
 
             return $created;
         });
+    }
+
+    public function renderPayslipPdf(PayrollPayslip $payslip): PayrollPayslip
+    {
+        $wasPublished = $payslip->published_at !== null;
+
+        $payslip->update([
+            'status' => PayrollPayslip::STATUS_PROCESSING,
+            'render_error' => null,
+        ]);
+
+        try {
+            $path = $this->pdfService->renderAndStore($payslip->refresh());
+            $payslip->update([
+                'pdf_path' => $path,
+                'status' => $wasPublished ? PayrollPayslip::STATUS_PUBLISHED : PayrollPayslip::STATUS_GENERATED,
+                'render_error' => null,
+            ]);
+        } catch (Throwable $e) {
+            $payslip->update([
+                'status' => PayrollPayslip::STATUS_FAILED,
+                'render_error' => $e->getMessage(),
+            ]);
+        }
+
+        return $payslip->refresh();
+    }
+
+    /**
+     * @return array{processed: int, failed: int, remaining: int}
+     */
+    public function renderPendingBatch(?int $runId, ?int $outletId, int $limit): array
+    {
+        $limit = max(1, $limit);
+
+        $query = PayrollPayslip::query()
+            ->where('status', PayrollPayslip::STATUS_DRAFT)
+            ->whereNull('pdf_path')
+            ->orderBy('id');
+
+        if ($runId !== null && $runId > 0) {
+            $query->where('payroll_run_id', $runId);
+        }
+
+        if ($outletId !== null && $outletId > 0) {
+            $query->where('outlet_id', $outletId);
+        }
+
+        $rows = $query->limit($limit)->get();
+
+        $processed = 0;
+        $failed = 0;
+
+        foreach ($rows as $payslip) {
+            $result = $this->renderPayslipPdf($payslip);
+            if ($result->status === PayrollPayslip::STATUS_FAILED) {
+                $failed++;
+            } else {
+                $processed++;
+            }
+            gc_collect_cycles();
+        }
+
+        $remainingQuery = PayrollPayslip::query()
+            ->where('status', PayrollPayslip::STATUS_DRAFT)
+            ->whereNull('pdf_path');
+
+        if ($runId !== null && $runId > 0) {
+            $remainingQuery->where('payroll_run_id', $runId);
+        }
+
+        if ($outletId !== null && $outletId > 0) {
+            $remainingQuery->where('outlet_id', $outletId);
+        }
+
+        return [
+            'processed' => $processed,
+            'failed' => $failed,
+            'remaining' => $remainingQuery->count(),
+        ];
+    }
+
+    public function queueRegenerate(?User $user, int $payslipId): PayrollPayslip
+    {
+        $payslip = $this->findAccessible($user, $payslipId);
+        $payslip->loadMissing('payrollRun');
+
+        if ($payslip->payrollRun !== null) {
+            $payslip->payrollRun->assertNotClosed();
+        }
+
+        if (in_array($payslip->status, [PayrollPayslip::STATUS_DRAFT, PayrollPayslip::STATUS_PROCESSING], true)) {
+            return $payslip;
+        }
+
+        $payslip->update([
+            'status' => PayrollPayslip::STATUS_DRAFT,
+            'pdf_path' => null,
+            'render_error' => null,
+        ]);
+
+        return $payslip->refresh()->load(['employee', 'payrollPeriod']);
+    }
+
+    /**
+     * @return array{
+     *     payrollRunId: int,
+     *     phase: string,
+     *     total: int,
+     *     draft: int,
+     *     processing: int,
+     *     generated: int,
+     *     published: int,
+     *     failed: int,
+     *     percent: int
+     * }
+     */
+    public function getGenerationStatus(?User $user, int $payrollRunId): array
+    {
+        $this->payrollRuns->findAccessible($user, $payrollRunId);
+
+        $base = PayrollPayslip::query()->where('payroll_run_id', $payrollRunId);
+        $this->employeeMaster->scopeByEmployeeOutlet($base, $user, 'employee_id');
+
+        $total = (clone $base)->count();
+
+        if ($total === 0) {
+            return [
+                'payrollRunId' => $payrollRunId,
+                'phase' => 'idle',
+                'total' => 0,
+                'draft' => 0,
+                'processing' => 0,
+                'generated' => 0,
+                'published' => 0,
+                'failed' => 0,
+                'percent' => 0,
+            ];
+        }
+
+        $draft = (clone $base)->where('status', PayrollPayslip::STATUS_DRAFT)->count();
+        $processing = (clone $base)->where('status', PayrollPayslip::STATUS_PROCESSING)->count();
+        $generated = (clone $base)->where('status', PayrollPayslip::STATUS_GENERATED)->count();
+        $published = (clone $base)->where('status', PayrollPayslip::STATUS_PUBLISHED)->count();
+        $failed = (clone $base)->where('status', PayrollPayslip::STATUS_FAILED)->count();
+
+        $done = $generated + $published + $failed;
+        $percent = (int) round(($done / $total) * 100);
+
+        $phase = 'completed';
+        if ($draft > 0 || $processing > 0) {
+            $phase = $processing > 0 || ($draft > 0 && $done > 0) ? 'processing' : 'queued';
+        } elseif ($failed > 0 && $done < $total) {
+            $phase = 'failed';
+        } elseif ($failed > 0) {
+            $phase = 'failed';
+        }
+
+        if ($draft > 0 && $processing === 0 && $done === 0) {
+            $phase = 'queued';
+        }
+
+        if ($draft === 0 && $processing === 0 && $failed === 0) {
+            $phase = 'completed';
+        }
+
+        return [
+            'payrollRunId' => $payrollRunId,
+            'phase' => $phase,
+            'total' => $total,
+            'draft' => $draft,
+            'processing' => $processing,
+            'generated' => $generated,
+            'published' => $published,
+            'failed' => $failed,
+            'percent' => min(100, $percent),
+        ];
     }
 
     public function publish(?User $user, int $payslipId): PayrollPayslip
@@ -144,7 +316,7 @@ class PayslipService
             return $payslip;
         }
 
-        if (! in_array($payslip->status, [PayrollPayslip::STATUS_GENERATED, PayrollPayslip::STATUS_DRAFT], true)) {
+        if ($payslip->status !== PayrollPayslip::STATUS_GENERATED) {
             throw ValidationException::withMessages([
                 'status' => ['Payslip must be generated before publishing.'],
             ]);
@@ -159,26 +331,6 @@ class PayslipService
         $payslip->update([
             'status' => PayrollPayslip::STATUS_PUBLISHED,
             'published_at' => now(),
-        ]);
-
-        return $payslip->refresh()->load(['employee', 'payrollPeriod']);
-    }
-
-    public function regenerate(?User $user, int $payslipId): PayrollPayslip
-    {
-        $payslip = $this->findAccessible($user, $payslipId);
-        $payslip->loadMissing('payrollRun');
-
-        if ($payslip->payrollRun !== null) {
-            $payslip->payrollRun->assertNotClosed();
-        }
-
-        $path = $this->pdfService->renderAndStore($payslip);
-        $payslip->update([
-            'pdf_path' => $path,
-            'status' => $payslip->status === PayrollPayslip::STATUS_PUBLISHED
-                ? PayrollPayslip::STATUS_PUBLISHED
-                : PayrollPayslip::STATUS_GENERATED,
         ]);
 
         return $payslip->refresh()->load(['employee', 'payrollPeriod']);
@@ -238,10 +390,17 @@ class PayslipService
             'total_deductions' => (float) $item->total_deductions,
             'net_salary' => (float) $item->net_salary,
             'breakdown_json' => $breakdown,
+            'pdf_path' => null,
+            'render_error' => null,
             'status' => PayrollPayslip::STATUS_DRAFT,
         ];
 
         if ($existing !== null) {
+            if ($existing->status === PayrollPayslip::STATUS_PUBLISHED) {
+                $data['status'] = PayrollPayslip::STATUS_DRAFT;
+                $data['published_at'] = $existing->published_at;
+            }
+
             $existing->update($data);
 
             return $existing->refresh();
@@ -267,7 +426,7 @@ class PayslipService
             if (! empty($merchant['name'])) {
                 return (string) $merchant['name'];
             }
-        } catch (\Throwable) {
+        } catch (Throwable) {
             // fallback below
         }
 

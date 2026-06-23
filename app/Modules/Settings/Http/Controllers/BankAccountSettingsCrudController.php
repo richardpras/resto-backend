@@ -27,6 +27,7 @@ class BankAccountSettingsCrudController extends Controller
             'accountName' => ['required', 'string', 'max:255'],
             'accountNumber' => ['required', 'string', 'max:64'],
             'isDefault' => ['required', 'boolean'],
+            'chartAccountId' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         return response()->json([
@@ -42,6 +43,7 @@ class BankAccountSettingsCrudController extends Controller
             'accountName' => ['required', 'string', 'max:255'],
             'accountNumber' => ['required', 'string', 'max:64'],
             'isDefault' => ['required', 'boolean'],
+            'chartAccountId' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         return response()->json([

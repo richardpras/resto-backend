@@ -79,16 +79,26 @@ class PayslipPdfService
 
     private function renderHtml(string $html): string
     {
+        $fontDir = storage_path('fonts');
+        if (! is_dir($fontDir)) {
+            mkdir($fontDir, 0755, true);
+        }
+
         $options = new Options;
         $options->set('defaultFont', 'DejaVu Sans');
         $options->set('isRemoteEnabled', false);
+        $options->set('fontDir', $fontDir);
+        $options->set('fontCache', $fontDir);
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html, 'UTF-8');
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
 
-        return (string) $dompdf->output();
+        $output = (string) $dompdf->output();
+        unset($dompdf);
+
+        return $output;
     }
 
     private function storagePathFor(PayrollPayslip $payslip): string

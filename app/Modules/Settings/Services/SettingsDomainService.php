@@ -311,7 +311,7 @@ class SettingsDomainService
     /** @return list<array<string, mixed>> */
     public function listPaymentMethods(): array
     {
-        return PaymentMethod::query()->orderBy('name')->get()->map(fn (PaymentMethod $p) => $this->paymentMethodToCamel($p))->all();
+        return PaymentMethod::query()->orderBy('name')->with('chartAccount:id,code')->get()->map(fn (PaymentMethod $p) => $this->paymentMethodToCamel($p))->all();
     }
 
     /** @param  array<string, mixed>  $data */
@@ -324,6 +324,7 @@ class SettingsDomainService
             'integration' => $data['integration'] ?? null,
             'fee' => $data['fee'] ?? null,
             'status' => $data['status'],
+            'chart_account_id' => $data['chartAccountId'] ?? null,
         ]);
 
         return $this->paymentMethodToCamel($p);
@@ -342,6 +343,7 @@ class SettingsDomainService
             'integration' => $data['integration'] ?? null,
             'fee' => $data['fee'] ?? null,
             'status' => $data['status'],
+            'chart_account_id' => $data['chartAccountId'] ?? null,
         ]);
         $p->save();
 
@@ -360,7 +362,7 @@ class SettingsDomainService
     /** @return list<array<string, mixed>> */
     public function listBankAccounts(): array
     {
-        return BankAccount::query()->orderBy('bank_name')->get()->map(fn (BankAccount $b) => $this->bankToCamel($b))->all();
+        return BankAccount::query()->orderBy('bank_name')->with('chartAccount:id,code')->get()->map(fn (BankAccount $b) => $this->bankToCamel($b))->all();
     }
 
     /** @param  array<string, mixed>  $data */
@@ -372,6 +374,7 @@ class SettingsDomainService
             'account_name' => $data['accountName'],
             'account_number' => $data['accountNumber'],
             'is_default' => $data['isDefault'],
+            'chart_account_id' => $data['chartAccountId'] ?? null,
         ]);
 
         return $this->bankToCamel($b);
@@ -389,6 +392,7 @@ class SettingsDomainService
             'account_name' => $data['accountName'],
             'account_number' => $data['accountNumber'],
             'is_default' => $data['isDefault'],
+            'chart_account_id' => $data['chartAccountId'] ?? null,
         ]);
         $b->save();
 
@@ -775,6 +779,10 @@ class SettingsDomainService
         if ($p->fee !== null) {
             $base['fee'] = (float) $p->fee;
         }
+        if ($p->chart_account_id !== null) {
+            $base['chartAccountId'] = (int) $p->chart_account_id;
+            $base['chartAccountCode'] = $p->chartAccount?->code;
+        }
 
         return $base;
     }
@@ -782,13 +790,19 @@ class SettingsDomainService
     /** @return array<string, mixed> */
     private function bankToCamel(BankAccount $b): array
     {
-        return [
+        $base = [
             'id' => $b->id,
             'bankName' => $b->bank_name,
             'accountName' => $b->account_name,
             'accountNumber' => $b->account_number,
             'isDefault' => $b->is_default,
         ];
+        if ($b->chart_account_id !== null) {
+            $base['chartAccountId'] = (int) $b->chart_account_id;
+            $base['chartAccountCode'] = $b->chartAccount?->code;
+        }
+
+        return $base;
     }
 
     private function normalizeThermalPaperWidth(?string $width): string

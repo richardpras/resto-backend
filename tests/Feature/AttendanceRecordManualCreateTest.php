@@ -49,6 +49,11 @@ class AttendanceRecordManualCreateTest extends TestCase
             'attendance_date' => '2026-07-10',
             'source' => AttendanceRecord::SOURCE_MANUAL,
         ]);
+
+        $this->assertDatabaseHas('attendance_daily_summaries', [
+            'employee_id' => $employee->id,
+            'attendance_date' => '2026-07-10',
+        ]);
     }
 
     public function test_duplicate_manual_create_is_blocked(): void

@@ -2,6 +2,7 @@
 
 namespace App\Models\Modules\Purchase\Domain;
 
+use App\Models\Modules\Settings\Domain\BankAccount;
 use App\Models\Supplier;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,6 +18,7 @@ class SupplierPayment extends Model
         'payment_no',
         'payment_date',
         'payment_method',
+        'bank_account_id',
         'reference_no',
         'notes',
         'amount',
@@ -44,6 +46,11 @@ class SupplierPayment extends Model
     public function supplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class);
+    }
+
+    public function bankAccount(): BelongsTo
+    {
+        return $this->belongsTo(BankAccount::class, 'bank_account_id');
     }
 
     public function allocations(): HasMany

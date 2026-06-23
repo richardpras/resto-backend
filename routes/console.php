@@ -69,6 +69,11 @@ Schedule::command('attendance:generate-summaries')
     ->withoutOverlapping()
     ->name('attendance-generate-summaries');
 
+Schedule::command('payslip:render-pending --limit=10')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->name('payslip-render-pending');
+
 Schedule::command('accounting:health-snapshot')
     ->dailyAt('02:00')
     ->withoutOverlapping()

@@ -4,8 +4,6 @@ namespace Database\Seeders\Demo;
 
 use App\Models\Modules\Accounting\Domain\AccountingHealthSnapshot;
 use App\Models\Modules\Accounting\Domain\AccountingPostingFailure;
-use App\Models\Modules\HR\Domain\Attendance;
-use App\Models\Modules\HR\Domain\AttendanceAuditLog;
 use App\Models\Modules\Notifications\Domain\UserNotification;
 use App\Models\Modules\Orders\Domain\PosEventLog;
 use App\Models\Modules\Payments\Domain\PaymentHealthSnapshot;
@@ -188,20 +186,6 @@ class DemoMonitoringSeeder extends Seeder
 
         foreach (array_chunk($batch, 100) as $chunk) {
             PosEventLog::query()->insertOrIgnore($chunk);
-        }
-
-        $attendanceId = Attendance::query()->orderBy('id')->value('id');
-        if ($attendanceId !== null) {
-            AttendanceAuditLog::query()->updateOrCreate(
-                ['attendance_id' => $attendanceId, 'action' => 'demo_corrected'],
-                [
-                    'actor_user_id' => $actorId,
-                    'before_json' => ['status' => 'late'],
-                    'after_json' => ['status' => 'present'],
-                    'reason' => 'Manager correction',
-                    'source_type' => 'manual-edit',
-                ],
-            );
         }
     }
 

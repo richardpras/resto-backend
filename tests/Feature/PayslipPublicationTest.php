@@ -7,6 +7,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Tests\Concerns\FinalizedPayrollRunFixture;
 use Tests\Concerns\HrmApiFixture;
+use Tests\Concerns\RendersPendingPayslips;
 use Tests\TestCase;
 
 class PayslipPublicationTest extends TestCase
@@ -14,6 +15,7 @@ class PayslipPublicationTest extends TestCase
     use FinalizedPayrollRunFixture;
     use HrmApiFixture;
     use RefreshDatabase;
+    use RendersPendingPayslips;
 
     protected function setUp(): void
     {
@@ -28,6 +30,8 @@ class PayslipPublicationTest extends TestCase
         [$employee, , $run] = $this->seedFinalizedPayrollRun();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $run->id])->assertCreated();
+        $this->renderPendingPayslipsForRun($run->id);
+
         $payslip = PayrollPayslip::query()->where('payroll_run_id', $run->id)->first();
 
         $this->postJson('/api/v1/payslips/'.$payslip->id.'/publish')
@@ -43,6 +47,7 @@ class PayslipPublicationTest extends TestCase
         [$employee, , $run] = $this->seedFinalizedPayrollRun();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $run->id])->assertCreated();
+        $this->renderPendingPayslipsForRun($run->id);
 
         $res = $this->getJson('/api/v1/employees/'.$employee->id.'/payslips')->assertOk();
         $this->assertCount(1, $res->json('data'));
@@ -54,6 +59,7 @@ class PayslipPublicationTest extends TestCase
         [, , $run] = $this->seedFinalizedPayrollRun();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $run->id])->assertCreated();
+        $this->renderPendingPayslipsForRun($run->id);
 
         $res = $this->getJson('/api/v1/payslips?payrollRunId='.$run->id.'&status=generated')->assertOk();
         $this->assertGreaterThanOrEqual(1, count($res->json('data')));

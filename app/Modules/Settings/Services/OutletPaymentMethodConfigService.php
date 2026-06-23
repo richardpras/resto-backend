@@ -26,6 +26,7 @@ class OutletPaymentMethodConfigService
         $this->ensureDefaultsForOutlet($outletId);
 
         return OutletPaymentMethodConfig::query()
+            ->with('chartAccount:id,code')
             ->where('outlet_id', $outletId)
             ->orderBy('display_order')
             ->orderBy('id')
@@ -42,6 +43,7 @@ class OutletPaymentMethodConfigService
         $this->ensureDefaultsForOutlet($outletId);
 
         return OutletPaymentMethodConfig::query()
+            ->with('chartAccount:id,code')
             ->where('outlet_id', $outletId)
             ->where('enabled', true)
             ->orderBy('display_order')
@@ -93,6 +95,10 @@ class OutletPaymentMethodConfigService
                     'provider' => isset($row['provider']) ? ($row['provider'] !== null ? (string) $row['provider'] : null) : $config->provider,
                     'settings' => $mergedSettings,
                 ]);
+                if (array_key_exists('chartAccountId', $row) || array_key_exists('chart_account_id', $row)) {
+                    $raw = $row['chartAccountId'] ?? $row['chart_account_id'] ?? null;
+                    $config->chart_account_id = $raw !== null && $raw !== '' ? (int) $raw : null;
+                }
                 $config->save();
             }
 
@@ -165,6 +171,7 @@ class OutletPaymentMethodConfigService
         $this->ensureDefaultsForOutlet($outletId);
 
         return OutletPaymentMethodConfig::query()
+            ->with('chartAccount:id,code')
             ->where('outlet_id', $outletId)
             ->where('payment_method_code', $code)
             ->where('enabled', true)
@@ -202,6 +209,7 @@ class OutletPaymentMethodConfigService
         };
 
         return OutletPaymentMethodConfig::query()
+            ->with('chartAccount:id,code')
             ->where('outlet_id', $outletId)
             ->whereIn('payment_method_code', $candidates)
             ->whereIn('type', [
@@ -231,6 +239,7 @@ class OutletPaymentMethodConfigService
     private function listConfigsForOutletInternal(int $outletId): array
     {
         return OutletPaymentMethodConfig::query()
+            ->with('chartAccount:id,code')
             ->where('outlet_id', $outletId)
             ->orderBy('display_order')
             ->orderBy('id')
@@ -247,7 +256,7 @@ class OutletPaymentMethodConfigService
             $settings['qr_image_url'] = Storage::disk('public')->url((string) $settings['qr_image_path']);
         }
 
-        return [
+        $base = [
             'id' => (int) $row->id,
             'outletId' => (int) $row->outlet_id,
             'paymentMethodCode' => (string) $row->payment_method_code,
@@ -260,6 +269,12 @@ class OutletPaymentMethodConfigService
             'settlementMethod' => PaymentMethodCatalog::settlementMethodForType((string) $row->type),
             'settings' => $settings,
         ];
+        if ($row->chart_account_id !== null) {
+            $base['chartAccountId'] = (int) $row->chart_account_id;
+            $base['chartAccountCode'] = $row->chartAccount?->code;
+        }
+
+        return $base;
     }
 
     /** @return array<string, mixed> */

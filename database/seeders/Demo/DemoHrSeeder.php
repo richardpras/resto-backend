@@ -2,7 +2,7 @@
 
 namespace Database\Seeders\Demo;
 
-use App\Models\Modules\HR\Domain\Attendance;
+use App\Models\Modules\HR\Domain\AttendanceRecord;
 use App\Models\Modules\HR\Domain\Employee;
 use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
 use App\Models\Modules\HR\Domain\PayrollRunAudit;
@@ -53,13 +53,13 @@ class DemoHrSeeder extends Seeder
                 $employeeIds[] = $employee->id;
             }
 
-            $this->seedAttendance($employeeIds, $base);
+            $this->seedAttendance($outlet->id, $employeeIds, $base);
             $this->seedPayrollRuns($outlet->id, $employeeIds, $base);
         }
     }
 
     /** @param  list<int>  $employeeIds */
-    private function seedAttendance(array $employeeIds, CarbonImmutable $base): void
+    private function seedAttendance(int $outletId, array $employeeIds, CarbonImmutable $base): void
     {
         $statuses = ['present', 'present', 'present', 'late', 'overtime', 'day_off', 'sick'];
 
@@ -71,17 +71,18 @@ class DemoHrSeeder extends Seeder
                     continue;
                 }
 
-                $checkIn = $status === 'sick' ? null : "{$date} 08:".str_pad((string) (($empIndex % 3) * 10), 2, '0', STR_PAD_LEFT).':00';
-                $checkOut = $status === 'sick' ? null : ($status === 'overtime' ? "{$date} 20:00:00" : "{$date} 17:00:00");
+                $clockIn = $status === 'sick' ? null : "{$date} 08:".str_pad((string) (($empIndex % 3) * 10), 2, '0', STR_PAD_LEFT).':00';
+                $clockOut = $status === 'sick' ? null : ($status === 'overtime' ? "{$date} 20:00:00" : "{$date} 17:00:00");
+                $recordStatus = $status === 'sick' ? AttendanceRecord::STATUS_ABSENT : ($status === 'late' ? AttendanceRecord::STATUS_LATE : AttendanceRecord::STATUS_PRESENT);
 
-                Attendance::query()->updateOrCreate(
+                AttendanceRecord::query()->updateOrCreate(
                     ['employee_id' => $employeeId, 'attendance_date' => $date],
                     [
-                        'check_in' => $checkIn,
-                        'check_out' => $checkOut,
-                        'source' => 'manual',
-                        'status' => $status === 'sick' ? 'absent' : ($status === 'late' ? 'late' : 'present'),
-                        'sync_key' => "demo-{$employeeId}-{$date}",
+                        'outlet_id' => $outletId,
+                        'clock_in' => $clockIn,
+                        'clock_out' => $clockOut,
+                        'source' => AttendanceRecord::SOURCE_MANUAL,
+                        'status' => $recordStatus,
                         'notes' => $status === 'sick' ? 'Medical leave' : ($status === 'overtime' ? 'Overtime shift' : 'Demo attendance'),
                     ],
                 );

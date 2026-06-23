@@ -21,6 +21,7 @@ return new class extends Migration
             $table->decimal('net_salary', 15, 2);
             $table->json('breakdown_json');
             $table->string('pdf_path')->nullable();
+            $table->text('render_error')->nullable();
             $table->string('status', 20)->default('draft');
             $table->timestamp('published_at')->nullable();
             $table->timestamps();

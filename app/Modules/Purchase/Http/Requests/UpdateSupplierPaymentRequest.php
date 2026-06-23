@@ -17,6 +17,7 @@ class UpdateSupplierPaymentRequest extends FormRequest
         return [
             'paymentDate' => ['sometimes', 'date'],
             'paymentMethod' => ['sometimes', Rule::in(['cash', 'bank_transfer', 'giro', 'check', 'other'])],
+            'bankAccountId' => ['sometimes', 'nullable', 'string', 'max:64', 'exists:bank_accounts,id'],
             'referenceNo' => ['sometimes', 'nullable', 'string', 'max:100'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'amount' => ['sometimes', 'numeric', 'gt:0'],

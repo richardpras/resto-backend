@@ -12,7 +12,7 @@ class GenerateAttendanceSummariesCommand extends Command
                             {--date= : Attendance date (Y-m-d); defaults to yesterday}
                             {--outlet= : Optional outlet id scope}';
 
-    protected $description = 'Generate attendance daily summaries for a date (idempotent)';
+    protected $description = 'Generate attendance daily summaries for a date (idempotent). Omit --date to process yesterday; pass --date=Y-m-d for a specific day (e.g. today).';
 
     public function handle(AttendanceSummaryService $summaryService): int
     {

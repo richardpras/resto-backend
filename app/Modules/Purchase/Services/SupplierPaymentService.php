@@ -51,6 +51,7 @@ final class SupplierPaymentService
                 'payment_no' => $this->nextNumber(),
                 'payment_date' => $data['paymentDate'],
                 'payment_method' => $data['paymentMethod'] ?? 'cash',
+                'bank_account_id' => $data['bankAccountId'] ?? null,
                 'reference_no' => $data['referenceNo'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'amount' => $amount,
@@ -83,6 +84,9 @@ final class SupplierPaymentService
             }
             if (array_key_exists('paymentMethod', $data)) {
                 $payment->payment_method = $data['paymentMethod'];
+            }
+            if (array_key_exists('bankAccountId', $data)) {
+                $payment->bank_account_id = $data['bankAccountId'];
             }
             if (array_key_exists('referenceNo', $data)) {
                 $payment->reference_no = $data['referenceNo'];

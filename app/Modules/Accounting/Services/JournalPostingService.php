@@ -8,6 +8,7 @@ use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\Modules\Accounting\Domain\JournalPostingKey;
 use App\Models\Modules\Accounting\Domain\AccountingPeriod;
 use App\Models\User;
+use App\Modules\Accounting\Support\JournalOutletNameResolver;
 use App\Modules\GiftCards\Support\GiftCardRedemptionComposition;
 use App\Modules\Orders\Services\PosAuditLogService;
 use Illuminate\Support\Facades\DB;
@@ -63,7 +64,10 @@ class JournalPostingService
                 'posted_by' => $payload['posted_by'] ?? null,
                 'immutable' => true,
                 'description' => $payload['description'] ?? null,
-                'outlet' => $payload['outlet'] ?? 'Main Outlet',
+                'outlet' => JournalOutletNameResolver::resolve(
+                    isset($payload['outlet_id']) ? (int) $payload['outlet_id'] : null,
+                    isset($payload['outlet']) ? (string) $payload['outlet'] : null,
+                ),
             ]);
 
             foreach (array_values($lines) as $idx => $line) {
@@ -321,19 +325,21 @@ class JournalPostingService
         float $totalCogs,
         string $batchKey,
         ?GiftCardRedemptionComposition $giftCardComposition = null,
+        array $paymentAmountsByMethod = [],
     ): ?Journal {
         $giftCardComposition ??= new GiftCardRedemptionComposition;
-        $totalRevenue = round($totalCashSales + $giftCardComposition->total(), 2);
+        $cashFromPayments = round((float) array_sum($paymentAmountsByMethod), 2);
+        $effectiveCashSales = $paymentAmountsByMethod !== [] ? $cashFromPayments : $totalCashSales;
+        $totalRevenue = round($effectiveCashSales + $giftCardComposition->total(), 2);
         if ($totalRevenue <= 0) {
             return null;
         }
 
         try {
-            $salesLines = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class)->buildSalesJournalLines(
-                $totalCashSales,
-                $giftCardComposition,
-                $outletId,
-            );
+            $giftCardService = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class);
+            $salesLines = $paymentAmountsByMethod !== []
+                ? $giftCardService->buildSalesJournalLinesFromPayments($paymentAmountsByMethod, $giftCardComposition, $outletId)
+                : $giftCardService->buildSalesJournalLines($totalCashSales, $giftCardComposition, $outletId);
             $cogsAcc = $this->integrityService->resolveAccountOrFail('cogs', ['5100'], ['expense'], $outletId);
             $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
 

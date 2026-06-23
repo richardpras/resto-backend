@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -50,5 +51,10 @@ class PayrollPostingJournalTest extends TestCase
         $entryCredit = round((float) $entries->sum('credit'), 2);
         $this->assertEquals($entryDebit, $entryCredit);
         $this->assertEquals($debit, $entryDebit);
+
+        $journal = Journal::query()->with('linkedOutlet')->findOrFail($journalId);
+        $this->assertSame((int) $run->outlet_id, (int) $journal->outlet_id);
+        $this->assertSame('Locked Prep', $journal->outlet);
+        $this->assertSame('Locked Prep', $journal->linkedOutlet?->name);
     }
 }

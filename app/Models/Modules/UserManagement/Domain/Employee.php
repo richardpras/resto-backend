@@ -2,18 +2,15 @@
 
 namespace App\Models\Modules\UserManagement\Domain;
 
-use App\Models\Modules\HR\Domain\Attendance;
 use App\Models\Modules\HR\Domain\AttendanceRecord;
 use App\Models\Modules\HR\Domain\EmployeeRoster;
 use App\Models\Modules\HR\Domain\EmployeeShiftAssignment;
-use App\Models\Modules\HR\Domain\Payroll;
-use App\Models\Modules\HR\Domain\Shift;
+use App\Models\Modules\HR\Domain\PayrollRunItemV2;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 /**
  * Canonical HRM employee master record (single table for payroll, attendance, org structure).
@@ -82,14 +79,9 @@ class Employee extends Model
         return $this->belongsTo(Department::class);
     }
 
-    public function payrolls(): HasMany
+    public function payrollRunItemsV2(): HasMany
     {
-        return $this->hasMany(Payroll::class);
-    }
-
-    public function attendances(): HasMany
-    {
-        return $this->hasMany(Attendance::class);
+        return $this->hasMany(PayrollRunItemV2::class);
     }
 
     public function shiftAssignments(): HasMany
@@ -105,17 +97,5 @@ class Employee extends Model
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
-    }
-
-    public function shifts(): HasManyThrough
-    {
-        return $this->hasManyThrough(
-            Shift::class,
-            Attendance::class,
-            'employee_id',
-            'id',
-            'id',
-            'shift_id'
-        )->distinct();
     }
 }

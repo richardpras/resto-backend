@@ -6,6 +6,7 @@ use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Accounting\Domain\JournalEntry;
 use App\Models\User;
+use App\Modules\Accounting\Support\JournalOutletNameResolver;
 use App\Modules\Orders\Services\PosAuditLogService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Carbon\Carbon;
@@ -104,7 +105,10 @@ class AccountingService
     public function listJournals(?int $tenantId = null, ?User $actor = null, ?int $outletId = null): Collection
     {
         $query = Journal::query()
-            ->with(['entries' => fn ($q) => $q->orderBy('line_no')])
+            ->with([
+                'linkedOutlet',
+                'entries' => fn ($q) => $q->orderBy('line_no'),
+            ])
             ->orderByDesc('journal_date')
             ->orderByDesc('id');
 
@@ -177,7 +181,10 @@ class AccountingService
                 'journal_date' => $data['journal_date'],
                 'status' => $data['status'] ?? 'draft',
                 'description' => $data['description'] ?? null,
-                'outlet' => $data['outlet'] ?? 'Main Outlet',
+                'outlet' => JournalOutletNameResolver::resolve(
+                    isset($data['outlet_id']) ? (int) $data['outlet_id'] : null,
+                    isset($data['outlet']) ? (string) $data['outlet'] : null,
+                ),
                 'created_by' => $data['created_by'] ?? null,
             ]);
 

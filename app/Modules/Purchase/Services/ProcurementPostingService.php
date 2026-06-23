@@ -10,6 +10,7 @@ use App\Models\Modules\Purchase\Domain\PurchaseInvoice;
 use App\Models\Modules\Purchase\Domain\SupplierPayment;
 use App\Models\User;
 use App\Modules\Accounting\Services\JournalPostingService;
+use App\Modules\Accounting\Services\PaymentAccountResolverService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,6 +32,7 @@ final class ProcurementPostingService
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly PurchaseAuditService $purchaseAuditService,
         private readonly ThreeWayMatchService $threeWayMatchService,
+        private readonly PaymentAccountResolverService $paymentAccountResolver,
     ) {}
 
     public function postGoodsReceipt(GoodsReceivingNote $grn, ?User $actor = null, bool $throwOnDuplicate = true): ?ProcurementPosting
@@ -121,8 +123,8 @@ final class ProcurementPostingService
             $actor,
             $throwOnDuplicate,
             function () use ($payment, $amount, $actor): array {
-                $accounts = $this->resolveAccounts((int) $payment->outlet_id, ['accounts_payable', $this->cashOrBankKey($payment)]);
-                $creditKey = $this->cashOrBankKey($payment);
+                $accounts = $this->resolveAccounts((int) $payment->outlet_id, ['accounts_payable']);
+                $creditAccount = $this->resolvePaymentCreditAccount($payment);
 
                 return [
                     'journal_date' => optional($payment->posted_at)->format('Y-m-d') ?? optional($payment->payment_date)->format('Y-m-d') ?? now()->toDateString(),
@@ -135,7 +137,7 @@ final class ProcurementPostingService
                     'posted_by' => $actor?->id,
                     'lines' => [
                         ['account_id' => $accounts['accounts_payable']->id, 'debit' => $amount, 'credit' => 0, 'memo' => 'AP settlement'],
-                        ['account_id' => $accounts[$creditKey]->id, 'debit' => 0, 'credit' => $amount, 'memo' => 'Cash/Bank payment'],
+                        ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $amount, 'memo' => 'Cash/Bank payment'],
                     ],
                 ];
             },
@@ -403,9 +405,15 @@ final class ProcurementPostingService
         return (clone $query)->orderBy('id')->first();
     }
 
-    private function cashOrBankKey(SupplierPayment $payment): string
+    private function resolvePaymentCreditAccount(SupplierPayment $payment): Account
     {
-        return in_array($payment->payment_method, ['bank_transfer', 'giro', 'check'], true) ? 'bank' : 'cash';
+        $outletId = (int) $payment->outlet_id;
+
+        if (in_array($payment->payment_method, ['bank_transfer', 'giro', 'check'], true)) {
+            return $this->paymentAccountResolver->resolveForBankAccount($payment->bank_account_id, $outletId > 0 ? $outletId : null);
+        }
+
+        return $this->paymentAccountResolver->resolveForCash($outletId > 0 ? $outletId : null);
     }
 
     private function nextPostingNo(string $sourceType): string

@@ -2,8 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Models\Modules\HR\Domain\Attendance;
+use App\Models\Modules\HR\Domain\AttendanceRecord;
 use App\Models\Modules\HR\Domain\Employee;
+use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -148,22 +149,31 @@ class EmployeeCrudTest extends TestCase
     {
         $this->authenticateUser();
 
+        $outlet = Outlet::query()->create([
+            'name' => 'Delete Block Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'del-block',
+        ]);
+
         $employee = Employee::query()->create([
+            'outlet_id' => $outlet->id,
             'employee_no' => 'EMP-DEL-BLOCK',
             'full_name' => 'Blocked',
             'position' => 'Staff',
             'base_salary' => 1000000,
         ]);
 
-        Attendance::query()->create([
+        AttendanceRecord::query()->create([
             'employee_id' => $employee->id,
-            'shift_id' => null,
+            'outlet_id' => $outlet->id,
             'attendance_date' => '2026-05-01',
-            'check_in' => null,
-            'check_out' => null,
-            'source' => 'manual',
-            'status' => 'absent',
-            'sync_key' => 'crud-block-delete-1',
+            'clock_in' => null,
+            'clock_out' => null,
+            'source' => AttendanceRecord::SOURCE_MANUAL,
+            'status' => AttendanceRecord::STATUS_ABSENT,
         ]);
 
         $this->deleteJson('/api/v1/hr/employees/'.$employee->id)->assertStatus(409);

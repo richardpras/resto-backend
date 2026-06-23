@@ -18,6 +18,7 @@ class SupplierPaymentResource extends JsonResource
             'outletId' => $this->outlet_id ? (string) $this->outlet_id : null,
             'paymentDate' => optional($this->payment_date)->format('Y-m-d'),
             'paymentMethod' => $this->payment_method,
+            'bankAccountId' => $this->bank_account_id,
             'referenceNo' => $this->reference_no,
             'notes' => $this->notes,
             'amount' => (float) $this->amount,

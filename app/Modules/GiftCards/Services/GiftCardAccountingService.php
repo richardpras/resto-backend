@@ -6,6 +6,7 @@ use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\GiftCards\Domain\GiftCardIssuance;
 use App\Models\Modules\GiftCards\Domain\GiftCardLedger;
 use App\Models\Modules\GiftCards\Domain\GiftCardRedemptionSettlement;
+use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ use App\Modules\Accounting\Services\AccountingAuditService;
 use App\Modules\Accounting\Services\AccountingPostingIntegrityService;
 use App\Modules\Accounting\Services\AccountingSettingsService;
 use App\Modules\Accounting\Services\JournalPostingService;
+use App\Modules\Accounting\Services\PaymentAccountResolverService;
 use App\Modules\GiftCards\Support\GiftCardRedemptionComposition;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +26,7 @@ final class GiftCardAccountingService
         private readonly AccountingPostingIntegrityService $integrityService,
         private readonly AccountingAuditService $accountingAuditService,
         private readonly AccountingSettingsService $accountingSettingsService,
+        private readonly PaymentAccountResolverService $paymentAccountResolver,
     ) {}
 
     /** @param list<int> $settlementIds */
@@ -190,14 +193,119 @@ final class GiftCardAccountingService
         return $lines;
     }
 
+    /**
+     * Build sales journal lines with per-payment-method debit accounts.
+     *
+     * @param  array<string, float>  $paymentAmountsByMethod  settlement method => amount
+     * @return list<array{account_id:int,debit:float,credit:float,memo:string}>
+     */
+    public function buildSalesJournalLinesFromPayments(
+        array $paymentAmountsByMethod,
+        GiftCardRedemptionComposition $composition,
+        ?int $outletId,
+    ): array {
+        $filtered = [];
+        foreach ($paymentAmountsByMethod as $method => $amount) {
+            $rounded = round(max(0, (float) $amount), 2);
+            if ($rounded > 0) {
+                $filtered[(string) $method] = ($filtered[(string) $method] ?? 0) + $rounded;
+            }
+        }
+
+        $cashTotal = round((float) array_sum($filtered), 2);
+        if ($cashTotal <= 0 && $composition->isEmpty()) {
+            return [];
+        }
+
+        if ($filtered === [] && $cashTotal <= 0) {
+            return $this->buildSalesJournalLines(0, $composition, $outletId);
+        }
+
+        $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100'], ['revenue'], $outletId);
+        $totalRevenue = round($cashTotal + $composition->total(), 2);
+        if ($totalRevenue <= 0) {
+            return [];
+        }
+
+        $debitByAccount = [];
+        foreach ($filtered as $method => $amount) {
+            $account = $this->paymentAccountResolver->resolveForOutletPaymentMethod(
+                (int) ($outletId ?? 0),
+                (string) $method,
+            );
+            $accountId = (int) $account->id;
+            $debitByAccount[$accountId] = round(($debitByAccount[$accountId] ?? 0) + $amount, 2);
+        }
+
+        $lines = [];
+        foreach ($debitByAccount as $accountId => $amount) {
+            if ($amount <= 0) {
+                continue;
+            }
+            $lines[] = [
+                'account_id' => $accountId,
+                'debit' => $amount,
+                'credit' => 0,
+                'memo' => 'Payment settlement',
+            ];
+        }
+
+        if ($composition->giftCardAmount > 0) {
+            $liability = $this->integrityService->resolveAccountOrFail(
+                'gift_card_liability',
+                ['2130'],
+                ['liability'],
+                $outletId,
+            );
+            $lines[] = [
+                'account_id' => (int) $liability->id,
+                'debit' => $composition->giftCardAmount,
+                'credit' => 0,
+                'memo' => 'Gift card redemption',
+            ];
+        }
+
+        if ($composition->storeCreditAmount > 0) {
+            $liability = $this->integrityService->resolveAccountOrFail(
+                'store_credit_liability',
+                ['2135'],
+                ['liability'],
+                $outletId,
+            );
+            $lines[] = [
+                'account_id' => (int) $liability->id,
+                'debit' => $composition->storeCreditAmount,
+                'credit' => 0,
+                'memo' => 'Store credit redemption',
+            ];
+        }
+
+        $lines[] = [
+            'account_id' => (int) $revenue->id,
+            'debit' => 0,
+            'credit' => $totalRevenue,
+            'memo' => 'Revenue recognition',
+        ];
+
+        return $lines;
+    }
+
     public function postPaymentTransactionJournal(
         PaymentTransaction $transaction,
         int $tenantId,
         int $outletId,
         GiftCardRedemptionComposition $composition,
     ): ?Journal {
+        $method = strtolower(trim((string) ($transaction->payment_method ?? 'qris')));
         $cashAmount = (float) $transaction->amount;
-        $lines = $this->buildSalesJournalLines($cashAmount, $composition, $outletId);
+        $lines = $this->buildSalesJournalLinesFromPayments(
+            [$method => $cashAmount],
+            $composition,
+            $outletId,
+        );
+        if ($lines === []) {
+            $lines = $this->buildSalesJournalLines($cashAmount, $composition, $outletId);
+        }
         if ($lines === []) {
             return null;
         }
@@ -223,7 +331,10 @@ final class GiftCardAccountingService
         GiftCardRedemptionComposition $composition,
         float $cogs = 0.0,
     ): ?Journal {
-        $lines = $this->buildSalesJournalLines($cashPaid, $composition, $outletId);
+        $paymentAmounts = $this->paymentAmountsForOrder($orderId);
+        $lines = $paymentAmounts !== []
+            ? $this->buildSalesJournalLinesFromPayments($paymentAmounts, $composition, $outletId)
+            : $this->buildSalesJournalLines($cashPaid, $composition, $outletId);
         if ($lines === []) {
             return null;
         }
@@ -669,5 +780,52 @@ final class GiftCardAccountingService
                 'message' => 'Legacy audit — use reverseRedemptionForOrder instead.',
             ],
         );
+    }
+
+    /** @return array<string, float> */
+    public function paymentAmountsForOrder(int $orderId): array
+    {
+        $rows = Payment::query()
+            ->where('order_id', $orderId)
+            ->where('status', '!=', 'void')
+            ->get(['method', 'amount']);
+
+        $amounts = [];
+        foreach ($rows as $payment) {
+            $method = strtolower(trim((string) $payment->method));
+            if ($method === '') {
+                $method = 'cash';
+            }
+            $amounts[$method] = round(($amounts[$method] ?? 0) + (float) $payment->amount, 2);
+        }
+
+        return $amounts;
+    }
+
+    /**
+     * @param  list<int>  $orderIds
+     * @return array<string, float>
+     */
+    public function paymentAmountsForOrders(array $orderIds): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+
+        $rows = Payment::query()
+            ->whereIn('order_id', $orderIds)
+            ->where('status', '!=', 'void')
+            ->get(['method', 'amount']);
+
+        $amounts = [];
+        foreach ($rows as $payment) {
+            $method = strtolower(trim((string) $payment->method));
+            if ($method === '') {
+                $method = 'cash';
+            }
+            $amounts[$method] = round(($amounts[$method] ?? 0) + (float) $payment->amount, 2);
+        }
+
+        return $amounts;
     }
 }

@@ -10,7 +10,6 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Manual corrections for {@see AttendanceRecord} (ATTENDANCE-01).
- * Legacy {@see AttendanceCorrectionService} remains for payroll `attendances` table.
  */
 class AttendanceRecordCorrectionService
 {
@@ -18,6 +17,7 @@ class AttendanceRecordCorrectionService
         private readonly EmployeeMasterService $employeeMaster,
         private readonly AttendanceMatchingService $matching,
         private readonly AttendancePeriodService $periodService,
+        private readonly AttendanceSummaryService $summaryService,
     ) {}
 
     public function correct(?User $user, int $recordId, array $payload): AttendanceRecord
@@ -62,6 +62,8 @@ class AttendanceRecordCorrectionService
             'updated_by' => $user?->id,
         ]);
         $record->save();
+
+        $this->summaryService->upsertSummary((int) $record->employee_id, $date);
 
         return $record->refresh()->load(['employee', 'shift', 'roster']);
     }

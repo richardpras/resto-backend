@@ -15,6 +15,7 @@ class AttendanceRecordManualService
         private readonly EmployeeMasterService $employeeMaster,
         private readonly AttendanceMatchingService $matching,
         private readonly AttendancePeriodService $periodService,
+        private readonly AttendanceSummaryService $summaryService,
     ) {}
 
     public function create(?User $user, array $payload): AttendanceRecord
@@ -67,6 +68,8 @@ class AttendanceRecordManualService
             'notes' => $payload['notes'] ?? null,
             'updated_by' => $user?->id,
         ]);
+
+        $this->summaryService->upsertSummary((int) $employee->id, $date);
 
         return $record->refresh()->load(['employee', 'shift', 'roster']);
     }

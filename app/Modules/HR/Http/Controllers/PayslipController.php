@@ -48,16 +48,36 @@ class PayslipController extends Controller
             'payrollRunId' => ['required', 'integer', 'exists:payroll_runs_v2,id'],
         ]);
 
-        $rows = $this->payslips->generateForRun(
+        $runId = (int) $validated['payrollRunId'];
+        $user = $this->resolveUser();
+
+        $rows = $this->payslips->generateForRun($user, $runId);
+        $generation = $this->payslips->getGenerationStatus($user, $runId);
+
+        return response()->json([
+            'message' => 'Payslips queued for PDF rendering.',
+            'data' => PayrollPayslipResource::collection($rows),
+            'meta' => [
+                'count' => $rows->count(),
+                'generation' => $generation,
+            ],
+        ], Response::HTTP_CREATED);
+    }
+
+    public function generationStatus(): JsonResponse
+    {
+        $validated = request()->validate([
+            'payrollRunId' => ['required', 'integer', 'exists:payroll_runs_v2,id'],
+        ]);
+
+        $generation = $this->payslips->getGenerationStatus(
             $this->resolveUser(),
             (int) $validated['payrollRunId'],
         );
 
         return response()->json([
-            'message' => 'Payslips generated.',
-            'data' => PayrollPayslipResource::collection($rows),
-            'meta' => ['count' => $rows->count()],
-        ], Response::HTTP_CREATED);
+            'data' => $generation,
+        ]);
     }
 
     public function publish(int $payslip): JsonResponse
@@ -72,10 +92,10 @@ class PayslipController extends Controller
 
     public function regenerate(int $payslip): JsonResponse
     {
-        $row = $this->payslips->regenerate($this->resolveUser(), $payslip);
+        $row = $this->payslips->queueRegenerate($this->resolveUser(), $payslip);
 
         return response()->json([
-            'message' => 'Payslip PDF regenerated.',
+            'message' => 'Payslip PDF queued for regeneration.',
             'data' => new PayrollPayslipResource($row),
         ]);
     }

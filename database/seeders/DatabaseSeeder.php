@@ -20,12 +20,10 @@ class DatabaseSeeder extends Seeder
         $this->call(SettingsDomainFromTemplateSeeder::class);
         $this->call(TemplateInventoryMenuSeeder::class);
         $this->call(TemplateAccountingSeeder::class);
+        $this->call(EssentialCoaAccountsSeeder::class);
+        $this->call(PaymentBankCoaLinkSeeder::class);
         $this->call(TemplatePayrollSeeder::class);
         $this->call(EmployeeSeeder::class);
-        $this->call(AttendanceSeeder::class);
-        $this->call(OvertimeSeeder::class);
-        $this->call(AdjustmentSeeder::class);
-        $this->call(LoanSeeder::class);
 
         $this->call(TemplateDemoUsersSeeder::class);
 

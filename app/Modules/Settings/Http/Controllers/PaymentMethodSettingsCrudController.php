@@ -28,6 +28,7 @@ class PaymentMethodSettingsCrudController extends Controller
             'integration' => ['nullable', 'string', 'max:255'],
             'fee' => ['nullable', 'numeric'],
             'status' => ['required', 'string', 'in:active,inactive'],
+            'chartAccountId' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         return response()->json([
@@ -44,6 +45,7 @@ class PaymentMethodSettingsCrudController extends Controller
             'integration' => ['nullable', 'string', 'max:255'],
             'fee' => ['nullable', 'numeric'],
             'status' => ['required', 'string', 'in:active,inactive'],
+            'chartAccountId' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         return response()->json([

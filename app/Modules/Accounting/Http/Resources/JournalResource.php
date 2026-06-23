@@ -24,7 +24,7 @@ class JournalResource extends JsonResource
                 : (string) $this->journal_date,
             'reference' => $this->journal_no,
             'description' => $this->description ?? '',
-            'outlet' => $this->outlet ?? 'Main Outlet',
+            'outlet' => $this->resolveOutletDisplayName(),
             'outletId' => $this->outlet_id !== null ? (int) $this->outlet_id : null,
             'status' => $this->status === 'posted' ? 'posted' : 'draft',
             'lines' => $entries->map(fn ($e) => [
@@ -35,5 +35,22 @@ class JournalResource extends JsonResource
                 'memo' => $e->memo,
             ])->values()->all(),
         ];
+    }
+
+    private function resolveOutletDisplayName(): string
+    {
+        if ($this->relationLoaded('linkedOutlet') && $this->linkedOutlet !== null) {
+            $name = trim((string) ($this->linkedOutlet->name ?? ''));
+            if ($name !== '') {
+                return $name;
+            }
+        }
+
+        $stored = trim((string) ($this->outlet ?? ''));
+        if ($stored !== '') {
+            return $stored;
+        }
+
+        return 'Main Outlet';
     }
 }

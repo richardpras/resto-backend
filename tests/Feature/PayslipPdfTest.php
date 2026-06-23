@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\FinalizedPayrollRunFixture;
 use Tests\Concerns\HrmApiFixture;
+use Tests\Concerns\RendersPendingPayslips;
 use Tests\TestCase;
 
 class PayslipPdfTest extends TestCase
@@ -15,6 +16,7 @@ class PayslipPdfTest extends TestCase
     use FinalizedPayrollRunFixture;
     use HrmApiFixture;
     use RefreshDatabase;
+    use RendersPendingPayslips;
 
     protected function setUp(): void
     {
@@ -30,6 +32,7 @@ class PayslipPdfTest extends TestCase
         [, , $run] = $this->seedFinalizedPayrollRun();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $run->id])->assertCreated();
+        $this->renderPendingPayslipsForRun($run->id);
 
         $payslip = PayrollPayslip::query()->where('payroll_run_id', $run->id)->first();
         $this->assertNotNull($payslip->pdf_path);
@@ -41,10 +44,19 @@ class PayslipPdfTest extends TestCase
         [, , $run] = $this->seedFinalizedPayrollRun();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $run->id])->assertCreated();
+        $this->renderPendingPayslipsForRun($run->id);
+
         $payslip = PayrollPayslip::query()->where('payroll_run_id', $run->id)->first();
         $oldPath = $payslip->pdf_path;
 
-        $this->postJson('/api/v1/payslips/'.$payslip->id.'/regenerate')->assertOk();
+        $this->postJson('/api/v1/payslips/'.$payslip->id.'/regenerate')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'draft');
+
+        $payslip->refresh();
+        $this->assertNull($payslip->pdf_path);
+
+        $this->renderPendingPayslipsForRun($run->id);
 
         $payslip->refresh();
         $this->assertNotNull($payslip->pdf_path);
@@ -58,6 +70,8 @@ class PayslipPdfTest extends TestCase
         [, , $run] = $this->seedFinalizedPayrollRun();
 
         $this->postJson('/api/v1/payslips/generate', ['payrollRunId' => $run->id])->assertCreated();
+        $this->renderPendingPayslipsForRun($run->id);
+
         $payslip = PayrollPayslip::query()->where('payroll_run_id', $run->id)->first();
 
         $response = $this->get('/api/v1/payslips/'.$payslip->id.'/download');

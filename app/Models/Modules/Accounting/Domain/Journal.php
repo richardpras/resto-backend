@@ -2,7 +2,9 @@
 
 namespace App\Models\Modules\Accounting\Domain;
 
+use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Journal extends Model
@@ -38,6 +40,11 @@ class Journal extends Model
     public function entries(): HasMany
     {
         return $this->hasMany(JournalEntry::class);
+    }
+
+    public function linkedOutlet(): BelongsTo
+    {
+        return $this->belongsTo(Outlet::class, 'outlet_id');
     }
 
     public function ledgers(): HasMany

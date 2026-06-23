@@ -123,6 +123,7 @@ trait ProcurementTestFixture
         DB::table('accounts')->insert([
             ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'cash_bank', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
             ['code' => '1110', 'name' => 'Bank', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'bank', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '1111', 'name' => 'Bank BCA', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'bank', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
             ['code' => '1300', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'inventory', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
             ['code' => '2100', 'name' => 'Accounts Payable', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'accounts_payable', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
             ['code' => '2140', 'name' => 'GRNI', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'grni', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
@@ -185,9 +186,9 @@ trait ProcurementTestFixture
     }
 
     /** @param array<int,array{invoiceId:int,allocatedAmount:float}> $allocations */
-    protected function createPostedSupplierPayment(int $supplierId, int $outletId, float $amount, array $allocations, string $method = 'cash'): int
+    protected function createPostedSupplierPayment(int $supplierId, int $outletId, float $amount, array $allocations, string $method = 'cash', ?string $bankAccountId = null): int
     {
-        $paymentId = (int) $this->postJson('/api/v1/supplier-payments', [
+        $payload = [
             'supplierId' => $supplierId,
             'outletId' => $outletId,
             'paymentDate' => now()->toDateString(),
@@ -197,7 +198,12 @@ trait ProcurementTestFixture
                 'invoiceId' => $row['invoiceId'],
                 'allocatedAmount' => $row['allocatedAmount'],
             ], $allocations),
-        ])->assertCreated()->json('data.id');
+        ];
+        if ($bankAccountId !== null) {
+            $payload['bankAccountId'] = $bankAccountId;
+        }
+
+        $paymentId = (int) $this->postJson('/api/v1/supplier-payments', $payload)->assertCreated()->json('data.id');
 
         $this->patchJson("/api/v1/supplier-payments/{$paymentId}/approve")->assertOk();
         $this->patchJson("/api/v1/supplier-payments/{$paymentId}/post")->assertOk();

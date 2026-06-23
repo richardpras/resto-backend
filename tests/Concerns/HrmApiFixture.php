@@ -10,6 +10,8 @@ use Laravel\Passport\Passport;
 
 trait HrmApiFixture
 {
+    protected ?User $hrmApiUser = null;
+
     protected function seedHrmPermissions(): void
     {
         $this->seed(UserManagementPermissionsSeeder::class);
@@ -35,8 +37,15 @@ trait HrmApiFixture
         ]);
         $user->roles()->sync([$role->id]);
 
+        $this->hrmApiUser = $user;
+
         Passport::actingAs($user);
 
         return $user;
+    }
+
+    protected function grantHrmApiUserOutletAccess(int $outletId): void
+    {
+        $this->hrmApiUser?->outlets()->syncWithoutDetaching([(int) $outletId]);
     }
 }

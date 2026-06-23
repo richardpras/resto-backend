@@ -10,9 +10,13 @@ class PayrollPayslip extends Model
 {
     public const STATUS_DRAFT = 'draft';
 
+    public const STATUS_PROCESSING = 'processing';
+
     public const STATUS_GENERATED = 'generated';
 
     public const STATUS_PUBLISHED = 'published';
+
+    public const STATUS_FAILED = 'failed';
 
     protected $fillable = [
         'outlet_id',
@@ -26,6 +30,7 @@ class PayrollPayslip extends Model
         'net_salary',
         'breakdown_json',
         'pdf_path',
+        'render_error',
         'status',
         'published_at',
     ];

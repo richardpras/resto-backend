@@ -3,6 +3,7 @@
 namespace App\Modules\ShiftClose\Services;
 
 use App\Models\Modules\Orders\Domain\Order;
+use App\Models\Modules\Orders\Domain\Payment;
 use App\Modules\Accounting\Services\AccountingSettingsService;
 use App\Modules\Accounting\Services\JournalPostingService;
 use App\Modules\GiftCards\Services\GiftCardAccountingService;
@@ -53,13 +54,14 @@ class ShiftCloseAccountingProcessor
             }
 
             $totalCashSales = (float) $orders->sum(fn (Order $order): float => (float) $order->paid_total);
+            $orderIds = $orders->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $paymentAmountsByMethod = $this->aggregatePaymentAmountsByMethod($orderIds);
             $totalCogs = $this->accountingGuard->resolveCogsForShiftCloseJournal(
                 $outletId,
                 $orders,
                 $deferredCogsPosted,
             );
             $journalOutletId = $this->resolveJournalOutletId($outletId, $orders);
-            $orderIds = $orders->pluck('id')->map(fn ($id): int => (int) $id)->all();
             $giftCardComposition = app(GiftCardAccountingService::class)
                 ->compositionFromOrderIds($orderIds, $journalOutletId, settledOnly: true);
             $batchKey = now()->format('YmdHis').'-'.$journalOutletId;
@@ -71,6 +73,7 @@ class ShiftCloseAccountingProcessor
                 $totalCogs,
                 $batchKey,
                 $giftCardComposition,
+                $paymentAmountsByMethod,
             );
 
             if ($journal === null) {
@@ -107,5 +110,32 @@ class ShiftCloseAccountingProcessor
             ->values();
 
         return $distinct->count() === 1 ? (int) $distinct->first() : $outletId;
+    }
+
+    /**
+     * @param  list<int>  $orderIds
+     * @return array<string, float>
+     */
+    private function aggregatePaymentAmountsByMethod(array $orderIds): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+
+        $rows = Payment::query()
+            ->whereIn('order_id', $orderIds)
+            ->where('status', '!=', 'void')
+            ->get(['method', 'amount']);
+
+        $amounts = [];
+        foreach ($rows as $payment) {
+            $method = strtolower(trim((string) $payment->method));
+            if ($method === '') {
+                $method = 'cash';
+            }
+            $amounts[$method] = round(($amounts[$method] ?? 0) + (float) $payment->amount, 2);
+        }
+
+        return $amounts;
     }
 }

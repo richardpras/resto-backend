@@ -4,7 +4,6 @@ namespace App\Modules\System\Services;
 
 use App\Models\Modules\GiftCards\Domain\GiftCardEvent;
 use App\Models\Modules\GiftCards\Domain\GiftCardLedger;
-use App\Models\Modules\HR\Domain\AttendanceAuditLog;
 use App\Models\Modules\HR\Domain\PayrollRunAudit;
 use App\Models\Modules\Orders\Domain\PosEventLog;
 use App\Models\Modules\Print\Domain\PrintReprintAudit;
@@ -201,10 +200,6 @@ final class AuditCenterService
       $records = $records->merge($this->collectPayrollAudits($filters, $limit));
     }
 
-    if ($this->shouldIncludeDedicatedSource($filters, 'attendance')) {
-      $records = $records->merge($this->collectAttendanceAudits($filters, $limit));
-    }
-
     if ($this->shouldIncludeDedicatedSource($filters, 'gift_card_issuance')) {
       $records = $records->merge($this->collectGiftCardEvents($filters, $limit));
       $records = $records->merge($this->collectGiftCardLedgers($filters, $limit));
@@ -234,10 +229,6 @@ final class AuditCenterService
 
     if ($this->shouldIncludeDedicatedSource($filters, 'payroll_run')) {
       $count += $this->applyPayrollFilters(PayrollRunAudit::query(), $filters)->count();
-    }
-
-    if ($this->shouldIncludeDedicatedSource($filters, 'attendance')) {
-      $count += $this->applyAttendanceFilters(AttendanceAuditLog::query(), $filters)->count();
     }
 
     if ($this->shouldIncludeDedicatedSource($filters, 'gift_card_issuance')) {
@@ -323,40 +314,6 @@ final class AuditCenterService
         [
           'source' => 'payroll_run_audits',
           'notes' => $row->notes,
-        ],
-      );
-    });
-  }
-
-  /**
-   * @param  array<string, mixed>  $filters
-   * @return Collection<int, UnifiedAuditRecord>
-   */
-  private function collectAttendanceAudits(array $filters, int $limit): Collection
-  {
-    $rows = $this->applyAttendanceFilters(AttendanceAuditLog::query()->with('actor'), $filters)
-      ->orderByDesc('created_at')
-      ->orderByDesc('id')
-      ->limit($limit)
-      ->get();
-
-    return $rows->map(function (AttendanceAuditLog $row): UnifiedAuditRecord {
-      return $this->buildRecord(
-        'attendance:'.$row->id,
-        'hr',
-        'attendance',
-        (int) $row->attendance_id,
-        (string) $row->action,
-        $row->actor_user_id !== null ? (int) $row->actor_user_id : null,
-        $row->actor?->name,
-        null,
-        $row->created_at?->toIso8601String() ?? now()->toIso8601String(),
-        is_array($row->before_json) ? $row->before_json : [],
-        is_array($row->after_json) ? $row->after_json : [],
-        [
-          'source' => 'attendance_audit_logs',
-          'reason' => $row->reason,
-          'sourceType' => $row->source_type,
         ],
       );
     });
@@ -514,7 +471,6 @@ final class AuditCenterService
 
     $dedicatedTypes = [
       'payroll_run' => 'payroll_run_audits',
-      'attendance' => 'attendance_audit_logs',
       'gift_card_issuance' => 'gift_card',
       'print_reprint' => 'print_reprint_audits',
       'user' => 'user_management_audit_logs',
@@ -659,7 +615,7 @@ final class AuditCenterService
 
     if (isset($filters['entityType']) && is_string($filters['entityType']) && $filters['entityType'] !== '') {
       $entityType = (string) $filters['entityType'];
-      if (! in_array($entityType, ['payroll_run', 'attendance', 'gift_card_issuance', 'print_reprint', 'user', 'role', 'permission'], true)) {
+      if (! in_array($entityType, ['payroll_run', 'gift_card_issuance', 'print_reprint', 'user', 'role', 'permission'], true)) {
         $query->where('entity_type', $entityType);
       }
     }
@@ -727,44 +683,6 @@ final class AuditCenterService
         if (is_numeric($filters['search'])) {
           $q->orWhere('payroll_run_id', (int) $filters['search']);
         }
-      });
-    }
-
-    return $query;
-  }
-
-  /**
-   * @param  Builder<AttendanceAuditLog>  $query
-   * @param  array<string, mixed>  $filters
-   * @return Builder<AttendanceAuditLog>
-   */
-  private function applyAttendanceFilters(Builder $query, array $filters): Builder
-  {
-    if (isset($filters['entityId']) && (int) $filters['entityId'] > 0) {
-      $query->where('attendance_id', (int) $filters['entityId']);
-    }
-
-    if (isset($filters['userId']) && (int) $filters['userId'] > 0) {
-      $query->where('actor_user_id', (int) $filters['userId']);
-    }
-
-    if (isset($filters['action']) && is_string($filters['action']) && $filters['action'] !== '') {
-      $query->where('action', 'like', '%'.$filters['action'].'%');
-    }
-
-    if (isset($filters['module']) && (string) $filters['module'] !== '' && (string) $filters['module'] !== 'hr') {
-      $query->whereRaw('1 = 0');
-    }
-
-    $this->applyDateRange($query, 'created_at', $filters);
-
-    if (isset($filters['search']) && is_string($filters['search']) && $filters['search'] !== '') {
-      $term = '%'.$filters['search'].'%';
-      $query->where(function (Builder $q) use ($term): void {
-        $q->where('action', 'like', $term)
-          ->orWhere('reason', 'like', $term)
-          ->orWhere('before_json', 'like', $term)
-          ->orWhere('after_json', 'like', $term);
       });
     }
 
