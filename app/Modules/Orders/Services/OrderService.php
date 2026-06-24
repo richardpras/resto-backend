@@ -582,6 +582,15 @@ class OrderService
         if ($before !== null) {
             $before->loadMissing(['items', 'payments']);
         }
+        $normalizedForSplits = $this->normalizePayments($payments);
+        $affectedSplitIds = collect($normalizedForSplits)
+            ->pluck('orderSplitId')
+            ->filter(static fn ($splitId): bool => $splitId !== null && (int) $splitId > 0)
+            ->map(static fn ($splitId): int => (int) $splitId)
+            ->unique()
+            ->values()
+            ->all();
+
         $updated = DB::transaction(function () use ($user, $id, $payments, $idempotencyKey, $expectedUpdatedAt, $before, $qrOrderRequestId): ?Order {
             if ($before !== null && (string) $before->payment_status !== 'paid') {
                 $normalized = $this->normalizePayments($payments);
@@ -620,6 +629,12 @@ class OrderService
             return $updated;
         });
         if ($updated !== null) {
+            $this->orderPrintOrchestration->maybeQueueSplitReceiptsAfterPayment(
+                $user,
+                $updated->fresh(['payments', 'orderPromotion', 'orderVoucher', 'splits.items']),
+                $affectedSplitIds,
+            );
+
             event(new OrderLifecycleChanged(
                 outletId: (int) ($updated->outlet_id ?? 0),
                 orderId: (int) $updated->id,
@@ -783,6 +798,7 @@ class OrderService
                 'method' => $this->normalizePaymentMethod((string) ($payment['method'] ?? '')),
                 'amount' => (float) ($payment['amount'] ?? 0),
                 'paidAt' => $payment['paidAt'] ?? null,
+                'orderSplitId' => isset($payment['orderSplitId']) ? (int) $payment['orderSplitId'] : null,
                 'splitBillLabel' => $payment['splitBillLabel'] ?? null,
                 'splitBillGroup' => $payment['splitBillGroup'] ?? null,
                 'allocations' => collect($payment['allocations'] ?? [])->map(fn (array $allocation): array => [

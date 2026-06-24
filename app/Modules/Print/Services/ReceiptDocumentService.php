@@ -3,8 +3,6 @@
 namespace App\Modules\Print\Services;
 
 use App\Models\Modules\Orders\Domain\Order;
-use App\Models\Modules\Orders\Domain\OrderSplit;
-use App\Models\Modules\Orders\Domain\OrderSplitItem;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\Modules\Print\Domain\PrinterProfile;
@@ -36,6 +34,7 @@ class ReceiptDocumentService
         private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
         private readonly ThermalReceiptLayoutBuilder $thermalReceiptLayout,
         private readonly OutletLogoService $outletLogoService,
+        private readonly ReceiptOrderSnapshotBuilder $orderSnapshotBuilder,
     ) {}
 
     /**
@@ -289,7 +288,7 @@ class ReceiptDocumentService
         ?int $orderSplitId,
     ): array {
         return match ($sourceType) {
-            'order' => $this->snapshotFromOrder($outletId, $sourceId, $orderSplitId),
+            'order' => $this->snapshotFromOrder($user, $outletId, $sourceId, $orderSplitId),
             'pos_session' => $this->snapshotFromPosSession($outletId, $sourceId),
             'payment_transaction' => $this->snapshotFromPaymentTx($outletId, $sourceId),
             default => throw ValidationException::withMessages(['sourceType' => ['Unsupported document source type.']]),
@@ -299,61 +298,20 @@ class ReceiptDocumentService
     /**
      * @return array<string,mixed>
      */
-    private function snapshotFromOrder(int $outletId, int $orderId, ?int $splitId): array
+    private function snapshotFromOrder(User $user, int $outletId, int $orderId, ?int $splitId): array
     {
-        $order = Order::query()->with(['items', 'payments'])->find($orderId);
-        if ($order === null || (int) $order->outlet_id !== $outletId) {
+        $order = Order::query()->find($orderId);
+        if ($order === null) {
             throw ValidationException::withMessages(['sourceId' => ['Order not found for outlet.']]);
         }
 
-        $lines = [];
-        foreach ($order->items as $row) {
-            $lines[] = [
-                'name' => (string) $row->name,
-                'qty' => (float) $row->qty,
-                'price' => (float) $row->price,
-                'notes' => $row->notes,
-            ];
-        }
-
-        $splitPayload = null;
-        if ($splitId !== null) {
-            /** @var OrderSplit|null $split */
-            $split = OrderSplit::query()->where('order_id', $orderId)->whereKey($splitId)->with(['items.orderItem'])->first();
-            if ($split === null) {
-                throw ValidationException::withMessages(['orderSplitId' => ['Split not found for order.']]);
-            }
-            $splitPayload = [
-                'label' => (string) $split->label,
-                'items' => $split->items->map(function (OrderSplitItem $i): array {
-                    $label = $i->orderItem !== null ? (string) $i->orderItem->name : 'Line';
-
-                    return ['qty' => (float) $i->qty, 'amount' => (float) $i->amount, 'label' => $label];
-                })->values()->all(),
-            ];
-        }
-
-        return [
-            'order_code' => (string) $order->code,
-            'order_channel' => (string) ($order->order_channel ?? ''),
-            'order_type' => (string) ($order->order_type ?? ''),
-            'service_mode' => (string) ($order->service_mode ?? ''),
-            'table' => $order->table_name,
-            'customer' => $order->customer_name,
-            'customer_display' => $this->thermalReceiptLayout->formatCustomerDisplay($order->customer_name),
-            'paid_at' => $this->resolveOrderPaidAt($order)?->toIso8601String(),
-            'subtotal' => (float) $order->subtotal,
-            'tax' => (float) $order->tax,
-            'total' => (float) $order->total,
-            'paid_total' => (float) $order->paid_total,
-            'payments' => $order->payments->map(fn ($p): array => [
-                'method' => (string) $p->method,
-                'amount' => (float) $p->amount,
-            ])->values()->all(),
-            'lines' => $lines,
-            'split' => $splitPayload,
-            'receipt_branding' => $this->resolveReceiptBranding($outletId),
-        ];
+        return $this->orderSnapshotBuilder->buildFromOrder(
+            $order,
+            $outletId,
+            $user,
+            $splitId,
+            $this->resolveReceiptBranding($outletId),
+        );
     }
 
     /**
@@ -507,11 +465,21 @@ class ReceiptDocumentService
             foreach ($context['lines'] ?? [] as $row) {
                 $lines[] = (($row['name'] ?? '')).'  ×'.number_format((float) ($row['qty'] ?? 0), 2).'  '.$this->money((float) ($row['price'] ?? 0) * (float) ($row['qty'] ?? 0));
             }
-            if (! empty($context['split'])) {
-                $lines[] = '-- SPLIT '.$this->sanitize((string) $context['split']['label']).' --';
-                foreach ($context['split']['items'] ?? [] as $chunk) {
-                    $lines[] = ($chunk['label'] ?? '').' × '.$this->sanitize((string) ($chunk['qty'] ?? ''));
+            if (! empty($context['discount_lines'])) {
+                foreach ($context['discount_lines'] as $discountLine) {
+                    $label = match ((string) ($discountLine['type'] ?? '')) {
+                        'promotion' => 'Promo ('.($discountLine['label'] ?? 'Promo').')',
+                        'voucher' => 'Voucher ('.($discountLine['label'] ?? 'Voucher').')',
+                        'gift_card' => 'Gift Card ('.($discountLine['label'] ?? 'Gift Card').')',
+                        'store_credit' => 'Store Credit ('.($discountLine['label'] ?? 'Store Credit').')',
+                        default => (string) ($discountLine['label'] ?? 'Discount'),
+                    };
+                    $lines[] = $label.' '.$this->money((float) ($discountLine['amount'] ?? 0.0));
                 }
+            }
+            foreach ($context['payments'] ?? [] as $payment) {
+                $label = (string) ($payment['label'] ?? $payment['method'] ?? 'Payment');
+                $lines[] = $label.' '.$this->money((float) ($payment['amount'] ?? 0.0));
             }
             $lines[] = 'Sub '.$this->money((float) ($context['subtotal'] ?? 0.0));
             $lines[] = 'Tax '.$this->money((float) ($context['tax'] ?? 0.0));
@@ -542,16 +510,6 @@ class ReceiptDocumentService
         }
 
         return is_array($context['receipt_branding'] ?? null);
-    }
-
-    private function resolveOrderPaidAt(Order $order): ?\Illuminate\Support\Carbon
-    {
-        $paidAt = $order->payments
-            ->pluck('paid_at')
-            ->filter()
-            ->max();
-
-        return $paidAt instanceof \Illuminate\Support\Carbon ? $paidAt : null;
     }
 
     /**

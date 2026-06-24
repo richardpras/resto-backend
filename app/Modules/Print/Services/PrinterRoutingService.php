@@ -25,6 +25,7 @@ class PrinterRoutingService
         private readonly ThermalPaperWidthResolver $thermalPaperWidthResolver,
         private readonly ThermalReceiptLayoutBuilder $thermalReceiptLayout,
         private readonly OutletLogoService $outletLogoService,
+        private readonly ReceiptOrderSnapshotBuilder $orderSnapshotBuilder,
     ) {}
 
     public function queueKitchenTicketsForOrder(Order $order): void
@@ -132,7 +133,7 @@ class PrinterRoutingService
             return;
         }
 
-        $order->loadMissing(['items', 'payments']);
+        $order->loadMissing(['items', 'payments', 'orderPromotion', 'orderVoucher', 'splits.items']);
 
         ['route' => $route, 'resolvedProfileId' => $resolvedProfileId] = $this->resolveReceiptRouting($outletId);
         $profile = $this->cashierPrinterResolver->resolveForOutlet($outletId);
@@ -140,32 +141,17 @@ class PrinterRoutingService
             ? $this->thermalPaperWidthResolver->resolveWidthChars($profile)
             : 32;
 
-        $lines = $order->items->map(fn ($row): array => [
-            'name' => (string) $row->name,
-            'qty' => (float) $row->qty,
-            'price' => (float) $row->price,
-        ])->values()->all();
-
         $branding = $this->resolveReceiptBranding($outletId);
-        $paidAt = $order->payments->pluck('paid_at')->filter()->max();
-
-        $printableSnapshot = [
-            'order_id' => (int) $order->id,
-            'order_code' => (string) $order->code,
-            'order_type' => (string) ($order->order_type ?? ''),
-            'service_mode' => (string) ($order->service_mode ?? ''),
-            'table_name' => $order->table_name,
-            'customer' => $order->customer_name,
-            'customer_display' => $this->thermalReceiptLayout->formatCustomerDisplay($order->customer_name),
-            'paid_at' => $paidAt instanceof \Illuminate\Support\Carbon ? $paidAt->toIso8601String() : null,
-            'amount' => (float) $order->paid_total,
-            'subtotal' => (float) $order->subtotal,
-            'tax' => (float) $order->tax,
-            'total' => (float) $order->total,
-            'lines' => $lines,
-            'receipt_branding' => $branding,
-            'reason' => $reason,
-        ];
+        $printableSnapshot = $this->orderSnapshotBuilder->buildFromOrder(
+            $order,
+            $outletId,
+            null,
+            null,
+            $branding,
+        );
+        $printableSnapshot['order_id'] = (int) $order->id;
+        $printableSnapshot['amount'] = (float) $order->paid_total;
+        $printableSnapshot['reason'] = $reason;
 
         $thermalRaster = null;
         if ($branding['showLogo'] ?? false) {

@@ -16,6 +16,49 @@ class ThermalReceiptLayoutBuilderTest extends TestCase
         $this->builder = app(ThermalReceiptLayoutBuilder::class);
     }
 
+    public function test_builds_v4_layout_with_cashier_discount_and_payment_rows(): void
+    {
+        $lines = $this->builder->buildCustomerReceipt([
+            'order_code' => 'ORD-V4',
+            'customer_display' => 'Budi',
+            'paid_at' => '2026-06-21T14:32:00+07:00',
+            'order_type' => 'Dine In',
+            'cashier_name' => 'Siti',
+            'split_label' => 'Guest A',
+            'subtotal' => 45000.0,
+            'tax' => 4500.0,
+            'total' => 44500.0,
+            'discount_lines' => [
+                ['type' => 'promotion', 'label' => 'SAVE10', 'amount' => -5000.0],
+            ],
+            'payments' => [
+                ['method' => 'cash', 'amount' => 30000.0, 'label' => 'Cash'],
+                ['method' => 'qris', 'amount' => 14500.0, 'label' => 'QRIS'],
+            ],
+            'lines' => [
+                ['name' => 'Nasi Goreng', 'qty' => 1, 'price' => 45000.0],
+            ],
+            'receipt_branding' => [
+                'outletName' => 'Mountain Cafe',
+                'header' => '',
+                'footer' => '',
+                'showTaxBreakdown' => true,
+            ],
+        ], 32);
+
+        $plain = implode("\n", $this->builder->toPlainThermalLines($lines, 32));
+
+        $this->assertStringContainsString('Cashier', $plain);
+        $this->assertStringContainsString('Siti', $plain);
+        $this->assertStringContainsString('Split', $plain);
+        $this->assertStringContainsString('Guest A', $plain);
+        $this->assertStringContainsString('Promo (SAVE10)', $plain);
+        $this->assertStringContainsString('Cash', $plain);
+        $this->assertStringContainsString('QRIS', $plain);
+        $this->assertStringNotContainsString('-- SPLIT --', $plain);
+        $this->assertStringNotContainsString('SPLIT --', $plain);
+    }
+
     public function test_builds_58mm_layout_with_meta_and_two_line_items(): void
     {
         Carbon::setTestNow('2026-06-21 14:32:00');

@@ -151,7 +151,13 @@ class Phase14ReceiptDocumentsApiTest extends TestCase
         $this->assignUserToOutlets($user, [(int) $outlet->id]);
 
         $orderId = $this->createOrderRow((int) $outlet->id, null, 'ORD');
-        $orderItemId = $this->createOrderItemRow($orderId, 'Noodles', 1, 9000);
+        $itemA = $this->createOrderItemRow($orderId, 'Noodles', 1, 9000);
+        $this->createOrderItemRow($orderId, 'Soup', 1, 3000);
+        DB::table('orders')->where('id', $orderId)->update([
+            'subtotal' => 12000,
+            'tax' => 1200,
+            'total' => 13200,
+        ]);
 
         $splitId = (int) DB::table('order_splits')->insertGetId([
             'order_id' => $orderId,
@@ -164,7 +170,7 @@ class Phase14ReceiptDocumentsApiTest extends TestCase
 
         DB::table('order_split_items')->insert([
             'order_split_id' => $splitId,
-            'order_item_id' => $orderItemId,
+            'order_item_id' => $itemA,
             'qty' => 1,
             'amount' => 9000,
             'created_at' => now(),
@@ -173,7 +179,7 @@ class Phase14ReceiptDocumentsApiTest extends TestCase
 
         Queue::fake();
 
-        $this->postJson('/api/v1/print/documents/render', [
+        $response = $this->postJson('/api/v1/print/documents/render', [
             'outletId' => (int) $outlet->id,
             'kind' => 'customer_receipt',
             'sourceType' => 'order',
@@ -182,6 +188,21 @@ class Phase14ReceiptDocumentsApiTest extends TestCase
             'issueFiscal' => true,
             'queuePrint' => false,
         ])->assertOk();
+
+        $history = ReceiptRenderHistory::query()
+            ->where('source_id', $orderId)
+            ->where('order_split_id', $splitId)
+            ->firstOrFail();
+        $snapshot = is_array($history->context_snapshot) ? $history->context_snapshot : [];
+        $lineNames = collect(is_array($snapshot['lines'] ?? null) ? $snapshot['lines'] : [])
+            ->pluck('name')
+            ->all();
+
+        $this->assertSame('Guest A', $snapshot['split_label'] ?? null);
+        $this->assertSame(['Noodles'], $lineNames);
+        $this->assertStringNotContainsString('Soup', json_encode($snapshot['lines'] ?? []));
+        $this->assertSame(9000.0, (float) ($snapshot['subtotal'] ?? 0));
+        $this->assertSame(900.0, (float) ($snapshot['tax'] ?? 0));
 
         $this->assertDatabaseHas('fiscal_invoices', [
             'outlet_id' => $outlet->id,

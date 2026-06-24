@@ -6,7 +6,7 @@ use Illuminate\Support\Carbon;
 
 class ThermalReceiptLayoutBuilder
 {
-    public const LAYOUT_VERSION = 'v3';
+    public const LAYOUT_VERSION = 'v4';
 
     /**
      * @param  array<string,mixed>  $snapshot
@@ -62,6 +62,16 @@ class ThermalReceiptLayoutBuilder
             $width,
         )];
 
+        $cashierName = trim((string) ($snapshot['cashier_name'] ?? ''));
+        if ($cashierName !== '') {
+            $lines[] = ['text' => $this->formatColumns('Cashier', $cashierName, $width)];
+        }
+
+        $splitLabel = trim((string) ($snapshot['split_label'] ?? ''));
+        if ($splitLabel !== '') {
+            $lines[] = ['text' => $this->formatColumns('Split', $splitLabel, $width)];
+        }
+
         if ($num = ($snapshot['fiscal_invoice_number'] ?? null)) {
             $lines[] = ['text' => $this->formatColumns('Invoice', (string) $num, $width)];
         }
@@ -83,15 +93,19 @@ class ThermalReceiptLayoutBuilder
             $lines[] = ['text' => $this->formatColumns($qtyLabel, $this->money($lineTotal), $width)];
         }
 
-        if (! empty($snapshot['split'])) {
-            $lines[] = ['text' => '-- SPLIT '.trim((string) data_get($snapshot, 'split.label', '')).' --', 'align' => 'center'];
-            foreach ((array) data_get($snapshot, 'split.items', []) as $chunk) {
-                $lines[] = ['text' => ($chunk['label'] ?? '').' x '.($chunk['qty'] ?? '')];
-            }
-        }
-
         $lines[] = ['text' => $divider, 'align' => 'center'];
         $lines[] = ['text' => $this->formatColumns('Subtotal', $this->money((float) ($snapshot['subtotal'] ?? 0.0)), $width)];
+
+        /** @var list<array<string,mixed>> $discountLines */
+        $discountLines = is_array($snapshot['discount_lines'] ?? null) ? $snapshot['discount_lines'] : [];
+        foreach ($discountLines as $discountLine) {
+            $label = $this->formatDiscountLabel($discountLine);
+            $amount = (float) ($discountLine['amount'] ?? 0.0);
+            if ($amount === 0.0) {
+                continue;
+            }
+            $lines[] = ['text' => $this->formatColumns($label, $this->money($amount), $width)];
+        }
 
         if ((bool) ($branding['showTaxBreakdown'] ?? false)) {
             $lines[] = ['text' => $this->formatColumns('Tax', $this->money((float) ($snapshot['tax'] ?? 0.0)), $width)];
@@ -102,6 +116,17 @@ class ThermalReceiptLayoutBuilder
             $this->money((float) ($snapshot['total'] ?? $snapshot['amount'] ?? 0.0)),
             $width,
         ), 'bold' => true];
+
+        /** @var list<array<string,mixed>> $payments */
+        $payments = is_array($snapshot['payments'] ?? null) ? $snapshot['payments'] : [];
+        if ($payments !== []) {
+            $lines[] = ['text' => $divider, 'align' => 'center'];
+            foreach ($payments as $payment) {
+                $label = trim((string) ($payment['label'] ?? $payment['method'] ?? 'Payment'));
+                $lines[] = ['text' => $this->formatColumns($label, $this->money((float) ($payment['amount'] ?? 0.0)), $width)];
+            }
+        }
+
         $lines[] = ['text' => $divider, 'align' => 'center'];
 
         $footer = trim((string) ($branding['footer'] ?? ''));
@@ -115,6 +140,22 @@ class ThermalReceiptLayoutBuilder
         }
 
         return array_slice(array_merge($lines, $this->trailingFeedLines()), 0, 256);
+    }
+
+    /**
+     * @param  array<string,mixed>  $discountLine
+     */
+    private function formatDiscountLabel(array $discountLine): string
+    {
+        $name = trim((string) ($discountLine['label'] ?? 'Discount'));
+
+        return match ((string) ($discountLine['type'] ?? '')) {
+            'promotion' => 'Promo ('.$name.')',
+            'voucher' => 'Voucher ('.$name.')',
+            'gift_card' => 'Gift Card ('.$name.')',
+            'store_credit' => 'Store Credit ('.$name.')',
+            default => $name,
+        };
     }
 
     /**
