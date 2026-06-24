@@ -23,7 +23,7 @@ class GoodsReceiptController extends Controller
 
     public function index(): JsonResponse
     {
-        $query = GoodsReceivingNote::query()->with(['purchaseOrder', 'items.purchaseOrderItem', 'invoice']);
+        $query = GoodsReceivingNote::query()->with(['purchaseOrder', 'items.purchaseOrderItem', 'items.ingredient', 'invoice']);
         $this->purchaseScopeService->applyOutletScope(
             $query,
             request()->user('api'),
@@ -45,7 +45,7 @@ class GoodsReceiptController extends Controller
         );
 
         return response()->json([
-            'data' => new GoodsReceiptResource($goodsReceipt->load(['purchaseOrder', 'items.purchaseOrderItem', 'invoice', 'warehouse'])),
+            'data' => new GoodsReceiptResource($goodsReceipt->load(['purchaseOrder', 'items.purchaseOrderItem', 'items.ingredient', 'invoice', 'warehouse'])),
         ]);
     }
 

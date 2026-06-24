@@ -30,17 +30,17 @@ class AttendancePeriodLockTest extends TestCase
     public function test_create_approve_and_lock_period(): void
     {
         $this->actingAsHrmApiAdministrator();
-        [$employee, $shift, $outlet] = $this->seedFixtures();
+        [, , $outlet] = $this->seedFixtures();
 
-        $this->postJson('/api/v1/attendance/periods', [
+        $prepRes = $this->postJson('/api/v1/payroll-preparation-periods', [
             'outletId' => $outlet->id,
             'periodStart' => '2026-08-01',
             'periodEnd' => '2026-08-07',
-            'notes' => 'August week 1',
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'draft');
+        ])->assertCreated();
 
-        $period = AttendancePeriodLock::query()->first();
+        $period = AttendancePeriodLock::query()
+            ->where('payroll_preparation_period_id', (int) $prepRes->json('data.id'))
+            ->first();
         $this->assertNotNull($period);
 
         $this->patchJson('/api/v1/attendance/periods/'.$period->id.'/approve')
@@ -56,7 +56,7 @@ class AttendancePeriodLockTest extends TestCase
         $this->assertNotNull($period->locked_at);
     }
 
-    public function test_duplicate_period_rejected(): void
+    public function test_standalone_attendance_create_blocked(): void
     {
         $this->actingAsHrmApiAdministrator();
         [, , $outlet] = $this->seedFixtures();
@@ -67,7 +67,6 @@ class AttendancePeriodLockTest extends TestCase
             'periodEnd' => '2026-08-16',
         ];
 
-        $this->postJson('/api/v1/attendance/periods', $payload)->assertCreated();
         $this->postJson('/api/v1/attendance/periods', $payload)->assertStatus(422);
     }
 
@@ -188,6 +187,94 @@ class AttendancePeriodLockTest extends TestCase
         $this->patchJson('/api/v1/attendance/periods/'.$locked->id.'/reopen')->assertForbidden();
     }
 
+    public function test_delete_orphan_draft_period(): void
+    {
+        $this->actingAsHrmApiAdministrator();
+        [, , $outlet] = $this->seedFixtures();
+
+        $period = AttendancePeriodLock::query()->create([
+            'outlet_id' => $outlet->id,
+            'period_start' => '2026-05-01',
+            'period_end' => '2026-05-31',
+            'status' => AttendancePeriodLock::STATUS_DRAFT,
+        ]);
+
+        $this->deleteJson('/api/v1/attendance/periods/'.$period->id)
+            ->assertOk();
+
+        $this->assertDatabaseMissing('attendance_period_locks', ['id' => $period->id]);
+    }
+
+    public function test_delete_rejected_for_approved_and_locked(): void
+    {
+        $this->actingAsHrmApiAdministrator();
+        [, , $outlet] = $this->seedFixtures();
+
+        $approved = AttendancePeriodLock::query()->create([
+            'outlet_id' => $outlet->id,
+            'period_start' => '2026-06-01',
+            'period_end' => '2026-06-30',
+            'status' => AttendancePeriodLock::STATUS_APPROVED,
+            'approved_at' => now(),
+        ]);
+
+        $this->deleteJson('/api/v1/attendance/periods/'.$approved->id)->assertStatus(422);
+
+        $locked = AttendancePeriodLock::query()->create([
+            'outlet_id' => $outlet->id,
+            'period_start' => '2026-07-01',
+            'period_end' => '2026-07-31',
+            'status' => AttendancePeriodLock::STATUS_LOCKED,
+            'locked_at' => now(),
+        ]);
+
+        $this->deleteJson('/api/v1/attendance/periods/'.$locked->id)->assertStatus(422);
+
+        $this->assertDatabaseHas('attendance_period_locks', ['id' => $approved->id]);
+        $this->assertDatabaseHas('attendance_period_locks', ['id' => $locked->id]);
+    }
+
+    public function test_overlapping_period_rejected_on_create(): void
+    {
+        $this->actingAsHrmApiAdministrator();
+        [, , $outlet] = $this->seedFixtures();
+
+        $this->postJson('/api/v1/payroll-preparation-periods', [
+            'outletId' => $outlet->id,
+            'periodStart' => '2026-05-01',
+            'periodEnd' => '2026-05-31',
+        ])->assertCreated();
+
+        $this->postJson('/api/v1/payroll-preparation-periods', [
+            'outletId' => $outlet->id,
+            'periodStart' => '2026-05-01',
+            'periodEnd' => '2026-06-24',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['periodStart']);
+
+        $this->assertSame(1, AttendancePeriodLock::query()->where('outlet_id', $outlet->id)->count());
+    }
+
+    public function test_non_overlapping_sequential_periods_allowed(): void
+    {
+        $this->actingAsHrmApiAdministrator();
+        [, , $outlet] = $this->seedFixtures();
+
+        $this->postJson('/api/v1/payroll-preparation-periods', [
+            'outletId' => $outlet->id,
+            'periodStart' => '2026-05-01',
+            'periodEnd' => '2026-05-31',
+        ])->assertCreated();
+
+        $this->postJson('/api/v1/payroll-preparation-periods', [
+            'outletId' => $outlet->id,
+            'periodStart' => '2026-06-01',
+            'periodEnd' => '2026-06-30',
+        ])->assertCreated();
+
+        $this->assertSame(2, AttendancePeriodLock::query()->where('outlet_id', $outlet->id)->count());
+    }
+
     /**
      * @return array{0: Employee, 1: Shift, 2: Outlet}
      */
@@ -221,6 +308,8 @@ class AttendancePeriodLockTest extends TestCase
             'overtime_after_minutes' => 0,
             'active' => true,
         ]);
+
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         return [$employee, $shift, $outlet];
     }

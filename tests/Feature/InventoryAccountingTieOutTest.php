@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Modules\Accounting\Services\AccountingHealthService;
 use App\Modules\Inventory\Services\InventoryValuationReconciliationService;
 use App\Modules\Inventory\Services\InventoryValuationService;
+use Database\Seeders\AccountingPostingMappingsSeeder;
+use Database\Seeders\EssentialCoaAccountsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\InventoryValuationFixture;
@@ -12,8 +14,15 @@ use Tests\TestCase;
 
 class InventoryAccountingTieOutTest extends TestCase
 {
-    use RefreshDatabase;
     use InventoryValuationFixture;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(EssentialCoaAccountsSeeder::class);
+        $this->seed(AccountingPostingMappingsSeeder::class);
+    }
 
     public function test_valuation_reconciliation_reports_balanced_when_gl_matches(): void
     {
@@ -21,16 +30,9 @@ class InventoryAccountingTieOutTest extends TestCase
         $ingredient = $this->createIngredientForOutlet((int) $outlet->id);
         app(InventoryValuationService::class)->recordPurchase((int) $ingredient->id, (int) $outlet->id, 10, 10000);
 
-        $accountId = DB::table('accounts')->insertGetId([
-            'code' => '1300',
-            'name' => 'Inventory',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'category' => 'inventory',
-            'is_active' => true,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $accountId = (int) DB::table('accounts')->where('code', '1300')->value('id');
+        $this->assertGreaterThan(0, $accountId);
+
         $journalId = DB::table('journals')->insertGetId([
             'tenant_id' => 1,
             'outlet_id' => $outlet->id,

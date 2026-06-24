@@ -128,6 +128,56 @@ trait ProcurementTestFixture
             ['code' => '2100', 'name' => 'Accounts Payable', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'accounts_payable', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
             ['code' => '2140', 'name' => 'GRNI', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'grni', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
         ]);
+
+        $this->seedProcurementPostingMappings();
+    }
+
+    /** @param array<string, string> $bankOverrides bankAccountId => account code */
+    protected function seedProcurementPostingMappings(?int $outletId = null, array $bankOverrides = []): void
+    {
+        $accountIdByCode = static fn (string $code): int => (int) DB::table('accounts')->where('code', $code)->value('id');
+
+        $rules = [
+            'procurement.grn.inventory' => '1300',
+            'procurement.grn.grni' => '2140',
+            'procurement.invoice.grni' => '2140',
+            'procurement.invoice.accounts_payable' => '2100',
+            'procurement.payment.accounts_payable' => '2100',
+            'procurement.payment.cash' => '1100',
+            'procurement.payment.bank' => '1110',
+        ];
+
+        foreach ($rules as $ruleKey => $code) {
+            DB::table('accounting_posting_mappings')->updateOrInsert(
+                [
+                    'tenant_id' => null,
+                    'outlet_id' => $outletId,
+                    'module' => 'procurement',
+                    'rule_key' => $ruleKey,
+                ],
+                [
+                    'chart_account_id' => $accountIdByCode($code),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ],
+            );
+        }
+
+        foreach ($bankOverrides as $bankAccountId => $code) {
+            DB::table('accounting_posting_mappings')->updateOrInsert(
+                [
+                    'tenant_id' => null,
+                    'outlet_id' => $outletId,
+                    'module' => 'procurement',
+                    'rule_key' => 'procurement.payment.bank.'.$bankAccountId,
+                ],
+                [
+                    'chart_account_id' => $accountIdByCode($code),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ],
+            );
+        }
     }
 
     protected function seedWarehouse(int $outletId, string $code = 'WH-01'): int

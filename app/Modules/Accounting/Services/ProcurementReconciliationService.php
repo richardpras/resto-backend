@@ -24,9 +24,9 @@ final class ProcurementReconciliationService
         $invoiceSubledger = (float) (clone $query)->where('source_type', ProcurementPosting::SOURCE_INVOICE)->sum('amount');
         $paymentSubledger = (float) (clone $query)->where('source_type', ProcurementPosting::SOURCE_SUPPLIER_PAYMENT)->sum('amount');
 
-        $inventoryGl = $this->glBalanceService->categoryBalance('inventory', ['1300'], ['asset'], $outletId);
-        $grniGl = $this->glBalanceService->categoryBalance('grni', ['2140', '2115'], ['liability'], $outletId);
-        $apGl = $this->glBalanceService->categoryBalance('accounts_payable', ['2100'], ['liability'], $outletId);
+        $inventoryGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'procurement', 'procurement.grn.inventory');
+        $grniGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'procurement', 'procurement.grn.grni');
+        $apGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'procurement', 'procurement.invoice.accounts_payable');
 
         $grnVariance = round($grnSubledger - ($inventoryGl > 0 ? min($inventoryGl, $grnSubledger) : 0), 2);
 

@@ -2,37 +2,26 @@
 
 namespace App\Modules\Purchase\Services;
 
-use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Purchase\Domain\GoodsReceivingNote;
 use App\Models\Modules\Purchase\Domain\ProcurementPosting;
 use App\Models\Modules\Purchase\Domain\PurchaseInvoice;
 use App\Models\Modules\Purchase\Domain\SupplierPayment;
 use App\Models\User;
+use App\Modules\Accounting\Services\AccountingPostingMappingService;
 use App\Modules\Accounting\Services\JournalPostingService;
-use App\Modules\Accounting\Services\PaymentAccountResolverService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 final class ProcurementPostingService
 {
-    /** @var array<string, array{category: string, fallback: list<string>, types: list<string>}> */
-    private const ACCOUNT_MAP = [
-        'inventory' => ['category' => 'inventory', 'fallback' => ['1300'], 'types' => ['asset']],
-        'grni' => ['category' => 'grni', 'fallback' => ['2140', '2115'], 'types' => ['liability']],
-        'accounts_payable' => ['category' => 'accounts_payable', 'fallback' => ['2100'], 'types' => ['liability']],
-        'cash' => ['category' => 'cash_bank', 'fallback' => ['1100'], 'types' => ['asset']],
-        'bank' => ['category' => 'bank', 'fallback' => ['1110', '1100'], 'types' => ['asset']],
-        'purchase_tax' => ['category' => 'purchase_tax', 'fallback' => ['2120'], 'types' => ['liability']],
-    ];
-
     public function __construct(
         private readonly JournalPostingService $journalPostingService,
         private readonly PurchaseScopeService $purchaseScopeService,
         private readonly PurchaseAuditService $purchaseAuditService,
         private readonly ThreeWayMatchService $threeWayMatchService,
-        private readonly PaymentAccountResolverService $paymentAccountResolver,
+        private readonly AccountingPostingMappingService $postingMappingService,
     ) {}
 
     public function postGoodsReceipt(GoodsReceivingNote $grn, ?User $actor = null, bool $throwOnDuplicate = true): ?ProcurementPosting
@@ -50,7 +39,10 @@ final class ProcurementPostingService
             $actor,
             $throwOnDuplicate,
             function () use ($grn, $amount, $actor): array {
-                $accounts = $this->resolveAccounts((int) $grn->outlet_id, ['inventory', 'grni']);
+                $tenantId = $grn->tenant_id !== null ? (int) $grn->tenant_id : null;
+                $outletId = (int) $grn->outlet_id;
+                $inventoryId = $this->resolveMappedAccountId($tenantId, $outletId, 'procurement.grn.inventory');
+                $grniId = $this->resolveMappedAccountId($tenantId, $outletId, 'procurement.grn.grni');
 
                 return [
                     'journal_date' => optional($grn->posted_at)->format('Y-m-d') ?? now()->toDateString(),
@@ -59,11 +51,11 @@ final class ProcurementPostingService
                     'scope' => 'procurement_grn.'.$grn->id,
                     'source_type' => 'procurement_grn',
                     'source_id' => (string) $grn->id,
-                    'outlet_id' => (int) $grn->outlet_id,
+                    'outlet_id' => $outletId,
                     'posted_by' => $actor?->id,
                     'lines' => [
-                        ['account_id' => $accounts['inventory']->id, 'debit' => $amount, 'credit' => 0, 'memo' => 'Inventory received'],
-                        ['account_id' => $accounts['grni']->id, 'debit' => 0, 'credit' => $amount, 'memo' => 'GRNI accrual'],
+                        ['account_id' => $inventoryId, 'debit' => $amount, 'credit' => 0, 'memo' => 'Inventory received'],
+                        ['account_id' => $grniId, 'debit' => 0, 'credit' => $amount, 'memo' => 'GRNI accrual'],
                     ],
                 ];
             },
@@ -87,7 +79,10 @@ final class ProcurementPostingService
             $actor,
             $throwOnDuplicate,
             function () use ($invoice, $amount, $actor): array {
-                $accounts = $this->resolveAccounts((int) $invoice->outlet_id, ['grni', 'accounts_payable']);
+                $tenantId = $invoice->tenant_id !== null ? (int) $invoice->tenant_id : null;
+                $outletId = (int) $invoice->outlet_id;
+                $grniId = $this->resolveMappedAccountId($tenantId, $outletId, 'procurement.invoice.grni');
+                $apId = $this->resolveMappedAccountId($tenantId, $outletId, 'procurement.invoice.accounts_payable');
 
                 return [
                     'journal_date' => optional($invoice->approved_at)->format('Y-m-d') ?? optional($invoice->invoice_date)->format('Y-m-d') ?? now()->toDateString(),
@@ -96,11 +91,11 @@ final class ProcurementPostingService
                     'scope' => 'procurement_invoice.'.$invoice->id,
                     'source_type' => 'procurement_invoice',
                     'source_id' => (string) $invoice->id,
-                    'outlet_id' => (int) $invoice->outlet_id,
+                    'outlet_id' => $outletId,
                     'posted_by' => $actor?->id,
                     'lines' => [
-                        ['account_id' => $accounts['grni']->id, 'debit' => $amount, 'credit' => 0, 'memo' => 'GRNI clearance'],
-                        ['account_id' => $accounts['accounts_payable']->id, 'debit' => 0, 'credit' => $amount, 'memo' => 'Accounts payable'],
+                        ['account_id' => $grniId, 'debit' => $amount, 'credit' => 0, 'memo' => 'GRNI clearance'],
+                        ['account_id' => $apId, 'debit' => 0, 'credit' => $amount, 'memo' => 'Accounts payable'],
                     ],
                 ];
             },
@@ -123,8 +118,10 @@ final class ProcurementPostingService
             $actor,
             $throwOnDuplicate,
             function () use ($payment, $amount, $actor): array {
-                $accounts = $this->resolveAccounts((int) $payment->outlet_id, ['accounts_payable']);
-                $creditAccount = $this->resolvePaymentCreditAccount($payment);
+                $tenantId = $payment->tenant_id !== null ? (int) $payment->tenant_id : null;
+                $outletId = (int) $payment->outlet_id;
+                $apId = $this->resolveMappedAccountId($tenantId, $outletId, 'procurement.payment.accounts_payable');
+                $creditAccountId = $this->resolvePaymentCreditAccountId($payment);
 
                 return [
                     'journal_date' => optional($payment->posted_at)->format('Y-m-d') ?? optional($payment->payment_date)->format('Y-m-d') ?? now()->toDateString(),
@@ -133,11 +130,11 @@ final class ProcurementPostingService
                     'scope' => 'procurement_supplier_payment.'.$payment->id,
                     'source_type' => 'procurement_supplier_payment',
                     'source_id' => (string) $payment->id,
-                    'outlet_id' => (int) $payment->outlet_id,
+                    'outlet_id' => $outletId,
                     'posted_by' => $actor?->id,
                     'lines' => [
-                        ['account_id' => $accounts['accounts_payable']->id, 'debit' => $amount, 'credit' => 0, 'memo' => 'AP settlement'],
-                        ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $amount, 'memo' => 'Cash/Bank payment'],
+                        ['account_id' => $apId, 'debit' => $amount, 'credit' => 0, 'memo' => 'AP settlement'],
+                        ['account_id' => $creditAccountId, 'debit' => 0, 'credit' => $amount, 'memo' => 'Cash/Bank payment'],
                     ],
                 ];
             },
@@ -357,63 +354,30 @@ final class ProcurementPostingService
         });
     }
 
-    /** @param list<string> $keys
-     * @return array<string, Account>
-     */
-    private function resolveAccounts(int $outletId, array $keys): array
+    private function resolveMappedAccountId(?int $tenantId, int $outletId, string $ruleKey): int
     {
-        $resolved = [];
-        foreach ($keys as $key) {
-            if (! isset(self::ACCOUNT_MAP[$key])) {
-                abort(Response::HTTP_UNPROCESSABLE_ENTITY, 'Unknown account mapping key: '.$key);
-            }
-            $config = self::ACCOUNT_MAP[$key];
-            $account = $this->resolveAccount($config['category'], $config['fallback'], $config['types'], $outletId);
-            if ($account === null) {
-                abort(Response::HTTP_UNPROCESSABLE_ENTITY, 'Accounting account mapping missing for '.$key.'.');
-            }
-            $resolved[$key] = $account;
-        }
-
-        return $resolved;
+        return $this->postingMappingService->resolveAccountIdOrFail(
+            $tenantId,
+            $outletId,
+            AccountingPostingMappingService::MODULE_PROCUREMENT,
+            $ruleKey,
+        );
     }
 
-    /** @param list<string> $fallbackCodes
-     * @param list<string> $types
-     */
-    private function resolveAccount(string $category, array $fallbackCodes, array $types, int $outletId): ?Account
+    private function resolvePaymentCreditAccountId(SupplierPayment $payment): int
     {
-        $query = Account::query()->whereIn('type', $types)->where('is_active', true);
-        if ($outletId > 0) {
-            $query->where(function ($q) use ($outletId): void {
-                $q->where('outlet_id', $outletId)->orWhereNull('outlet_id');
-            });
-        }
-
-        $byCategory = (clone $query)->where('category', $category)->orderByRaw('outlet_id is null')->first();
-        if ($byCategory !== null) {
-            return $byCategory;
-        }
-
-        foreach ($fallbackCodes as $code) {
-            $candidate = (clone $query)->where('code', $code)->orderByRaw('outlet_id is null')->first();
-            if ($candidate !== null) {
-                return $candidate;
-            }
-        }
-
-        return (clone $query)->orderBy('id')->first();
-    }
-
-    private function resolvePaymentCreditAccount(SupplierPayment $payment): Account
-    {
+        $tenantId = $payment->tenant_id !== null ? (int) $payment->tenant_id : null;
         $outletId = (int) $payment->outlet_id;
 
         if (in_array($payment->payment_method, ['bank_transfer', 'giro', 'check'], true)) {
-            return $this->paymentAccountResolver->resolveForBankAccount($payment->bank_account_id, $outletId > 0 ? $outletId : null);
+            return $this->postingMappingService->resolveBankCreditAccountId(
+                $tenantId,
+                $outletId,
+                $payment->bank_account_id,
+            );
         }
 
-        return $this->paymentAccountResolver->resolveForCash($outletId > 0 ? $outletId : null);
+        return $this->resolveMappedAccountId($tenantId, $outletId, 'procurement.payment.cash');
     }
 
     private function nextPostingNo(string $sourceType): string

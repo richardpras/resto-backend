@@ -4,11 +4,14 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\AccountingPostingMappingsFixture;
+use Tests\Concerns\ProcurementTestFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class ProcurementReconciliationTest extends TestCase
 {
+    use ProcurementTestFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -17,6 +20,7 @@ class ProcurementReconciliationTest extends TestCase
         parent::setUp();
         config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
         Artisan::call('passport:keys', ['--force' => true]);
+        $this->seedAccountingAccounts();
     }
 
     public function test_procurement_reconciliation_endpoint_returns_report(): void

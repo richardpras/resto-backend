@@ -13,11 +13,13 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class Phase10PaymentGatewayFoundationTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -399,28 +401,7 @@ class Phase10PaymentGatewayFoundationTest extends TestCase
 
     private function seedAccountingAccounts(): void
     {
-        DB::table('accounts')->insert([
-            [
-                'tenant_id' => 1,
-                'code' => '1100',
-                'name' => 'Cash',
-                'type' => 'asset',
-                'category' => 'cash_bank',
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'tenant_id' => 1,
-                'code' => '4100',
-                'name' => 'Sales',
-                'type' => 'revenue',
-                'category' => 'sales_revenue',
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-        ]);
+        $this->seedPosPostingAccountsAndMappings();
     }
 
     private function createPaymentTransaction(int $orderId, int $outletId, ?int $splitId, string $externalReference, string $idempotencyKey): int

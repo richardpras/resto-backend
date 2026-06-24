@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Modules\HR\Domain\AttendancePeriodLock;
 use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -26,13 +27,17 @@ class PayrollPreparationPeriodTest extends TestCase
     {
         $this->actingAsHrmApiAdministrator();
         $outlet = $this->seedOutlet();
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         $this->postJson('/api/v1/payroll-preparation-periods', [
             'outletId' => $outlet->id,
             'periodStart' => '2026-09-01',
             'periodEnd' => '2026-09-30',
         ])->assertCreated()
-            ->assertJsonPath('data.status', 'draft');
+            ->assertJsonPath('data.status', 'draft')
+            ->assertJsonPath('data.attendancePeriodStatus', 'draft');
+
+        $this->assertSame(1, AttendancePeriodLock::query()->count());
 
         $this->getJson('/api/v1/payroll-preparation-periods?outletId='.$outlet->id)
             ->assertOk()
@@ -43,6 +48,7 @@ class PayrollPreparationPeriodTest extends TestCase
     {
         $this->actingAsHrmApiAdministrator();
         $outlet = $this->seedOutlet();
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         $payload = [
             'outletId' => $outlet->id,

@@ -21,6 +21,7 @@ class JournalPostingService
         private readonly AccountingPeriodService $periodService,
         private readonly PosAuditLogService $auditLogService,
         private readonly AccountingPostingIntegrityService $integrityService,
+        private readonly AccountingPostingMappingService $postingMappingService,
         private readonly AccountingPostingFailureService $failureService,
         private readonly AccountingSettingsService $accountingSettingsService,
         private readonly RevenuePostingGuardService $revenuePostingGuard,
@@ -246,15 +247,25 @@ class JournalPostingService
         }
 
         try {
-            $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
-            $counter = $type === 'waste'
-                ? $this->integrityService->resolveAccountOrFail('waste_expense', ['5200'], ['expense'], $outletId)
-                : $this->integrityService->resolveAccountOrFail('stock_adjustment', ['5300'], ['expense', 'revenue'], $outletId);
+            $resolvedOutletId = (int) ($outletId ?? 0);
+            $inventoryId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_INVENTORY,
+                'inventory.asset',
+            );
+            $counterRuleKey = $type === 'waste' ? 'inventory.waste' : 'inventory.adjustment';
+            $counterId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_INVENTORY,
+                $counterRuleKey,
+            );
 
             $isCreditInventory = in_array($type, ['waste', 'sale'], true);
             $lines = [
-                ['account_id' => $counter->id, 'debit' => $isCreditInventory ? $amount : 0, 'credit' => $isCreditInventory ? 0 : $amount, 'memo' => 'Inventory '.$type],
-                ['account_id' => $inventory->id, 'debit' => $isCreditInventory ? 0 : $amount, 'credit' => $isCreditInventory ? $amount : 0, 'memo' => 'Inventory '.$type],
+                ['account_id' => $counterId, 'debit' => $isCreditInventory ? $amount : 0, 'credit' => $isCreditInventory ? 0 : $amount, 'memo' => 'Inventory '.$type],
+                ['account_id' => $inventoryId, 'debit' => $isCreditInventory ? 0 : $amount, 'credit' => $isCreditInventory ? $amount : 0, 'memo' => 'Inventory '.$type],
             ];
 
             return $this->post([
@@ -287,13 +298,19 @@ class JournalPostingService
         }
 
         try {
-            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100'], ['asset'], $outletId);
-            $overShort = $this->integrityService->resolveAccountOrFail('cash_variance', ['5400'], ['expense', 'revenue'], $outletId);
+            $resolvedOutletId = (int) ($outletId ?? 0);
+            $cashId = $this->postingMappingService->resolvePosPaymentAccountId($tenantId, $resolvedOutletId, 'cash');
+            $overShortId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.cash.variance',
+            );
             $abs = abs($variance);
             $isShort = $variance < 0;
             $lines = [
-                ['account_id' => $overShort->id, 'debit' => $isShort ? $abs : 0, 'credit' => $isShort ? 0 : $abs, 'memo' => 'POS cash variance'],
-                ['account_id' => $cash->id, 'debit' => $isShort ? 0 : $abs, 'credit' => $isShort ? $abs : 0, 'memo' => 'POS cash variance'],
+                ['account_id' => $overShortId, 'debit' => $isShort ? $abs : 0, 'credit' => $isShort ? 0 : $abs, 'memo' => 'POS cash variance'],
+                ['account_id' => $cashId, 'debit' => $isShort ? 0 : $abs, 'credit' => $isShort ? $abs : 0, 'memo' => 'POS cash variance'],
             ];
 
             return $this->post([
@@ -338,15 +355,26 @@ class JournalPostingService
         try {
             $giftCardService = app(\App\Modules\GiftCards\Services\GiftCardAccountingService::class);
             $salesLines = $paymentAmountsByMethod !== []
-                ? $giftCardService->buildSalesJournalLinesFromPayments($paymentAmountsByMethod, $giftCardComposition, $outletId)
-                : $giftCardService->buildSalesJournalLines($totalCashSales, $giftCardComposition, $outletId);
-            $cogsAcc = $this->integrityService->resolveAccountOrFail('cogs', ['5100'], ['expense'], $outletId);
-            $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
+                ? $giftCardService->buildSalesJournalLinesFromPayments($paymentAmountsByMethod, $giftCardComposition, $outletId, $tenantId)
+                : $giftCardService->buildSalesJournalLines($totalCashSales, $giftCardComposition, $outletId, $tenantId);
+            $resolvedOutletId = (int) ($outletId ?? 0);
+            $cogsId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.cogs',
+            );
+            $inventoryId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.inventory',
+            );
 
             $lines = [
                 ...$salesLines,
-                ['account_id' => $cogsAcc->id, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS recognized on shift close'],
-                ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction on shift close'],
+                ['account_id' => $cogsId, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS recognized on shift close'],
+                ['account_id' => $inventoryId, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction on shift close'],
             ];
 
             return $this->post([
@@ -385,8 +413,19 @@ class JournalPostingService
         }
 
         try {
-            $cogsAcc = $this->integrityService->resolveAccountOrFail('cogs', ['5100'], ['expense'], $outletId);
-            $inventory = $this->integrityService->resolveAccountOrFail('inventory', ['1300'], ['asset'], $outletId);
+            $resolvedOutletId = (int) ($outletId ?? 0);
+            $cogsId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.cogs',
+            );
+            $inventoryId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.inventory',
+            );
 
             return $this->post([
                 'tenant_id' => $tenantId,
@@ -398,8 +437,8 @@ class JournalPostingService
                 'posting_key' => 'inventory-consumption-'.$batchKey,
                 'scope' => 'inventory_consumption.'.$outletId,
                 'lines' => [
-                    ['account_id' => $cogsAcc->id, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS from deferred consumption'],
-                    ['account_id' => $inventory->id, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction from deferred consumption'],
+                    ['account_id' => $cogsId, 'debit' => $totalCogs, 'credit' => 0, 'memo' => 'COGS from deferred consumption'],
+                    ['account_id' => $inventoryId, 'debit' => 0, 'credit' => $totalCogs, 'memo' => 'Inventory reduction from deferred consumption'],
                 ],
             ]);
         } catch (\Throwable $e) {

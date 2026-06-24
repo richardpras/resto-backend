@@ -2,7 +2,6 @@
 
 namespace App\Modules\Orders\Services;
 
-use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderPaymentAllocation;
@@ -949,40 +948,6 @@ class OrderService
             ->where('source_type', 'order_payment')
             ->whereIn('source_id', $orderCodes)
             ->sum('total_cost');
-    }
-
-    private function resolveAccount(
-        ?string $requestedCode,
-        array $fallbackCodes,
-        array $allowedTypes,
-        ?string $subtype = null
-    ): ?Account {
-        if (is_string($requestedCode) && $requestedCode !== '') {
-            $query = Account::query()->where('code', $requestedCode)->whereIn('type', $allowedTypes);
-            if ($subtype !== null) {
-                $query->where('subtype', $subtype);
-            }
-
-            return $query->first();
-        }
-
-        foreach ($fallbackCodes as $code) {
-            $query = Account::query()->where('code', $code)->whereIn('type', $allowedTypes);
-            if ($subtype !== null) {
-                $query->where('subtype', $subtype);
-            }
-            $account = $query->first();
-            if ($account !== null) {
-                return $account;
-            }
-        }
-
-        $query = Account::query()->whereIn('type', $allowedTypes);
-        if ($subtype !== null) {
-            $query->where('subtype', $subtype);
-        }
-
-        return $query->orderBy('id')->first();
     }
 
     private function finalizePaidOrder(Order $paidOrder, ?User $user): void

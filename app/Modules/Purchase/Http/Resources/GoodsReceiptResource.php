@@ -39,6 +39,7 @@ class GoodsReceiptResource extends JsonResource
             'items' => $this->items->map(static fn ($item): array => [
                 'id' => (string) $item->id,
                 'inventoryItemId' => (string) $item->ingredient_id,
+                'ingredientName' => $item->relationLoaded('ingredient') ? $item->ingredient?->name : null,
                 'orderedQty' => (float) ($item->purchaseOrderItem?->ordered_qty ?? 0),
                 'receivedQty' => (float) $item->received_qty,
                 'unitCost' => (float) ($item->actual_received_cost ?? $item->original_po_cost ?? 0),

@@ -80,6 +80,15 @@ class AttendancePeriodController extends Controller
         ]);
     }
 
+    public function destroy(int $period): JsonResponse
+    {
+        $this->periodService->delete($this->resolveUser(), $period);
+
+        return response()->json([
+            'message' => 'Attendance period deleted.',
+        ]);
+    }
+
     private function resolveUser(): ?\App\Models\User
     {
         $user = request()->user('api') ?? request()->user();

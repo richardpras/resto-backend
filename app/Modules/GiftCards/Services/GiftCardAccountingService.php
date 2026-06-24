@@ -11,10 +11,9 @@ use App\Models\Modules\Payments\Domain\PaymentTransaction;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use App\Modules\Accounting\Services\AccountingAuditService;
-use App\Modules\Accounting\Services\AccountingPostingIntegrityService;
+use App\Modules\Accounting\Services\AccountingPostingMappingService;
 use App\Modules\Accounting\Services\AccountingSettingsService;
 use App\Modules\Accounting\Services\JournalPostingService;
-use App\Modules\Accounting\Services\PaymentAccountResolverService;
 use App\Modules\GiftCards\Support\GiftCardRedemptionComposition;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -23,10 +22,9 @@ final class GiftCardAccountingService
 {
     public function __construct(
         private readonly JournalPostingService $journalPostingService,
-        private readonly AccountingPostingIntegrityService $integrityService,
+        private readonly AccountingPostingMappingService $postingMappingService,
         private readonly AccountingAuditService $accountingAuditService,
         private readonly AccountingSettingsService $accountingSettingsService,
-        private readonly PaymentAccountResolverService $paymentAccountResolver,
     ) {}
 
     /** @param list<int> $settlementIds */
@@ -133,6 +131,7 @@ final class GiftCardAccountingService
         float $cashAmount,
         GiftCardRedemptionComposition $composition,
         ?int $outletId,
+        ?int $tenantId = null,
     ): array {
         $cashAmount = round(max(0, $cashAmount), 2);
         $totalRevenue = round($cashAmount + $composition->total(), 2);
@@ -140,13 +139,23 @@ final class GiftCardAccountingService
             return [];
         }
 
-        $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100'], ['asset'], $outletId);
-        $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100'], ['revenue'], $outletId);
+        $resolvedOutletId = (int) ($outletId ?? 0);
+        $revenueId = $this->postingMappingService->resolveAccountIdOrFail(
+            $tenantId,
+            $resolvedOutletId,
+            AccountingPostingMappingService::MODULE_POS,
+            'pos.sales.revenue',
+        );
 
         $lines = [];
         if ($cashAmount > 0) {
+            $cashId = $this->postingMappingService->resolvePosPaymentAccountId(
+                $tenantId,
+                $resolvedOutletId,
+                'cash',
+            );
             $lines[] = [
-                'account_id' => (int) $cash->id,
+                'account_id' => $cashId,
                 'debit' => $cashAmount,
                 'credit' => 0,
                 'memo' => 'Payment settlement',
@@ -154,14 +163,14 @@ final class GiftCardAccountingService
         }
 
         if ($composition->giftCardAmount > 0) {
-            $liability = $this->integrityService->resolveAccountOrFail(
-                'gift_card_liability',
-                ['2130'],
-                ['liability'],
-                $outletId,
+            $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.redemption.gift_card',
             );
             $lines[] = [
-                'account_id' => (int) $liability->id,
+                'account_id' => $liabilityId,
                 'debit' => $composition->giftCardAmount,
                 'credit' => 0,
                 'memo' => 'Gift card redemption',
@@ -169,14 +178,14 @@ final class GiftCardAccountingService
         }
 
         if ($composition->storeCreditAmount > 0) {
-            $liability = $this->integrityService->resolveAccountOrFail(
-                'store_credit_liability',
-                ['2135'],
-                ['liability'],
-                $outletId,
+            $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.redemption.store_credit',
             );
             $lines[] = [
-                'account_id' => (int) $liability->id,
+                'account_id' => $liabilityId,
                 'debit' => $composition->storeCreditAmount,
                 'credit' => 0,
                 'memo' => 'Store credit redemption',
@@ -184,7 +193,7 @@ final class GiftCardAccountingService
         }
 
         $lines[] = [
-            'account_id' => (int) $revenue->id,
+            'account_id' => $revenueId,
             'debit' => 0,
             'credit' => $totalRevenue,
             'memo' => 'Revenue recognition',
@@ -203,6 +212,7 @@ final class GiftCardAccountingService
         array $paymentAmountsByMethod,
         GiftCardRedemptionComposition $composition,
         ?int $outletId,
+        ?int $tenantId = null,
     ): array {
         $filtered = [];
         foreach ($paymentAmountsByMethod as $method => $amount) {
@@ -218,10 +228,16 @@ final class GiftCardAccountingService
         }
 
         if ($filtered === [] && $cashTotal <= 0) {
-            return $this->buildSalesJournalLines(0, $composition, $outletId);
+            return $this->buildSalesJournalLines(0, $composition, $outletId, $tenantId);
         }
 
-        $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100'], ['revenue'], $outletId);
+        $resolvedOutletId = (int) ($outletId ?? 0);
+        $revenueId = $this->postingMappingService->resolveAccountIdOrFail(
+            $tenantId,
+            $resolvedOutletId,
+            AccountingPostingMappingService::MODULE_POS,
+            'pos.sales.revenue',
+        );
         $totalRevenue = round($cashTotal + $composition->total(), 2);
         if ($totalRevenue <= 0) {
             return [];
@@ -229,11 +245,12 @@ final class GiftCardAccountingService
 
         $debitByAccount = [];
         foreach ($filtered as $method => $amount) {
-            $account = $this->paymentAccountResolver->resolveForOutletPaymentMethod(
-                (int) ($outletId ?? 0),
+            $accountId = $this->postingMappingService->resolvePosPaymentAccountId(
+                $tenantId,
+                $resolvedOutletId,
+                (string) $method,
                 (string) $method,
             );
-            $accountId = (int) $account->id;
             $debitByAccount[$accountId] = round(($debitByAccount[$accountId] ?? 0) + $amount, 2);
         }
 
@@ -251,14 +268,14 @@ final class GiftCardAccountingService
         }
 
         if ($composition->giftCardAmount > 0) {
-            $liability = $this->integrityService->resolveAccountOrFail(
-                'gift_card_liability',
-                ['2130'],
-                ['liability'],
-                $outletId,
+            $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.redemption.gift_card',
             );
             $lines[] = [
-                'account_id' => (int) $liability->id,
+                'account_id' => $liabilityId,
                 'debit' => $composition->giftCardAmount,
                 'credit' => 0,
                 'memo' => 'Gift card redemption',
@@ -266,14 +283,14 @@ final class GiftCardAccountingService
         }
 
         if ($composition->storeCreditAmount > 0) {
-            $liability = $this->integrityService->resolveAccountOrFail(
-                'store_credit_liability',
-                ['2135'],
-                ['liability'],
-                $outletId,
+            $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.redemption.store_credit',
             );
             $lines[] = [
-                'account_id' => (int) $liability->id,
+                'account_id' => $liabilityId,
                 'debit' => $composition->storeCreditAmount,
                 'credit' => 0,
                 'memo' => 'Store credit redemption',
@@ -281,7 +298,7 @@ final class GiftCardAccountingService
         }
 
         $lines[] = [
-            'account_id' => (int) $revenue->id,
+            'account_id' => $revenueId,
             'debit' => 0,
             'credit' => $totalRevenue,
             'memo' => 'Revenue recognition',
@@ -302,9 +319,10 @@ final class GiftCardAccountingService
             [$method => $cashAmount],
             $composition,
             $outletId,
+            $tenantId,
         );
         if ($lines === []) {
-            $lines = $this->buildSalesJournalLines($cashAmount, $composition, $outletId);
+            $lines = $this->buildSalesJournalLines($cashAmount, $composition, $outletId, $tenantId);
         }
         if ($lines === []) {
             return null;
@@ -333,19 +351,28 @@ final class GiftCardAccountingService
     ): ?Journal {
         $paymentAmounts = $this->paymentAmountsForOrder($orderId);
         $lines = $paymentAmounts !== []
-            ? $this->buildSalesJournalLinesFromPayments($paymentAmounts, $composition, $outletId)
-            : $this->buildSalesJournalLines($cashPaid, $composition, $outletId);
+            ? $this->buildSalesJournalLinesFromPayments($paymentAmounts, $composition, $outletId, $tenantId)
+            : $this->buildSalesJournalLines($cashPaid, $composition, $outletId, $tenantId);
         if ($lines === []) {
             return null;
         }
 
         if ($cogs > 0) {
-            $cogsAcc = $this->integrityService->resolveAccount('cogs', ['5100'], ['expense'], $outletId);
-            $inventory = $this->integrityService->resolveAccount('inventory', ['1300'], ['asset'], $outletId);
-            if ($cogsAcc !== null && $inventory !== null) {
-                $lines[] = ['account_id' => (int) $cogsAcc->id, 'debit' => $cogs, 'credit' => 0, 'memo' => 'COGS recognition'];
-                $lines[] = ['account_id' => (int) $inventory->id, 'debit' => 0, 'credit' => $cogs, 'memo' => 'Inventory reduction'];
-            }
+            $resolvedOutletId = (int) ($outletId ?? 0);
+            $cogsId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.cogs',
+            );
+            $inventoryId = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.inventory',
+            );
+            $lines[] = ['account_id' => $cogsId, 'debit' => $cogs, 'credit' => 0, 'memo' => 'COGS recognition'];
+            $lines[] = ['account_id' => $inventoryId, 'debit' => 0, 'credit' => $cogs, 'memo' => 'Inventory reduction'];
         }
 
         return $this->journalPostingService->post([
@@ -425,19 +452,22 @@ final class GiftCardAccountingService
 
         $outletId = (int) $issuance->outlet_id;
         $instrument = strtolower((string) $issuance->instrument_type);
-        $liabilityCategory = $instrument === 'store_credit' ? 'store_credit_liability' : 'gift_card_liability';
-        $liabilityCodes = $instrument === 'store_credit' ? ['2135'] : ['2130'];
+        $liabilityRuleKey = $instrument === 'store_credit'
+            ? 'pos.redemption.store_credit'
+            : 'pos.redemption.gift_card';
 
-        $liability = $this->integrityService->resolveAccount($liabilityCategory, $liabilityCodes, ['liability'], $outletId);
-        $breakage = $this->integrityService->resolveAccount('gift_card_breakage', ['4190'], ['revenue'], $outletId);
-        if ($liability === null || $breakage === null) {
-            Log::info('Gift card expiry breakage skipped: missing account mapping.', [
-                'issuance_id' => (int) $issuance->id,
-                'outlet_id' => $outletId,
-            ]);
-
-            return null;
-        }
+        $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+            null,
+            $outletId,
+            AccountingPostingMappingService::MODULE_POS,
+            $liabilityRuleKey,
+        );
+        $breakageId = $this->postingMappingService->resolveAccountIdOrFail(
+            null,
+            $outletId,
+            AccountingPostingMappingService::MODULE_POS,
+            'pos.gift_card.breakage.revenue',
+        );
 
         $amount = round($expiredAmount, 2);
         $postingKey = 'gift-card-expiry-'.$issuance->id;
@@ -453,13 +483,13 @@ final class GiftCardAccountingService
             'scope' => 'gift_card_expiry.'.$issuance->id,
             'lines' => [
                 [
-                    'account_id' => (int) $liability->id,
+                    'account_id' => $liabilityId,
                     'debit' => $amount,
                     'credit' => 0,
                     'memo' => 'Expired gift card liability relief',
                 ],
                 [
-                    'account_id' => (int) $breakage->id,
+                    'account_id' => $breakageId,
                     'debit' => 0,
                     'credit' => $amount,
                     'memo' => 'Gift card breakage revenue',
@@ -492,12 +522,23 @@ final class GiftCardAccountingService
         }
 
         $instrument = strtolower((string) $issuance->instrument_type);
-        $liabilityCategory = $instrument === 'store_credit' ? 'store_credit_liability' : 'gift_card_liability';
-        $liabilityCodes = $instrument === 'store_credit' ? ['2135'] : ['2130'];
+        $liabilityRuleKey = $instrument === 'store_credit'
+            ? 'pos.gift_card.issue.store_credit'
+            : 'pos.gift_card.issue.gift_card';
 
         try {
-            $cash = $this->integrityService->resolveAccountOrFail('cash_bank', ['1100'], ['asset'], $outletId);
-            $liability = $this->integrityService->resolveAccountOrFail($liabilityCategory, $liabilityCodes, ['liability'], $outletId);
+            $cashId = $this->postingMappingService->resolveAccountIdOrFail(
+                null,
+                $outletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.gift_card.issue.cash',
+            );
+            $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+                null,
+                $outletId,
+                AccountingPostingMappingService::MODULE_POS,
+                $liabilityRuleKey,
+            );
         } catch (\Throwable $e) {
             Log::info('Gift card issue liability skipped: missing account mapping.', [
                 'issuance_id' => (int) $issuance->id,
@@ -519,13 +560,13 @@ final class GiftCardAccountingService
             'scope' => 'gift_card_issue.'.$issuance->id,
             'lines' => [
                 [
-                    'account_id' => (int) $cash->id,
+                    'account_id' => $cashId,
                     'debit' => $cashReceivedAmount,
                     'credit' => 0,
                     'memo' => 'Gift card issue proceeds'.($paymentMethod ? ' ('.$paymentMethod.')' : ''),
                 ],
                 [
-                    'account_id' => (int) $liability->id,
+                    'account_id' => $liabilityId,
                     'debit' => 0,
                     'credit' => $cashReceivedAmount,
                     'memo' => 'Gift card/store credit liability recognized — '.(string) $issuance->code,
@@ -701,12 +742,22 @@ final class GiftCardAccountingService
         }
 
         $instrument = strtolower((string) ($settlement->ledgerEntry?->issuance?->instrument_type ?? 'gift_card'));
-        $liabilityCategory = $instrument === 'store_credit' ? 'store_credit_liability' : 'gift_card_liability';
-        $liabilityCodes = $instrument === 'store_credit' ? ['2135'] : ['2130'];
 
         try {
-            $revenue = $this->integrityService->resolveAccountOrFail('sales_revenue', ['4100'], ['revenue'], $outletId);
-            $liability = $this->integrityService->resolveAccountOrFail($liabilityCategory, $liabilityCodes, ['liability'], $outletId);
+            $resolvedOutletId = (int) $outletId;
+            $revenueId = $this->postingMappingService->resolveAccountIdOrFail(
+                null,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                'pos.sales.revenue',
+            );
+            $ruleKey = $instrument === 'store_credit' ? 'pos.redemption.store_credit' : 'pos.redemption.gift_card';
+            $liabilityId = $this->postingMappingService->resolveAccountIdOrFail(
+                null,
+                $resolvedOutletId,
+                AccountingPostingMappingService::MODULE_POS,
+                $ruleKey,
+            );
         } catch (\Throwable $e) {
             Log::info('Gift card refund reversal skipped: missing account mapping.', [
                 'settlement_id' => (int) $settlement->id,
@@ -728,13 +779,13 @@ final class GiftCardAccountingService
             'scope' => 'gift_card_refund.'.$settlement->id,
             'lines' => [
                 [
-                    'account_id' => (int) $revenue->id,
+                    'account_id' => $revenueId,
                     'debit' => $amount,
                     'credit' => 0,
                     'memo' => 'Revenue reversal — gift card refund',
                 ],
                 [
-                    'account_id' => (int) $liability->id,
+                    'account_id' => $liabilityId,
                     'debit' => 0,
                     'credit' => $amount,
                     'memo' => 'Gift card liability restored',

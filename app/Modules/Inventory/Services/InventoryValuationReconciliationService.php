@@ -19,7 +19,7 @@ final class InventoryValuationReconciliationService
     public function report(?User $actor = null, ?int $outletId = null): array
     {
         $valuationBalance = $this->valuationService->outletValuationTotal($outletId);
-        $inventoryGlBalance = $this->glBalanceService->categoryBalance('inventory', ['1300'], ['asset'], $outletId);
+        $inventoryGlBalance = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'inventory', 'inventory.asset');
         $difference = round($inventoryGlBalance - $valuationBalance, 2);
         $absDiff = abs($difference);
 

@@ -52,10 +52,10 @@ final class PayrollReconciliationService
             }
         }
 
-        $expenseGl = $this->glBalanceService->categoryBalance('payroll_expense', ['6100', '5001'], ['expense'], $outletId);
-        $salaryGl = $this->glBalanceService->categoryBalance('salary_payable', ['2150', '2100'], ['liability'], $outletId);
-        $pph21Gl = $this->glBalanceService->categoryBalance('pph21_payable', ['2160'], ['liability'], $outletId);
-        $bpjsGl = $this->glBalanceService->categoryBalance('bpjs_payable', ['2170'], ['liability'], $outletId);
+        $expenseGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'payroll', 'payroll.expense');
+        $salaryGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'payroll', 'payroll.salary_payable');
+        $pph21Gl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'payroll', 'payroll.pph21_payable');
+        $bpjsGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'payroll', 'payroll.bpjs_payable');
 
         $lines = [
             'payrollExpense' => $this->line($expenseGl, round($subledgerExpense, 2)),

@@ -23,6 +23,10 @@ class AttendancePeriodLockResource extends JsonResource
             'lockedBy' => $this->locked_by,
             'lockedAt' => $this->locked_at?->toIso8601String(),
             'notes' => $this->notes,
+            'payrollPreparationPeriodId' => $this->payroll_preparation_period_id !== null
+                ? (int) $this->payroll_preparation_period_id
+                : null,
+            'isLinkedToPayrollMaster' => $this->payroll_preparation_period_id !== null,
             'employeeCount' => $this->when(
                 isset($this->employee_count),
                 fn () => (int) $this->employee_count,

@@ -4,7 +4,6 @@ namespace App\Modules\Payments\Services;
 
 use App\Jobs\Payments\ProcessPaymentWebhookReceiptJob;
 use App\Jobs\Payments\ReconcilePaymentTransactionJob;
-use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderSplit;
@@ -841,28 +840,6 @@ class PaymentGatewayService
                 'error' => $throwable->getMessage(),
             ]);
         }
-    }
-
-    private function resolveAccount(string $category, array $fallbackCodes, array $types, int $outletId): ?Account
-    {
-        $query = Account::query()->whereIn('type', $types)->where('is_active', true);
-        $query->where(function ($q) use ($outletId): void {
-            $q->where('outlet_id', $outletId)->orWhereNull('outlet_id');
-        });
-
-        $byCategory = (clone $query)->where('category', $category)->orderByRaw('outlet_id is null')->first();
-        if ($byCategory !== null) {
-            return $byCategory;
-        }
-
-        foreach ($fallbackCodes as $code) {
-            $candidate = (clone $query)->where('code', $code)->orderByRaw('outlet_id is null')->first();
-            if ($candidate !== null) {
-                return $candidate;
-            }
-        }
-
-        return (clone $query)->orderBy('id')->first();
     }
 
     /**

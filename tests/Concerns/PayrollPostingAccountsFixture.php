@@ -6,6 +6,8 @@ use App\Models\Modules\Accounting\Domain\Account;
 
 trait PayrollPostingAccountsFixture
 {
+    use AccountingPostingMappingsFixture;
+
     protected function seedPayrollPostingAccounts(): void
     {
         $accounts = [
@@ -30,5 +32,7 @@ trait PayrollPostingAccountsFixture
                 ],
             );
         }
+
+        $this->seedPayrollPostingMappings();
     }
 }

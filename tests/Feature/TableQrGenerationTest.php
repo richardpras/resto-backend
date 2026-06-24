@@ -71,6 +71,8 @@ class TableQrGenerationTest extends TestCase
         $response = $this->get('/api/v1/tables/'.$table->id.'/qr/image');
         $response->assertOk();
         $this->assertStringStartsWith("\x89PNG", $response->getContent());
+        $this->assertStringContainsString('attachment', (string) $response->headers->get('Content-Disposition'));
+        $this->assertStringContainsString('image/png', (string) $response->headers->get('Content-Type'));
     }
 
     public function test_customer_app_url_settings_api(): void

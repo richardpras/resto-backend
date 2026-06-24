@@ -23,6 +23,14 @@ class PayrollPreparationPeriodResource extends JsonResource
             'lockedBy' => $this->locked_by,
             'lockedAt' => $this->locked_at?->toIso8601String(),
             'generatedAt' => $this->generated_at?->toIso8601String(),
+            'attendancePeriodId' => $this->when(
+                $this->relationLoaded('attendancePeriodLock') && $this->attendancePeriodLock !== null,
+                fn () => (int) $this->attendancePeriodLock->id,
+            ),
+            'attendancePeriodStatus' => $this->when(
+                $this->relationLoaded('attendancePeriodLock') && $this->attendancePeriodLock !== null,
+                fn () => $this->attendancePeriodLock->status,
+            ),
             'employeeCount' => $this->when(
                 isset($this->employee_count),
                 fn () => (int) $this->employee_count,

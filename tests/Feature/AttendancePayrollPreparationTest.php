@@ -31,6 +31,7 @@ class AttendancePayrollPreparationTest extends TestCase
     {
         $this->actingAsHrmApiAdministrator();
         [$employee, $shift, $outlet] = $this->seedFixtures();
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         foreach (['2026-07-01', '2026-07-02', '2026-07-03'] as $date) {
             EmployeeRoster::query()->create([
@@ -86,14 +87,15 @@ class AttendancePayrollPreparationTest extends TestCase
     public function test_payroll_preparation_does_not_modify_payroll_tables(): void
     {
         $this->actingAsHrmApiAdministrator();
-        [$employee, , $outlet] = $this->seedFixtures();
+        [, , $outlet] = $this->seedFixtures();
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
-        $payrollCountBefore = \Illuminate\Support\Facades\DB::table('payrolls')->count();
+        $payrollCountBefore = \Illuminate\Support\Facades\DB::table('payroll_runs_v2')->count();
 
         $this->getJson('/api/v1/attendance/payroll-preparation?periodStart=2026-07-01&periodEnd=2026-07-31')
             ->assertOk();
 
-        $this->assertSame($payrollCountBefore, \Illuminate\Support\Facades\DB::table('payrolls')->count());
+        $this->assertSame($payrollCountBefore, \Illuminate\Support\Facades\DB::table('payroll_runs_v2')->count());
     }
 
     /**

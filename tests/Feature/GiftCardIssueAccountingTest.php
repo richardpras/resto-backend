@@ -6,11 +6,13 @@ use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class GiftCardIssueAccountingTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -133,26 +135,7 @@ class GiftCardIssueAccountingTest extends TestCase
 
     private function seedAccounts(): void
     {
-        foreach ([
-            ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'category' => 'cash_bank'],
-            ['code' => '2130', 'name' => 'Gift Card Liability', 'type' => 'liability', 'category' => 'gift_card_liability'],
-            ['code' => '2135', 'name' => 'Store Credit Liability', 'type' => 'liability', 'category' => 'store_credit_liability'],
-            ['code' => '4100', 'name' => 'Sales', 'type' => 'revenue', 'category' => 'sales_revenue'],
-        ] as $row) {
-            if (DB::table('accounts')->where('code', $row['code'])->exists()) {
-                continue;
-            }
-            DB::table('accounts')->insert([
-                'tenant_id' => 1,
-                'code' => $row['code'],
-                'name' => $row['name'],
-                'type' => $row['type'],
-                'category' => $row['category'],
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
+        $this->seedPosPostingAccountsAndMappings();
     }
 
     /** @return array<string, array{debit: float, credit: float}> */

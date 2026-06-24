@@ -10,11 +10,13 @@ use App\Modules\Payments\Services\Providers\PaymentProviderInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class Phase11RecoveryReconciliationTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -133,32 +135,7 @@ class Phase11RecoveryReconciliationTest extends TestCase
 
     private function seedPostingAccounts(int $outletId): void
     {
-        DB::table('accounts')->insert([
-            [
-                'tenant_id' => 1,
-                'outlet_id' => $outletId,
-                'scope' => 'outlet',
-                'code' => '1100',
-                'name' => 'Cash',
-                'type' => 'asset',
-                'category' => 'cash_bank',
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'tenant_id' => 1,
-                'outlet_id' => $outletId,
-                'scope' => 'outlet',
-                'code' => '4100',
-                'name' => 'Sales',
-                'type' => 'revenue',
-                'category' => 'sales_revenue',
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-        ]);
+        $this->seedPosPostingAccountsAndMappings($outletId);
     }
 
     private function createConfirmedOrder(int $outletId, int $openedByUserId, string $code): int

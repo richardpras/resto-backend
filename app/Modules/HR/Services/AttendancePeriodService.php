@@ -4,6 +4,7 @@ namespace App\Modules\HR\Services;
 
 use App\Models\Modules\HR\Domain\AttendanceDailySummary;
 use App\Models\Modules\HR\Domain\AttendancePeriodLock;
+use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
 use App\Models\User;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Support\Collection;
@@ -41,37 +42,8 @@ class AttendancePeriodService
 
     public function create(?User $user, array $payload): AttendancePeriodLock
     {
-        $outletId = (int) ($payload['outletId'] ?? 0);
-        $periodStart = (string) ($payload['periodStart'] ?? '');
-        $periodEnd = (string) ($payload['periodEnd'] ?? '');
-
-        abort_if($outletId < 1, 422, 'outletId is required.');
-        $this->assertOutletAllowed($user, $outletId);
-
-        if ($periodEnd < $periodStart) {
-            throw ValidationException::withMessages([
-                'periodEnd' => ['periodEnd must be on or after periodStart.'],
-            ]);
-        }
-
-        $exists = AttendancePeriodLock::query()
-            ->where('outlet_id', $outletId)
-            ->where('period_start', $periodStart)
-            ->where('period_end', $periodEnd)
-            ->exists();
-
-        if ($exists) {
-            throw ValidationException::withMessages([
-                'periodStart' => ['An attendance period already exists for this outlet and date range.'],
-            ]);
-        }
-
-        return AttendancePeriodLock::query()->create([
-            'outlet_id' => $outletId,
-            'period_start' => $periodStart,
-            'period_end' => $periodEnd,
-            'status' => AttendancePeriodLock::STATUS_DRAFT,
-            'notes' => $payload['notes'] ?? null,
+        throw ValidationException::withMessages([
+            'periodStart' => ['Create payroll preparation periods instead; attendance periods are created automatically.'],
         ]);
     }
 
@@ -127,6 +99,25 @@ class AttendancePeriodService
             ]);
         }
 
+        $period->loadMissing('payrollPreparationPeriod');
+        $prep = $period->payrollPreparationPeriod;
+        if ($prep !== null) {
+            if ($prep->status === PayrollPreparationPeriod::STATUS_LOCKED) {
+                abort(Response::HTTP_FORBIDDEN, 'Locked payroll preparation periods cannot be reopened from attendance review.');
+            }
+
+            if ($prep->status !== PayrollPreparationPeriod::STATUS_DRAFT || $prep->generated_at !== null) {
+                $prep->update([
+                    'status' => PayrollPreparationPeriod::STATUS_DRAFT,
+                    'approved_by' => null,
+                    'approved_at' => null,
+                    'locked_by' => null,
+                    'locked_at' => null,
+                    'generated_at' => null,
+                ]);
+            }
+        }
+
         $period->update([
             'status' => AttendancePeriodLock::STATUS_DRAFT,
             'approved_by' => null,
@@ -136,6 +127,25 @@ class AttendancePeriodService
         ]);
 
         return $period->refresh();
+    }
+
+    public function delete(?User $user, int $periodId): void
+    {
+        $period = $this->findAccessible($user, $periodId);
+
+        if ($period->payroll_preparation_period_id !== null) {
+            throw ValidationException::withMessages([
+                'status' => ['Delete the payroll preparation period instead; attendance periods are managed from payroll preparation.'],
+            ]);
+        }
+
+        if ($period->status !== AttendancePeriodLock::STATUS_DRAFT) {
+            throw ValidationException::withMessages([
+                'status' => ['Only draft attendance periods can be deleted. Reopen approved periods first.'],
+            ]);
+        }
+
+        $period->delete();
     }
 
     public function findExactPeriod(int $outletId, string $periodStart, string $periodEnd): ?AttendancePeriodLock

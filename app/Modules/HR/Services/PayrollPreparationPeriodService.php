@@ -2,11 +2,14 @@
 
 namespace App\Modules\HR\Services;
 
+use App\Models\Modules\HR\Domain\AttendancePeriodLock;
 use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
 use App\Models\Modules\HR\Domain\PayrollPreparationSnapshot;
 use App\Models\User;
+use App\Modules\HR\Support\PeriodRangeOverlapGuard;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -15,6 +18,8 @@ class PayrollPreparationPeriodService
     public function __construct(
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly PayrollPreparationService $preparation,
+        private readonly AttendancePeriodService $attendancePeriods,
+        private readonly PeriodRangeOverlapGuard $overlapGuard,
     ) {}
 
     /**
@@ -23,6 +28,7 @@ class PayrollPreparationPeriodService
     public function list(?User $user, array $filters = []): Collection
     {
         $query = PayrollPreparationPeriod::query()
+            ->with('attendancePeriodLock')
             ->orderByDesc('period_start')
             ->orderByDesc('id');
 
@@ -67,17 +73,33 @@ class PayrollPreparationPeriodService
             ]);
         }
 
-        return PayrollPreparationPeriod::query()->create([
-            'outlet_id' => $outletId,
-            'period_start' => $periodStart,
-            'period_end' => $periodEnd,
-            'status' => PayrollPreparationPeriod::STATUS_DRAFT,
-        ]);
+        $this->overlapGuard->assertNoOverlapForOutlet($outletId, $periodStart, $periodEnd);
+
+        return DB::transaction(function () use ($outletId, $periodStart, $periodEnd) {
+            $period = PayrollPreparationPeriod::query()->create([
+                'outlet_id' => $outletId,
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'status' => PayrollPreparationPeriod::STATUS_DRAFT,
+            ]);
+
+            AttendancePeriodLock::query()->create([
+                'outlet_id' => $outletId,
+                'payroll_preparation_period_id' => $period->id,
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'status' => AttendancePeriodLock::STATUS_DRAFT,
+            ]);
+
+            return $period->load('attendancePeriodLock');
+        });
     }
 
     public function findAccessible(?User $user, int $periodId): PayrollPreparationPeriod
     {
-        $period = PayrollPreparationPeriod::query()->find($periodId);
+        $period = PayrollPreparationPeriod::query()
+            ->with('attendancePeriodLock')
+            ->find($periodId);
         abort_if($period === null, Response::HTTP_NOT_FOUND, 'Payroll preparation period not found.');
         $this->assertOutletAllowed($user, (int) $period->outlet_id);
 
@@ -106,7 +128,7 @@ class PayrollPreparationPeriodService
             'approved_at' => now(),
         ]);
 
-        return $period->refresh();
+        return $period->refresh()->load('attendancePeriodLock');
     }
 
     public function lock(?User $user, int $periodId): PayrollPreparationPeriod
@@ -119,13 +141,57 @@ class PayrollPreparationPeriodService
             ]);
         }
 
-        $period->update([
-            'status' => PayrollPreparationPeriod::STATUS_LOCKED,
-            'locked_by' => $user?->id,
-            'locked_at' => now(),
-        ]);
+        $attendancePeriod = $period->attendancePeriodLock;
+        if ($attendancePeriod === null) {
+            throw ValidationException::withMessages([
+                'status' => ['Linked attendance period is missing.'],
+            ]);
+        }
 
-        return $period->refresh();
+        if ($attendancePeriod->status === AttendancePeriodLock::STATUS_DRAFT) {
+            throw ValidationException::withMessages([
+                'status' => ['Approve the attendance period in Attendance Review before locking payroll preparation.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($user, $period, $attendancePeriod) {
+            $period->update([
+                'status' => PayrollPreparationPeriod::STATUS_LOCKED,
+                'locked_by' => $user?->id,
+                'locked_at' => now(),
+            ]);
+
+            if ($attendancePeriod->status === AttendancePeriodLock::STATUS_APPROVED) {
+                $this->attendancePeriods->lock($user, (int) $attendancePeriod->id);
+            }
+
+            return $period->refresh()->load('attendancePeriodLock');
+        });
+    }
+
+    public function delete(?User $user, int $periodId): void
+    {
+        $period = $this->findAccessible($user, $periodId);
+
+        if ($period->status !== PayrollPreparationPeriod::STATUS_DRAFT) {
+            throw ValidationException::withMessages([
+                'status' => ['Only draft payroll preparation periods can be deleted.'],
+            ]);
+        }
+
+        if ($period->payrollRun()->exists()) {
+            throw ValidationException::withMessages([
+                'status' => ['This period is linked to a payroll run and cannot be deleted.'],
+            ]);
+        }
+
+        DB::transaction(function () use ($period) {
+            PayrollPreparationSnapshot::query()
+                ->where('preparation_period_id', $period->id)
+                ->delete();
+
+            $period->delete();
+        });
     }
 
     /**
@@ -138,6 +204,22 @@ class PayrollPreparationPeriodService
         if ($period->status === PayrollPreparationPeriod::STATUS_LOCKED) {
             throw ValidationException::withMessages([
                 'status' => ['Locked payroll preparation periods cannot be regenerated.'],
+            ]);
+        }
+
+        $attendancePeriod = $period->attendancePeriodLock;
+        if ($attendancePeriod === null) {
+            throw ValidationException::withMessages([
+                'status' => ['Linked attendance period is missing.'],
+            ]);
+        }
+
+        if (! in_array($attendancePeriod->status, [
+            AttendancePeriodLock::STATUS_APPROVED,
+            AttendancePeriodLock::STATUS_LOCKED,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Approve the attendance period in Attendance Review before generating snapshots.'],
             ]);
         }
 

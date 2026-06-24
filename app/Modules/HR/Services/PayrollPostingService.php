@@ -4,6 +4,7 @@ namespace App\Modules\HR\Services;
 
 use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\Journal;
+use App\Modules\Accounting\Services\AccountingPostingMappingService;
 use App\Models\Modules\HR\Domain\PayrollPosting;
 use App\Models\Modules\HR\Domain\PayrollRunAudit;
 use App\Models\Modules\HR\Domain\PayrollRunItemV2;
@@ -16,21 +17,22 @@ use Symfony\Component\HttpFoundation\Response;
 
 class PayrollPostingService
 {
-    /** @var array<string, array{fallback: list<string>, types: list<string>}> */
-    private const ACCOUNT_MAP = [
-        'payroll_expense' => ['fallback' => ['6100', '5001'], 'types' => ['expense']],
-        'salary_payable' => ['fallback' => ['2150', '2100'], 'types' => ['liability']],
-        'pph21_payable' => ['fallback' => ['2160'], 'types' => ['liability']],
-        'bpjs_payable' => ['fallback' => ['2170'], 'types' => ['liability']],
-        'loan_receivable' => ['fallback' => ['1210', '1200'], 'types' => ['asset']],
-        'cash_advance_recovery' => ['fallback' => ['1220', '1200'], 'types' => ['asset']],
-        'other_deductions' => ['fallback' => ['2180', '2190'], 'types' => ['liability']],
+    /** @var array<string, string> */
+    private const COMPONENT_RULE_KEYS = [
+        'payroll_expense' => 'payroll.expense',
+        'salary_payable' => 'payroll.salary_payable',
+        'pph21_payable' => 'payroll.pph21_payable',
+        'bpjs_payable' => 'payroll.bpjs_payable',
+        'loan_receivable' => 'payroll.loan_receivable',
+        'cash_advance_recovery' => 'payroll.cash_advance_recovery',
+        'other_deductions' => 'payroll.other_deductions',
     ];
 
     public function __construct(
         private readonly PayrollRunServiceV2 $payrollRuns,
         private readonly JournalPostingService $journalPosting,
         private readonly PayrollRunAuditService $audits,
+        private readonly AccountingPostingMappingService $postingMappingService,
     ) {}
 
     /**
@@ -198,7 +200,8 @@ class PayrollPostingService
     private function buildJournalLines(PayrollRunV2 $run): array
     {
         $items = PayrollRunItemV2::query()->where('payroll_run_id', $run->id)->get();
-        $accounts = $this->resolveAccounts((int) $run->outlet_id);
+        $outletId = (int) $run->outlet_id;
+        $accountIds = $this->resolveAccountIds(null, $outletId);
 
         $gross = round((float) $items->sum('gross_salary'), 2);
         $employerBpjs = round(
@@ -246,17 +249,18 @@ class PayrollPostingService
             if ($amount <= 0) {
                 continue;
             }
-            $account = $accounts[$component['key']];
+            $accountId = $accountIds[$component['key']];
+            $account = Account::query()->find($accountId);
             $lines[] = [
-                'accountId' => (int) $account->id,
-                'accountCode' => $account->code,
-                'accountName' => $account->name,
+                'accountId' => $accountId,
+                'accountCode' => $account?->code,
+                'accountName' => $account?->name,
                 'debit' => (float) $component['debit'],
                 'credit' => (float) $component['credit'],
                 'memo' => $component['memo'],
             ];
             $journalLines[] = [
-                'account_id' => (int) $account->id,
+                'account_id' => $accountId,
                 'debit' => (float) $component['debit'],
                 'credit' => (float) $component['credit'],
                 'memo' => $component['memo'],
@@ -280,45 +284,19 @@ class PayrollPostingService
         ];
     }
 
-    /**
-     * @return array<string, Account>
-     */
-    private function resolveAccounts(int $outletId): array
+    /** @return array<string, int> */
+    private function resolveAccountIds(?int $tenantId, int $outletId): array
     {
         $resolved = [];
-        foreach (self::ACCOUNT_MAP as $key => $config) {
-            $account = $this->resolveAccount($config['fallback'], $config['types'], $outletId);
-            if ($account === null) {
-                throw ValidationException::withMessages([
-                    'accounts' => ["Accounting account mapping missing for {$key}."],
-                ]);
-            }
-            $resolved[$key] = $account;
+        foreach (self::COMPONENT_RULE_KEYS as $componentKey => $ruleKey) {
+            $resolved[$componentKey] = $this->postingMappingService->resolveAccountIdOrFail(
+                $tenantId,
+                $outletId,
+                AccountingPostingMappingService::MODULE_PAYROLL,
+                $ruleKey,
+            );
         }
 
         return $resolved;
-    }
-
-    /**
-     * @param  list<string>  $fallbackCodes
-     * @param  list<string>  $types
-     */
-    private function resolveAccount(array $fallbackCodes, array $types, int $outletId): ?Account
-    {
-        $query = Account::query()->whereIn('type', $types)->where('is_active', true);
-        if ($outletId > 0) {
-            $query->where(function ($q) use ($outletId) {
-                $q->where('outlet_id', $outletId)->orWhereNull('outlet_id');
-            });
-        }
-
-        foreach ($fallbackCodes as $code) {
-            $candidate = (clone $query)->where('code', $code)->orderByRaw('outlet_id is null')->first();
-            if ($candidate !== null) {
-                return $candidate;
-            }
-        }
-
-        return (clone $query)->orderBy('id')->first();
     }
 }

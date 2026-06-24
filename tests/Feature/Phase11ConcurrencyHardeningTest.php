@@ -10,11 +10,13 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class Phase11ConcurrencyHardeningTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -213,32 +215,7 @@ class Phase11ConcurrencyHardeningTest extends TestCase
 
     private function createPaymentTransaction(int $orderId, int $outletId, string $externalReference, string $idempotencyKey): int
     {
-        DB::table('accounts')->insert([
-            [
-                'tenant_id' => 1,
-                'outlet_id' => $outletId,
-                'scope' => 'outlet',
-                'code' => '1100',
-                'name' => 'Cash',
-                'type' => 'asset',
-                'category' => 'cash_bank',
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'tenant_id' => 1,
-                'outlet_id' => $outletId,
-                'scope' => 'outlet',
-                'code' => '4100',
-                'name' => 'Sales',
-                'type' => 'revenue',
-                'category' => 'sales_revenue',
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-        ]);
+        $this->seedPosPostingAccountsAndMappings($outletId);
 
         $this->enableGatewayQrisForOutlet($outletId);
 

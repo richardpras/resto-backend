@@ -4,6 +4,7 @@ use App\Modules\Accounting\Http\Controllers\AccountController;
 use App\Modules\Accounting\Http\Controllers\AccountingHealthController;
 use App\Modules\Accounting\Http\Controllers\AccountingPeriodController;
 use App\Modules\Accounting\Http\Controllers\AccountingPostingFailureController;
+use App\Modules\Accounting\Http\Controllers\AccountingPostingMappingController;
 use App\Modules\Accounting\Http\Controllers\AccountingReconciliationController;
 use App\Modules\Accounting\Http\Controllers\AccountingSettingsController;
 use App\Modules\Accounting\Http\Controllers\CashFlowReportController;
@@ -446,6 +447,9 @@ Route::prefix('v1')->group(function (): void {
     Route::post('accounting-periods/{period}/open', [AccountingPeriodController::class, 'open'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/settings', [AccountingSettingsController::class, 'show'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::patch('accounting/settings', [AccountingSettingsController::class, 'update'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::get('accounting/posting-mappings', [AccountingPostingMappingController::class, 'show'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::get('accounting/posting-mappings/status', [AccountingPostingMappingController::class, 'status'])->middleware(['auth:api', 'permission:accounting.manage']);
+    Route::patch('accounting/posting-mappings', [AccountingPostingMappingController::class, 'update'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/health', [AccountingHealthController::class, 'show'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/health/trends', [AccountingHealthController::class, 'trends'])->middleware(['auth:api', 'permission:accounting.manage']);
     Route::get('accounting/posting-failures', [AccountingPostingFailureController::class, 'index'])->middleware(['auth:api', 'permission:accounting.manage']);
@@ -575,6 +579,8 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('permission.any:payroll.manage,attendance.manage');
         Route::patch('attendance/periods/{period}/reopen', [AttendancePeriodController::class, 'reopen'])
             ->middleware('permission.any:payroll.manage,attendance.manage');
+        Route::delete('attendance/periods/{period}', [AttendancePeriodController::class, 'destroy'])
+            ->middleware('permission.any:payroll.manage,attendance.manage');
         Route::get('attendance/summaries', [AttendanceSummaryController::class, 'index'])
             ->middleware('permission.any:payroll.manage,attendance.manage');
         Route::get('attendance/summaries/{summary}', [AttendanceSummaryController::class, 'show'])
@@ -645,6 +651,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('payroll-preparation-periods', [PayrollPreparationPeriodController::class, 'index'])
             ->middleware('permission.any:payroll.manage,payroll.create');
         Route::post('payroll-preparation-periods', [PayrollPreparationPeriodController::class, 'store'])
+            ->middleware('permission.any:payroll.manage,payroll.create');
+        Route::delete('payroll-preparation-periods/{period}', [PayrollPreparationPeriodController::class, 'destroy'])
             ->middleware('permission.any:payroll.manage,payroll.create');
         Route::patch('payroll-preparation-periods/{period}/approve', [PayrollPreparationPeriodController::class, 'approve'])
             ->middleware('permission.any:payroll.manage,payroll.create');

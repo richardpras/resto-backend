@@ -71,6 +71,7 @@ class ProcurementPostingPaymentTest extends TestCase
             'is_default' => true,
             'chart_account_id' => $bcaAccountId,
         ]);
+        $this->seedProcurementPostingMappings(null, ['bank-proc-test' => '1111']);
 
         $grnId = $this->createPostedGoodsReceipt($master['poId'], (int) $outlet->id, [
             ['inventoryItemId' => $master['ingredientId'], 'receivedQty' => 10],

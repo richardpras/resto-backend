@@ -96,7 +96,7 @@ class TableQrController extends Controller
 
         return response($binary, Response::HTTP_OK, [
             'Content-Type' => 'image/png',
-            'Content-Disposition' => 'inline; filename="'.$this->tableQrService->pngFilename($table).'"',
+            'Content-Disposition' => 'attachment; filename="'.$this->tableQrService->pngFilename($table).'"',
         ]);
     }
 

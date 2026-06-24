@@ -27,11 +27,11 @@ final class AccountsPayableReconciliationService
         }
         $subledger = round($subledger, 2);
 
-        $glBalance = $this->glBalanceService->categoryBalance(
-            'accounts_payable',
-            ['2100'],
-            ['liability'],
+        $glBalance = $this->glBalanceService->mappedRuleBalance(
+            null,
             $outletId,
+            'procurement',
+            'procurement.invoice.accounts_payable',
         );
 
         $difference = round($subledger - $glBalance, 2);

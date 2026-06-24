@@ -13,7 +13,6 @@
         .table-name { font-size: 18px; font-weight: bold; margin: 6px 0; }
         .qr { width: 42mm; height: 42mm; margin: 4px auto; }
         .hint { font-size: 9px; color: #444; margin-top: 6px; line-height: 1.35; }
-        .url { font-size: 7px; color: #666; word-break: break-all; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -29,7 +28,6 @@
                 <div class="table-name">{{ $label['tableName'] }}</div>
                 <img class="qr" src="data:image/png;base64,{{ $label['pngBase64'] }}" alt="QR">
                 <div class="hint">Scan to order from your table</div>
-                <div class="url">{{ $label['qrUrl'] }}</div>
             </div>
         </td>
         @if($index % 2 === 1)

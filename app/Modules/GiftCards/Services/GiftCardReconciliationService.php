@@ -54,8 +54,8 @@ final class GiftCardReconciliationService
         $pendingSettlements = (int) (clone $settlementQuery)->where('status', 'pending')->count();
         $settledSettlements = (int) (clone $settlementQuery)->where('status', 'settled')->count();
 
-        $giftCardGl = $this->glBalanceService->categoryBalance('gift_card_liability', ['2130'], ['liability'], $outletId);
-        $storeCreditGl = $this->glBalanceService->categoryBalance('store_credit_liability', ['2135'], ['liability'], $outletId);
+        $giftCardGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'pos', 'pos.redemption.gift_card');
+        $storeCreditGl = $this->glBalanceService->mappedRuleBalance(null, $outletId, 'pos', 'pos.redemption.store_credit');
         $glLiabilityBalance = round($giftCardGl + $storeCreditGl, 2);
 
         $giftCardVariance = round($giftCardOutstanding - $giftCardGl, 2);

@@ -34,14 +34,7 @@ class PayrollPreparationSnapshotTest extends TestCase
     {
         $this->actingAsHrmApiAdministrator();
         [$employee, $shift, $outlet, $leaveType] = $this->seedFixtures();
-
-        AttendancePeriodLock::query()->create([
-            'outlet_id' => $outlet->id,
-            'period_start' => '2026-10-01',
-            'period_end' => '2026-10-07',
-            'status' => AttendancePeriodLock::STATUS_APPROVED,
-            'approved_at' => now(),
-        ]);
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         EmployeeRoster::query()->create([
             'outlet_id' => $outlet->id,
@@ -104,6 +97,9 @@ class PayrollPreparationSnapshotTest extends TestCase
         ])->assertCreated();
 
         $periodId = (int) $periodRes->json('data.id');
+
+        $attendance = AttendancePeriodLock::query()->where('payroll_preparation_period_id', $periodId)->first();
+        $this->patchJson('/api/v1/attendance/periods/'.$attendance->id.'/approve')->assertOk();
 
         $this->postJson('/api/v1/payroll-preparation-periods/'.$periodId.'/generate')->assertOk();
 

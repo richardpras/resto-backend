@@ -24,7 +24,11 @@ class TemplateAccountingSeeder extends Seeder
         $accounts = [
             ['code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'cash_bank'],
             ['code' => '1110', 'name' => 'Bank', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'bank'],
+            ['code' => '1111', 'name' => 'Bank BCA', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'bank'],
+            ['code' => '1120', 'name' => 'QRIS / E-Wallet Clearing', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'cash_bank'],
             ['code' => '1200', 'name' => 'Accounts Receivable', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'accounts_receivable'],
+            ['code' => '1210', 'name' => 'Employee Loan Receivable', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => null],
+            ['code' => '1220', 'name' => 'Cash Advance Receivable', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => null],
             ['code' => '1300', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset', 'category' => 'inventory'],
             ['code' => '1500', 'name' => 'Equipment', 'type' => 'asset', 'subtype' => 'fixed_asset', 'category' => 'fixed_asset'],
             ['code' => '2100', 'name' => 'Accounts Payable', 'type' => 'liability', 'subtype' => 'short_term_liability', 'category' => 'accounts_payable'],

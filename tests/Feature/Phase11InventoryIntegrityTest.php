@@ -15,6 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\HttpException;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -27,6 +28,7 @@ use Tests\TestCase;
  */
 class Phase11InventoryIntegrityTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -540,86 +542,83 @@ class Phase11InventoryIntegrityTest extends TestCase
 
     private function seedFullAccounts(int $outletId): void
     {
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'cash_bank',
-            'code' => '1100',
-            'name' => 'Cash',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'is_active' => true,
-        ]);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'sales_revenue',
-            'code' => '4100',
-            'name' => 'Sales',
-            'type' => 'revenue',
-            'subtype' => 'revenue',
-            'is_active' => true,
-        ]);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'cogs',
-            'code' => '5100',
-            'name' => 'COGS',
-            'type' => 'expense',
-            'subtype' => 'cogs',
-            'is_active' => true,
-        ]);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'inventory',
-            'code' => '1300',
-            'name' => 'Inventory',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'is_active' => true,
-        ]);
+        $definitions = [
+            '1100' => ['category' => 'cash_bank', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset'],
+            '4100' => ['category' => 'sales_revenue', 'name' => 'Sales', 'type' => 'revenue', 'subtype' => 'revenue'],
+            '5100' => ['category' => 'cogs', 'name' => 'COGS', 'type' => 'expense', 'subtype' => 'cogs'],
+            '1300' => ['category' => 'inventory', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset'],
+            '1120' => ['category' => 'bank', 'name' => 'QRIS', 'type' => 'asset', 'subtype' => 'current_asset'],
+            '2130' => ['category' => 'gift_card_liability', 'name' => 'Gift Card Liability', 'type' => 'liability', 'subtype' => 'short_term_liability'],
+            '2135' => ['category' => 'store_credit_liability', 'name' => 'Store Credit Liability', 'type' => 'liability', 'subtype' => 'short_term_liability'],
+            '5400' => ['category' => 'cash_variance', 'name' => 'Cash Variance', 'type' => 'expense', 'subtype' => 'operational_expense'],
+            '4190' => ['category' => 'gift_card_breakage', 'name' => 'Gift Card Breakage', 'type' => 'revenue', 'subtype' => 'revenue'],
+        ];
+
+        $codeToAccountId = [];
+        foreach ($definitions as $code => $meta) {
+            $account = Account::query()->firstOrCreate(
+                ['code' => $code],
+                [
+                    'tenant_id' => 1,
+                    'outlet_id' => $outletId,
+                    'scope' => 'outlet',
+                    'category' => $meta['category'],
+                    'name' => $meta['name'],
+                    'type' => $meta['type'],
+                    'subtype' => $meta['subtype'],
+                    'is_active' => true,
+                ],
+            );
+            $codeToAccountId[$code] = (int) $account->id;
+        }
+
+        $this->seedOutletPosMappingsFromAccounts($outletId, $codeToAccountId);
     }
 
     private function seedAdjustmentAccounts(int $outletId): void
     {
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'inventory',
-            'code' => '1300',
-            'name' => 'Inventory',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'is_active' => true,
-        ]);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'waste_expense',
-            'code' => '5200',
-            'name' => 'Waste Expense',
-            'type' => 'expense',
-            'subtype' => 'operational_expense',
-            'is_active' => true,
-        ]);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'stock_adjustment',
-            'code' => '5300',
-            'name' => 'Stock Adjustment',
-            'type' => 'expense',
-            'subtype' => 'operational_expense',
-            'is_active' => true,
-        ]);
+        $codes = [
+            '1300' => ['category' => 'inventory', 'name' => 'Inventory', 'type' => 'asset', 'subtype' => 'current_asset'],
+            '5200' => ['category' => 'waste_expense', 'name' => 'Waste Expense', 'type' => 'expense', 'subtype' => 'operational_expense'],
+            '5300' => ['category' => 'stock_adjustment', 'name' => 'Stock Adjustment', 'type' => 'expense', 'subtype' => 'operational_expense'],
+        ];
+
+        $accountIds = [];
+        foreach ($codes as $code => $meta) {
+            $account = Account::query()->firstOrCreate(
+                ['code' => $code],
+                [
+                    'tenant_id' => 1,
+                    'outlet_id' => $outletId,
+                    'scope' => 'outlet',
+                    'category' => $meta['category'],
+                    'name' => $meta['name'],
+                    'type' => $meta['type'],
+                    'subtype' => $meta['subtype'],
+                    'is_active' => true,
+                ],
+            );
+            $accountIds[$code] = (int) $account->id;
+        }
+
+        foreach ([
+            'inventory.asset' => $accountIds['1300'],
+            'inventory.waste' => $accountIds['5200'],
+            'inventory.adjustment' => $accountIds['5300'],
+        ] as $ruleKey => $chartAccountId) {
+            DB::table('accounting_posting_mappings')->updateOrInsert(
+                [
+                    'tenant_id' => null,
+                    'outlet_id' => $outletId,
+                    'module' => 'inventory',
+                    'rule_key' => $ruleKey,
+                ],
+                [
+                    'chart_account_id' => $chartAccountId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ],
+            );
+        }
     }
 }

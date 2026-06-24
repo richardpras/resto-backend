@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
         $this->call(TemplateAccountingSeeder::class);
         $this->call(EssentialCoaAccountsSeeder::class);
         $this->call(PaymentBankCoaLinkSeeder::class);
+        $this->call(AccountingPostingMappingsSeeder::class);
         $this->call(TemplatePayrollSeeder::class);
         $this->call(EmployeeSeeder::class);
 

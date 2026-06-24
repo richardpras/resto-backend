@@ -17,6 +17,7 @@ class AttendancePeriodLock extends Model
 
     protected $fillable = [
         'outlet_id',
+        'payroll_preparation_period_id',
         'period_start',
         'period_end',
         'status',
@@ -37,6 +38,11 @@ class AttendancePeriodLock extends Model
     public function outlet(): BelongsTo
     {
         return $this->belongsTo(Outlet::class);
+    }
+
+    public function payrollPreparationPeriod(): BelongsTo
+    {
+        return $this->belongsTo(PayrollPreparationPeriod::class, 'payroll_preparation_period_id');
     }
 
     public function approvedByUser(): BelongsTo

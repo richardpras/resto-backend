@@ -9,11 +9,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class GiftCardGlAccountingTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -87,7 +89,7 @@ class GiftCardGlAccountingTest extends TestCase
         $this->assertGreaterThan(0, $journalId);
         $lines = $this->journalLinesByCode($journalId);
 
-        $this->assertEquals(70000, $lines['1100']['debit'] ?? 0);
+        $this->assertEquals(70000, $lines['1120']['debit'] ?? 0);
         $this->assertEquals(30000, $lines['2130']['debit'] ?? 0);
         $this->assertEquals(100000, $lines['4100']['credit'] ?? 0);
         $this->assertEquals(0, DB::table('journals')->where('source_type', 'gift_card_settlement')->count());
@@ -306,6 +308,8 @@ class GiftCardGlAccountingTest extends TestCase
                 'updated_at' => now(),
             ]);
         }
+
+        $this->seedPosPostingAccountsAndMappings();
     }
 
     private function postSignedWebhook(string $provider, array $payload)

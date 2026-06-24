@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class PayrollPreparationPeriod extends Model
 {
@@ -54,5 +55,15 @@ class PayrollPreparationPeriod extends Model
     public function snapshots(): HasMany
     {
         return $this->hasMany(PayrollPreparationSnapshot::class, 'preparation_period_id');
+    }
+
+    public function attendancePeriodLock(): HasOne
+    {
+        return $this->hasOne(AttendancePeriodLock::class, 'payroll_preparation_period_id');
+    }
+
+    public function payrollRun(): HasOne
+    {
+        return $this->hasOne(PayrollRunV2::class, 'payroll_preparation_period_id');
     }
 }

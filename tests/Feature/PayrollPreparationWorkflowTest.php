@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Modules\HR\Domain\AttendanceDailySummary;
+use App\Models\Modules\HR\Domain\AttendancePeriodLock;
 use App\Models\Modules\HR\Domain\Employee;
 use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
 use App\Models\Modules\HR\Domain\PayrollPreparationSnapshot;
@@ -29,6 +30,7 @@ class PayrollPreparationWorkflowTest extends TestCase
     {
         $this->actingAsHrmApiAdministrator();
         [$employee, $outlet] = $this->seedFixtures();
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         AttendanceDailySummary::query()->create([
             'outlet_id' => $outlet->id,
@@ -50,6 +52,13 @@ class PayrollPreparationWorkflowTest extends TestCase
         ])->assertCreated();
 
         $periodId = (int) $periodRes->json('data.id');
+
+        $attendance = AttendancePeriodLock::query()->where('payroll_preparation_period_id', $periodId)->first();
+        $this->assertNotNull($attendance);
+
+        $this->postJson('/api/v1/payroll-preparation-periods/'.$periodId.'/generate')->assertStatus(422);
+
+        $this->patchJson('/api/v1/attendance/periods/'.$attendance->id.'/approve')->assertOk();
 
         $this->patchJson('/api/v1/payroll-preparation-periods/'.$periodId.'/approve')->assertStatus(422);
 

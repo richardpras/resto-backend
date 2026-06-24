@@ -44,9 +44,18 @@ class PayrollPreparationPeriodController extends Controller
         $period->employee_count = 0;
 
         return response()->json([
-            'message' => 'Payroll preparation period created.',
+            'message' => 'Payroll preparation period created with linked attendance period.',
             'data' => new PayrollPreparationPeriodResource($period),
         ], Response::HTTP_CREATED);
+    }
+
+    public function destroy(int $period): JsonResponse
+    {
+        $this->periodService->delete($this->resolveUser(), $period);
+
+        return response()->json([
+            'message' => 'Payroll preparation period deleted.',
+        ]);
     }
 
     public function approve(int $period): JsonResponse

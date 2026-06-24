@@ -4,9 +4,6 @@ namespace App\Modules\Accounting\Services;
 
 use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Accounting\Domain\AccountingPostingFailure;
-use App\Models\Modules\Accounting\Domain\Journal;
-use App\Models\User;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 
@@ -38,40 +35,6 @@ final class AccountingPostingIntegrityService
         }
     }
 
-    /**
-     * @param list<string> $categories
-     * @param list<string> $types
-     * @param list<string> $fallbackCodes
-     */
-    public function resolveAccountOrFail(string $category, array $fallbackCodes, array $types, ?int $outletId): Account
-    {
-        $account = $this->resolveAccount($category, $fallbackCodes, $types, $outletId);
-        if ($account === null) {
-            throw ValidationException::withMessages([
-                'accounts' => ["Missing active account mapping for category: {$category}."],
-            ]);
-        }
-
-        return $account;
-    }
-
-    /**
-     * @param list<string> $categories Each entry: "category|type1,type2|code1,code2"
-     */
-    public function assertRequiredMappings(array $mappingSpecs, ?int $outletId): void
-    {
-        foreach ($mappingSpecs as $spec) {
-            [$category, $typesCsv, $codesCsv] = array_pad(explode('|', $spec, 3), 3, '');
-            $types = $typesCsv !== '' ? explode(',', $typesCsv) : ['asset'];
-            $codes = $codesCsv !== '' ? explode(',', $codesCsv) : [];
-            if ($this->resolveAccount($category, $codes, $types, $outletId) === null) {
-                throw ValidationException::withMessages([
-                    'accounts' => ["Missing active account mapping for category: {$category}."],
-                ]);
-            }
-        }
-    }
-
     /** @param list<array{account_id:int|string,debit:float|int|string,credit:float|int|string}> $lines */
     public function assertBalancedLines(array $lines): void
     {
@@ -92,29 +55,6 @@ final class AccountingPostingIntegrityService
         if (round($debit, 2) !== round($credit, 2) || $debit <= 0) {
             throw new UnprocessableEntityHttpException('Journal is not balanced.');
         }
-    }
-
-    /** @param list<string> $fallbackCodes @param list<string> $types */
-    public function resolveAccount(string $category, array $fallbackCodes, array $types, ?int $outletId): ?Account
-    {
-        $query = Account::query()->whereIn('type', $types)->where('is_active', true);
-        if ($outletId !== null && $outletId > 0) {
-            $query->where(function ($q) use ($outletId): void {
-                $q->where('outlet_id', $outletId)->orWhereNull('outlet_id');
-            });
-        }
-        $byCategory = (clone $query)->where('category', $category)->orderByRaw('outlet_id is null')->first();
-        if ($byCategory !== null) {
-            return $byCategory;
-        }
-        foreach ($fallbackCodes as $code) {
-            $candidate = (clone $query)->where('code', $code)->orderByRaw('outlet_id is null')->first();
-            if ($candidate !== null) {
-                return $candidate;
-            }
-        }
-
-        return (clone $query)->orderBy('id')->first();
     }
 
     public function classifyError(\Throwable $e): string

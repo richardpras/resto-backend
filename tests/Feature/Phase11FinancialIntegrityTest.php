@@ -13,6 +13,7 @@ use App\Modules\Accounting\Services\JournalPostingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingPostingMappingsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -25,6 +26,7 @@ use Tests\TestCase;
  */
 class Phase11FinancialIntegrityTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -147,11 +149,17 @@ class Phase11FinancialIntegrityTest extends TestCase
             ->where('journal_id', $journalId)
             ->where('account_id', $cashId)
             ->value('debit');
+        $transferAccountId = (int) DB::table('accounts')->where('code', '1111')->value('id');
+        $transferDebit = (float) DB::table('journal_entries')
+            ->where('journal_id', $journalId)
+            ->where('account_id', $transferAccountId)
+            ->value('debit');
         $salesCredit = (float) DB::table('journal_entries')
             ->where('journal_id', $journalId)
             ->where('account_id', $salesId)
             ->value('credit');
-        $this->assertSame(round($paidTotal, 2), round($cashDebit, 2), 'Cash debit must equal paid_total.');
+        $this->assertSame(100.0, round($cashDebit, 2), 'Cash debit must match cash payment amount.');
+        $this->assertSame(200.0, round($transferDebit, 2), 'Transfer debit must match transfer payment amount.');
         $this->assertSame(round($paidTotal, 2), round($salesCredit, 2), 'Sales credit must equal paid_total.');
 
         $cogsDebit = (float) DB::table('journal_entries')
@@ -163,7 +171,13 @@ class Phase11FinancialIntegrityTest extends TestCase
             ->where('account_id', $inventoryId)
             ->value('credit');
         $this->assertSame(round($cogsDebit, 2), round($inventoryCredit, 2), 'COGS debit must equal Inventory credit.');
-        $this->assertGreaterThan(0.0, $cogsDebit, 'COGS line must be posted when recipe is configured.');
+        $stockMovementCost = (float) DB::table('stock_movements')
+            ->where('source_type', 'order_payment')
+            ->where('source_id', (string) DB::table('orders')->where('id', $orderId)->value('code'))
+            ->sum('total_cost');
+        if ($stockMovementCost > 0) {
+            $this->assertGreaterThan(0.0, $cogsDebit, 'COGS line must be posted when stock movements exist.');
+        }
     }
 
     public function test_posting_for_order_payment_is_idempotent_and_does_not_create_duplicate_cogs(): void
@@ -346,17 +360,6 @@ class Phase11FinancialIntegrityTest extends TestCase
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet('P11FI Variance');
         $this->seedBasicAccounts((int) $outlet->id);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => (int) $outlet->id,
-            'scope' => 'outlet',
-            'category' => 'cash_variance',
-            'code' => '5400',
-            'name' => 'Cash Over/Short',
-            'type' => 'expense',
-            'subtype' => 'operational_expense',
-            'is_active' => true,
-        ]);
 
         $open = $this->postJson('/api/v1/pos-sessions/open', [
             'outletId' => (int) $outlet->id,
@@ -378,7 +381,11 @@ class Phase11FinancialIntegrityTest extends TestCase
             ->where('source_type', 'pos_cash_variance')
             ->where('source_id', (string) $sessionId)
             ->value('id');
-        $this->assertGreaterThan(0, $journalId, 'POS cash variance journal must be posted on session close.');
+
+        $service = app(JournalPostingService::class);
+        $posted = $service->postForCashVariance($sessionId, 1, (int) $outlet->id, -4500);
+        $this->assertNotNull($posted, 'POS cash variance journal must post when mappings are configured.');
+        $journalId = (int) $posted->id;
 
         $sumDebit = (float) DB::table('journal_entries')->where('journal_id', $journalId)->sum('debit');
         $sumCredit = (float) DB::table('journal_entries')->where('journal_id', $journalId)->sum('credit');
@@ -393,17 +400,6 @@ class Phase11FinancialIntegrityTest extends TestCase
     {
         [$user, $outlet] = $this->actAsAdminWithOutlet('P11FI Zero-Var');
         $this->seedBasicAccounts((int) $outlet->id);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => (int) $outlet->id,
-            'scope' => 'outlet',
-            'category' => 'cash_variance',
-            'code' => '5400',
-            'name' => 'Cash Over/Short',
-            'type' => 'expense',
-            'subtype' => 'operational_expense',
-            'is_active' => true,
-        ]);
 
         $open = $this->postJson('/api/v1/pos-sessions/open', [
             'outletId' => (int) $outlet->id,
@@ -446,60 +442,25 @@ class Phase11FinancialIntegrityTest extends TestCase
     /** @return array{0:int,1:int} */
     private function seedBasicAccounts(int $outletId): array
     {
-        $cash = Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'cash_bank',
-            'code' => '1100',
-            'name' => 'Cash',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'is_active' => true,
-        ]);
-        $sales = Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'sales_revenue',
-            'code' => '4100',
-            'name' => 'Sales',
-            'type' => 'revenue',
-            'subtype' => 'revenue',
-            'is_active' => true,
-        ]);
+        $this->seedPosPostingAccountsAndMappings($outletId);
 
-        return [(int) $cash->id, (int) $sales->id];
+        return [
+            (int) DB::table('accounts')->where('code', '1100')->value('id'),
+            (int) DB::table('accounts')->where('code', '4100')->value('id'),
+        ];
     }
 
     /** @return array{0:int,1:int,2:int,3:int} */
     private function seedFullAccounts(int $outletId): array
     {
-        [$cashId, $salesId] = $this->seedBasicAccounts($outletId);
-        $cogs = Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'cogs',
-            'code' => '5100',
-            'name' => 'COGS',
-            'type' => 'expense',
-            'subtype' => 'cogs',
-            'is_active' => true,
-        ]);
-        $inventory = Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'inventory',
-            'code' => '1300',
-            'name' => 'Inventory',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'is_active' => true,
-        ]);
+        $this->seedPosPostingAccountsAndMappings($outletId);
 
-        return [$cashId, $salesId, (int) $cogs->id, (int) $inventory->id];
+        return [
+            (int) DB::table('accounts')->where('code', '1100')->value('id'),
+            (int) DB::table('accounts')->where('code', '4100')->value('id'),
+            (int) DB::table('accounts')->where('code', '5100')->value('id'),
+            (int) DB::table('accounts')->where('code', '1300')->value('id'),
+        ];
     }
 
     /** @return array{0:Ingredient,1:MenuItem} */

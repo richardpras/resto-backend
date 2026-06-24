@@ -4,11 +4,15 @@ namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\AccountingPostingMappingsFixture;
+use Tests\Concerns\PayrollPostingAccountsFixture;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
 class PayrollReconciliationTest extends TestCase
 {
+    use AccountingPostingMappingsFixture;
+    use PayrollPostingAccountsFixture;
     use RefreshDatabase;
     use UserManagementApiFixture;
 
@@ -17,11 +21,13 @@ class PayrollReconciliationTest extends TestCase
         parent::setUp();
         config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
         Artisan::call('passport:keys', ['--force' => true]);
+        $this->seedPayrollPostingAccounts();
     }
 
     public function test_payroll_reconciliation_endpoint_returns_report(): void
     {
         $this->actingAsUserManagementApiAdministrator();
+        $this->seedPayrollPostingMappings();
 
         $this->getJson('/api/v1/accounting/reconciliation/payroll')
             ->assertOk()

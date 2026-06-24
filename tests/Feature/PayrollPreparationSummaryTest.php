@@ -30,6 +30,7 @@ class PayrollPreparationSummaryTest extends TestCase
     {
         $this->actingAsHrmApiAdministrator();
         [$employee, $outlet] = $this->seedFixtures();
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         $periodRes = $this->postJson('/api/v1/payroll-preparation-periods', [
             'outletId' => $outlet->id,
@@ -47,6 +48,9 @@ class PayrollPreparationSummaryTest extends TestCase
             'request_count' => 1,
         ]);
 
+        $attendance = AttendancePeriodLock::query()->where('payroll_preparation_period_id', $periodId)->first();
+        $this->patchJson('/api/v1/attendance/periods/'.$attendance->id.'/approve')->assertOk();
+
         $this->postJson('/api/v1/payroll-preparation-periods/'.$periodId.'/generate')->assertOk();
 
         $this->getJson('/api/v1/payroll-preparation-periods/'.$periodId.'/summary')
@@ -54,21 +58,15 @@ class PayrollPreparationSummaryTest extends TestCase
             ->assertJsonPath('data.employeeCount', 1)
             ->assertJsonPath('data.overtimeHours', 1.5);
 
-        $payrollCountBefore = \Illuminate\Support\Facades\DB::table('payrolls')->count();
+        $payrollCountBefore = \Illuminate\Support\Facades\DB::table('payroll_runs_v2')->count();
         $this->assertSame(0, $payrollCountBefore);
     }
 
-    public function test_draft_attendance_period_zeros_attendance_metrics(): void
+    public function test_generate_rejected_while_attendance_period_still_draft(): void
     {
         $this->actingAsHrmApiAdministrator();
         [$employee, $outlet] = $this->seedFixtures();
-
-        AttendancePeriodLock::query()->create([
-            'outlet_id' => $outlet->id,
-            'period_start' => '2026-12-01',
-            'period_end' => '2026-12-07',
-            'status' => AttendancePeriodLock::STATUS_DRAFT,
-        ]);
+        $this->grantHrmApiUserOutletAccess((int) $outlet->id);
 
         AttendanceDailySummary::query()->create([
             'outlet_id' => $outlet->id,
@@ -90,16 +88,9 @@ class PayrollPreparationSummaryTest extends TestCase
         ])->assertCreated();
 
         $periodId = (int) $periodRes->json('data.id');
-        $this->postJson('/api/v1/payroll-preparation-periods/'.$periodId.'/generate')->assertOk();
+        $this->postJson('/api/v1/payroll-preparation-periods/'.$periodId.'/generate')->assertStatus(422);
 
-        $snapshot = PayrollPreparationSnapshot::query()
-            ->where('preparation_period_id', $periodId)
-            ->where('employee_id', $employee->id)
-            ->first();
-
-        $this->assertNotNull($snapshot);
-        $this->assertSame(0, (int) $snapshot->attended_days);
-        $this->assertTrue($snapshot->review_required);
+        $this->assertSame(0, PayrollPreparationSnapshot::query()->where('preparation_period_id', $periodId)->count());
     }
 
     /**
