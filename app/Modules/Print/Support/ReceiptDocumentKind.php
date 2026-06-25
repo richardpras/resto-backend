@@ -5,6 +5,7 @@ namespace App\Modules\Print\Support;
 enum ReceiptDocumentKind: string
 {
     case CustomerReceipt = 'customer_receipt';
+    case CustomerBill = 'customer_bill';
     case KitchenChit = 'kitchen_chit';
     case PaymentReceipt = 'payment_receipt';
     case QrReceipt = 'qr_receipt';

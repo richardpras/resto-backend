@@ -202,6 +202,114 @@ class PrinterRoutingService
     }
 
     /**
+     * Reprint kitchen tickets for a subset of order items (new idempotency key per request).
+     *
+     * @param  list<int>  $orderItemIds
+     * @return array{printJobIds:list<int>,groupedByStation:list<array{station:string,menuCategoryName:string,itemCount:int}>}
+     */
+    public function queueKitchenReprintForOrderItems(Order $order, array $orderItemIds): array
+    {
+        if (! (bool) config('print.category_mapping.enabled', true)) {
+            return ['printJobIds' => [], 'groupedByStation' => []];
+        }
+
+        $order->loadMissing('items');
+        $idSet = array_flip($orderItemIds);
+        $items = $this->withRoutingContextForOrderItems($order)
+            ->filter(fn (array $item): bool => isset($idSet[(int) ($item['order_item_id'] ?? 0)]))
+            ->values();
+
+        $outletId = (int) ($order->outlet_id ?? 0);
+        if ($outletId < 1 || $items->isEmpty()) {
+            return ['printJobIds' => [], 'groupedByStation' => []];
+        }
+
+        $categoryMappings = MenuCategoryPrinterMapping::query()
+            ->where('outlet_id', $outletId)
+            ->where('is_active', true)
+            ->orderBy('priority')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('menu_category_id')
+            ->map(fn (Collection $rows) => $rows->first());
+
+        $groups = [];
+        foreach ($items as $item) {
+            $stationResolution = $this->stationResolver->resolveForOrderItemRow($item, $outletId);
+            if ($stationResolution['skip']) {
+                continue;
+            }
+
+            $resolved = $this->resolveKitchenRouteForItem($categoryMappings, $item, $outletId);
+            if ($resolved === null) {
+                continue;
+            }
+
+            $menuCategoryId = (int) $resolved['menuCategoryId'];
+            $resolvedProfileId = (int) $resolved['printerProfileId'];
+            $groupKey = $menuCategoryId.'|'.$resolvedProfileId;
+
+            if (! isset($groups[$groupKey])) {
+                $groups[$groupKey] = [
+                    'items' => [],
+                    'meta' => [
+                        'resolution_layer' => $resolved['resolutionLayer'],
+                        'menu_category_id' => $menuCategoryId,
+                        'menu_category_name' => $resolved['menuCategoryName'],
+                        'source_category' => $resolved['menuCategoryName'],
+                        'resolved_printer_profile_id' => $resolvedProfileId,
+                        'matched_category_mapping_id' => $resolved['categoryMappingId'],
+                    ],
+                ];
+            }
+            $groups[$groupKey]['items'][] = $item;
+        }
+
+        $printJobIds = [];
+        $groupedByStation = [];
+        $sortedItemKey = sha1(implode(',', collect($orderItemIds)->sort()->values()->all()));
+
+        foreach ($groups as $group) {
+            /** @var array<string,mixed> $routeResolutionMeta */
+            $routeResolutionMeta = $group['meta'];
+            /** @var array<int,array<string,mixed>> $groupItems */
+            $groupItems = $group['items'];
+            $menuCategoryId = (int) ($routeResolutionMeta['menu_category_id'] ?? 0);
+            $groupProfileId = (int) ($routeResolutionMeta['resolved_printer_profile_id'] ?? 0);
+
+            $job = $this->enqueuePrintJob(
+                outletId: $outletId,
+                sourceType: 'order',
+                sourceId: (int) $order->id,
+                type: 'kitchen',
+                route: null,
+                printableSnapshot: [
+                    'order_id' => (int) $order->id,
+                    'category' => $routeResolutionMeta['menu_category_name'] ?? null,
+                    'menu_category_id' => $menuCategoryId,
+                    'resolved_printer_profile_id' => $groupProfileId,
+                    'thermal_width_chars' => $this->thermalPaperWidthResolver->resolveWidthCharsForProfileId($groupProfileId),
+                    'route_resolution' => $routeResolutionMeta,
+                    'items' => array_values($groupItems),
+                    'reprint' => true,
+                ],
+                idempotencyKey: 'kitchen-reprint-'.(int) $order->id.'-'.$sortedItemKey.'-cat-'.$menuCategoryId.'-'.uniqid('', true),
+                routeResolutionMeta: $routeResolutionMeta,
+                resolvedProfileId: $groupProfileId,
+            );
+
+            $printJobIds[] = (int) $job->id;
+            $groupedByStation[] = [
+                'station' => (string) ($routeResolutionMeta['resolution_layer'] ?? 'kitchen'),
+                'menuCategoryName' => (string) ($routeResolutionMeta['menu_category_name'] ?? ''),
+                'itemCount' => count($groupItems),
+            ];
+        }
+
+        return ['printJobIds' => $printJobIds, 'groupedByStation' => $groupedByStation];
+    }
+
+    /**
      * @return array{route: ?PrinterRoute, resolvedProfileId: ?int}
      */
     private function resolveReceiptRouting(int $outletId): array

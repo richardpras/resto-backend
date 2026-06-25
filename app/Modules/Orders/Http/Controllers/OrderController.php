@@ -5,9 +5,10 @@ namespace App\Modules\Orders\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Http\Requests\AddOrderPaymentsRequest;
-use App\Modules\Orders\Http\Requests\ListOrdersRequest;
+use App\Modules\Orders\Http\Requests\KitchenReprintRequest;
 use App\Modules\Orders\Http\Requests\NextOrderCodeRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderSplitRequest;
+use App\Modules\Orders\Http\Requests\SyncOrderSplitsRequest;
 use App\Modules\Orders\Http\Requests\ShiftClosePostingRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderSplitRequest;
@@ -22,6 +23,8 @@ use App\Modules\Orders\Services\PaymentAllocationService;
 use App\Modules\Orders\Services\OrderCodeAllocationService;
 use App\Modules\Orders\Services\OrderService;
 use App\Modules\Orders\Services\SplitBillService;
+use App\Modules\Print\Services\KitchenReprintService;
+use App\Models\Modules\Orders\Domain\Order;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -33,6 +36,7 @@ class OrderController extends Controller
         private readonly SplitBillService $splitBillService,
         private readonly PaymentAllocationService $paymentAllocationService,
         private readonly OrderCodeAllocationService $orderCodeAllocationService,
+        private readonly KitchenReprintService $kitchenReprintService,
     ) {}
 
     public function nextCode(NextOrderCodeRequest $request): JsonResponse
@@ -227,6 +231,42 @@ class OrderController extends Controller
             'message' => 'Order split created successfully.',
             'data' => new OrderSplitResource($split),
         ], Response::HTTP_CREATED);
+    }
+
+    public function syncSplits(SyncOrderSplitsRequest $request, int $order): JsonResponse
+    {
+        $user = $this->resolveAuthenticatedUser($request);
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+        $validated = $request->validated();
+        $splits = $this->splitBillService->syncSplits(
+            $user,
+            $order,
+            $validated['persons'],
+            $validated['idempotencyKey'] ?? $request->header('Idempotency-Key'),
+            $validated['expectedUpdatedAt'] ?? null,
+        );
+
+        return response()->json([
+            'message' => 'Order splits synced successfully.',
+            'data' => OrderSplitResource::collection($splits),
+        ]);
+    }
+
+    public function kitchenReprint(KitchenReprintRequest $request, int $order): JsonResponse
+    {
+        $user = $this->resolveAuthenticatedUser($request);
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
+        $orderModel = Order::query()->findOrFail($order);
+        $result = $this->kitchenReprintService->reprintItems(
+            $user,
+            $orderModel,
+            $request->validated('orderItemIds'),
+        );
+
+        return response()->json([
+            'message' => 'Kitchen reprint queued successfully.',
+            'data' => $result,
+        ]);
     }
 
     public function updateSplit(UpdateOrderSplitRequest $request, int $order, int $split): JsonResponse

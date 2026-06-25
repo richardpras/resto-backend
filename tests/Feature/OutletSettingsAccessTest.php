@@ -312,22 +312,38 @@ class OutletSettingsAccessTest extends TestCase
             ->assertJsonPath('data.id', $assignedOutlet->id);
     }
 
+    public function test_settings_update_only_user_cannot_create_outlet(): void
+    {
+        [$assignedOutlet] = $this->actingAsScopedSettingsUser();
+
+        $this->postJson('/api/v1/outlets', [
+            'name' => 'New Scoped Outlet',
+            'address' => 'Addr',
+            'phone' => '0800',
+            'manager' => 'M',
+            'status' => 'active',
+        ])->assertForbidden();
+
+        $this->assertDatabaseMissing('outlets', ['name' => 'New Scoped Outlet']);
+        $this->assertDatabaseHas('outlets', ['id' => $assignedOutlet->id]);
+    }
+
     public function test_non_owner_cannot_delete_unassigned_outlet(): void
     {
         [$assignedOutlet, $unassignedOutlet] = $this->actingAsScopedSettingsUser();
 
-        $this->deleteJson('/api/v1/outlets/'.$unassignedOutlet->id)->assertNotFound();
+        $this->deleteJson('/api/v1/outlets/'.$unassignedOutlet->id)->assertForbidden();
         $this->assertDatabaseHas('outlets', ['id' => $unassignedOutlet->id]);
 
-        $this->deleteJson('/api/v1/outlets/'.$assignedOutlet->id)->assertOk();
-        $this->assertDatabaseMissing('outlets', ['id' => $assignedOutlet->id]);
+        $this->deleteJson('/api/v1/outlets/'.$assignedOutlet->id)->assertForbidden();
+        $this->assertDatabaseHas('outlets', ['id' => $assignedOutlet->id]);
     }
 
     public function test_non_owner_cannot_delete_unassigned_outlet_even_with_valid_token(): void
     {
         [, $unassignedOutlet] = $this->actingAsScopedSettingsUser();
 
-        $this->deleteJson('/api/v1/outlets/'.$unassignedOutlet->id)->assertNotFound();
+        $this->deleteJson('/api/v1/outlets/'.$unassignedOutlet->id)->assertForbidden();
         $this->assertDatabaseHas('outlets', ['id' => $unassignedOutlet->id]);
     }
 

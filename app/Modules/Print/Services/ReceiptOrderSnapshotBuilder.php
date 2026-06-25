@@ -101,6 +101,31 @@ final class ReceiptOrderSnapshotBuilder
         ];
     }
 
+    /**
+     * Proforma bill snapshot (unpaid order, no payment rows).
+     *
+     * @param  array{outletName:string,header:string,footer:string,showTaxBreakdown:bool,showLogo:bool,logoVersion:int,logoUrl:?string}  $receiptBranding
+     * @return array<string,mixed>
+     */
+    public function buildBillFromOrder(
+        Order $order,
+        int $outletId,
+        ?User $cashier,
+        array $receiptBranding,
+    ): array {
+        $snapshot = $this->buildFromOrder($order, $outletId, $cashier, null, $receiptBranding);
+        $balanceDue = max(0.0, (float) ($order->balance_due ?? ((float) $order->total - (float) $order->paid_total)));
+
+        $snapshot['payments'] = [];
+        $snapshot['paid_total'] = (float) $order->paid_total;
+        $snapshot['balance_due'] = $balanceDue;
+        $snapshot['is_proforma'] = true;
+        $snapshot['document_title'] = 'BILL';
+        $snapshot['paid_at'] = null;
+
+        return $snapshot;
+    }
+
     public function splitDueAmount(Order $order, int $splitId): float
     {
         $order->loadMissing(['orderPromotion', 'orderVoucher', 'splits.items']);

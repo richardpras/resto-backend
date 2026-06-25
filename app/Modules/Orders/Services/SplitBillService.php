@@ -6,6 +6,7 @@ use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItem;
 use App\Models\Modules\Orders\Domain\OrderSplit;
 use App\Models\Modules\Orders\Domain\OrderSplitItem;
+use App\Models\Modules\Orders\Domain\Payment;
 use App\Models\User;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -54,6 +55,83 @@ class SplitBillService
                     $this->auditLogService->log('split.created', 'order_split', (int) $split->id, (int) $order->outlet_id, $user, ['orderId' => (int) $order->id]);
 
                     return $split->fresh('items') ?? $split->load('items');
+                }
+            );
+        });
+    }
+
+    /**
+     * Replace or create all guest splits before incremental payment begins.
+     *
+     * @param  list<array{splitType:string,label:string,items:list<array{orderItemId:int,qty:float,amount:float}>}>  $persons
+     * @return Collection<int, OrderSplit>
+     */
+    public function syncSplits(User $user, int $orderId, array $persons, ?string $idempotencyKey = null, ?string $expectedUpdatedAt = null): Collection
+    {
+        return DB::transaction(function () use ($user, $orderId, $persons, $idempotencyKey, $expectedUpdatedAt): Collection {
+            return $this->idempotencyService->run(
+                'orders.splits.sync.'.$orderId,
+                $idempotencyKey,
+                ['persons' => $persons, 'expectedUpdatedAt' => $expectedUpdatedAt],
+                function () use ($user, $orderId, $persons, $expectedUpdatedAt): Collection {
+                    $order = $this->findScopedOrderForUpdate($user, $orderId);
+                    $this->optimisticConcurrencyService->assertNotStale($order, $expectedUpdatedAt);
+                    $this->assertOrderEditable($order);
+
+                    $normalized = collect($persons)->map(fn (array $person): array => [
+                        'splitType' => (string) ($person['splitType'] ?? 'by_item'),
+                        'label' => (string) ($person['label'] ?? ''),
+                        'items' => collect($person['items'] ?? [])->map(fn (array $item): array => [
+                            'orderItemId' => (int) ($item['orderItemId'] ?? 0),
+                            'qty' => (float) ($item['qty'] ?? 0),
+                            'amount' => (float) ($item['amount'] ?? 0),
+                        ])->values()->all(),
+                    ])->values()->all();
+
+                    $this->validateGlobalSplitAllocation($order, $normalized);
+
+                    $hasSplitPayments = Payment::query()
+                        ->where('order_id', $order->id)
+                        ->whereNotNull('order_split_id')
+                        ->where('status', 'paid')
+                        ->exists();
+
+                    if ($hasSplitPayments) {
+                        $existing = OrderSplit::query()
+                            ->where('order_id', $order->id)
+                            ->with('items')
+                            ->orderBy('id')
+                            ->get();
+
+                        if ($existing->count() !== count($normalized)) {
+                            throw ValidationException::withMessages([
+                                'persons' => ['Cannot reshuffle splits after guests have paid.'],
+                            ]);
+                        }
+
+                        return $existing;
+                    }
+
+                    $splitIds = OrderSplit::query()->where('order_id', $order->id)->pluck('id');
+                    if ($splitIds->isNotEmpty()) {
+                        OrderSplitItem::query()->whereIn('order_split_id', $splitIds)->delete();
+                        OrderSplit::query()->whereIn('id', $splitIds)->delete();
+                    }
+
+                    $created = collect();
+                    foreach ($normalized as $person) {
+                        $split = OrderSplit::query()->create([
+                            'order_id' => $order->id,
+                            'split_type' => $person['splitType'],
+                            'label' => $person['label'],
+                            'status' => 'open',
+                        ]);
+                        $this->replaceSplitItems($split, $person['items']);
+                        $this->auditLogService->log('split.synced', 'order_split', (int) $split->id, (int) $order->outlet_id, $user, ['orderId' => (int) $order->id]);
+                        $created->push($split->fresh('items') ?? $split->load('items'));
+                    }
+
+                    return $created;
                 }
             );
         });
@@ -135,6 +213,55 @@ class SplitBillService
             throw ValidationException::withMessages([
                 'paymentStatus' => ['Only unpaid/partial orders can be split or updated.'],
             ]);
+        }
+    }
+
+    /**
+     * @param  list<array{splitType:string,label:string,items:list<array{orderItemId:int,qty:float,amount:float}>}>  $persons
+     */
+    private function validateGlobalSplitAllocation(Order $order, array $persons): void
+    {
+        $orderItems = OrderItem::query()
+            ->where('order_id', $order->id)
+            ->get(['id', 'qty', 'line_total'])
+            ->keyBy('id');
+
+        $qtyTotals = [];
+        $amountTotals = [];
+        foreach ($persons as $person) {
+            foreach ($person['items'] as $item) {
+                $orderItemId = (int) $item['orderItemId'];
+                if (! $orderItems->has($orderItemId)) {
+                    throw ValidationException::withMessages([
+                        'persons' => ['Split item does not belong to this order.'],
+                    ]);
+                }
+                if ($item['qty'] <= 0 || $item['amount'] <= 0) {
+                    throw ValidationException::withMessages([
+                        'persons' => ['Split qty and amount must be greater than zero.'],
+                    ]);
+                }
+                $qtyTotals[$orderItemId] = ($qtyTotals[$orderItemId] ?? 0) + (float) $item['qty'];
+                $amountTotals[$orderItemId] = ($amountTotals[$orderItemId] ?? 0) + (float) $item['amount'];
+            }
+        }
+
+        foreach ($qtyTotals as $orderItemId => $qtySum) {
+            $row = $orderItems->get($orderItemId);
+            if ($qtySum > ((float) $row->qty + 0.00001)) {
+                throw ValidationException::withMessages([
+                    'persons' => ['Split allocation qty exceeds order item qty.'],
+                ]);
+            }
+        }
+
+        foreach ($amountTotals as $orderItemId => $amountSum) {
+            $row = $orderItems->get($orderItemId);
+            if ($amountSum > ((float) $row->line_total + 0.00001)) {
+                throw ValidationException::withMessages([
+                    'persons' => ['Split allocation amount exceeds order item line total.'],
+                ]);
+            }
         }
     }
 

@@ -200,6 +200,8 @@ Route::prefix('v1')->group(function (): void {
     Route::get('orders/{order}/promotion-preview', [OrderPromotionController::class, 'preview'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('promotions/evaluate', [PromotionController::class, 'evaluate'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/splits', [OrderController::class, 'storeSplit'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/splits/sync', [OrderController::class, 'syncSplits'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::post('orders/{order}/kitchen-reprint', [OrderController::class, 'kitchenReprint'])->middleware(['auth:api', 'permission:pos.use']);
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('pos/bootstrap', [\App\Modules\Orders\Http\Controllers\PosBootstrapController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
@@ -837,12 +839,12 @@ Route::prefix('v1')->group(function (): void {
         Route::post('permissions', [PermissionController::class, 'store'])->middleware('permission:permissions.create');
 
         Route::get('merchant-settings', [MerchantSettingsController::class, 'show'])->middleware('permission:settings.view');
-        Route::patch('merchant-settings', [MerchantSettingsController::class, 'update'])->middleware('permission:settings.update');
+        Route::patch('merchant-settings', [MerchantSettingsController::class, 'update'])->middleware('permission:settings.manage');
 
         Route::get('outlets', [OutletSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
-        Route::post('outlets', [OutletSettingsCrudController::class, 'store'])->middleware('permission:settings.update');
+        Route::post('outlets', [OutletSettingsCrudController::class, 'store'])->middleware('permission:settings.manage');
         Route::patch('outlets/{outletId}', [OutletSettingsCrudController::class, 'update'])->middleware('permission:settings.update');
-        Route::delete('outlets/{outletId}', [OutletSettingsCrudController::class, 'destroy'])->middleware('permission:settings.update');
+        Route::delete('outlets/{outletId}', [OutletSettingsCrudController::class, 'destroy'])->middleware('permission:settings.manage');
         Route::post('outlets/{outletId}/logo', [OutletLogoController::class, 'upload'])->middleware('permission:settings.update');
         Route::delete('outlets/{outletId}/logo', [OutletLogoController::class, 'destroy'])->middleware('permission:settings.update');
 

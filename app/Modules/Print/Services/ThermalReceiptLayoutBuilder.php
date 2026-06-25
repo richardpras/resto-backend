@@ -25,6 +25,12 @@ class ThermalReceiptLayoutBuilder
             $lines[] = ['text' => $outletName, 'bold' => true, 'align' => 'center'];
         }
 
+        $isProforma = (bool) ($snapshot['is_proforma'] ?? false);
+        if ($isProforma) {
+            $lines[] = ['text' => 'BILL', 'bold' => true, 'align' => 'center'];
+            $lines[] = ['text' => 'NOT PAID', 'bold' => true, 'align' => 'center'];
+        }
+
         $header = trim((string) ($branding['header'] ?? ''));
         if ($header !== '') {
             foreach (preg_split("/\r\n|\n|\r/", $header) ?: [] as $headerLine) {
@@ -117,9 +123,14 @@ class ThermalReceiptLayoutBuilder
             $width,
         ), 'bold' => true];
 
+        if ($isProforma) {
+            $balanceDue = (float) ($snapshot['balance_due'] ?? 0.0);
+            $lines[] = ['text' => $this->formatColumns('Balance Due', $this->money($balanceDue), $width), 'bold' => true];
+        }
+
         /** @var list<array<string,mixed>> $payments */
         $payments = is_array($snapshot['payments'] ?? null) ? $snapshot['payments'] : [];
-        if ($payments !== []) {
+        if (! $isProforma && $payments !== []) {
             $lines[] = ['text' => $divider, 'align' => 'center'];
             foreach ($payments as $payment) {
                 $label = trim((string) ($payment['label'] ?? $payment['method'] ?? 'Payment'));
@@ -165,8 +176,11 @@ class ThermalReceiptLayoutBuilder
      */
     public function buildCustomerReceiptDocument(array $snapshot, int $width, ?array $thermalRaster = null): array
     {
+        $isBill = (bool) ($snapshot['is_proforma'] ?? false);
         $document = [
-            'lines' => $this->buildCustomerReceipt($snapshot, $width),
+            'lines' => $isBill
+                ? $this->buildCustomerBill($snapshot, $width)
+                : $this->buildCustomerReceipt($snapshot, $width),
             'cut' => true,
         ];
 
@@ -183,6 +197,17 @@ class ThermalReceiptLayoutBuilder
         }
 
         return $document;
+    }
+
+    /**
+     * @param  array<string,mixed>  $snapshot
+     * @return list<array{text:string,bold?:bool,align?:string}>
+     */
+    public function buildCustomerBill(array $snapshot, int $width): array
+    {
+        $snapshot = array_merge($snapshot, ['is_proforma' => true, 'payments' => []]);
+
+        return $this->buildCustomerReceipt($snapshot, $width);
     }
 
     /**

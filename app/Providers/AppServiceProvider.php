@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\CustomerDemoSeedCommand;
 use App\Console\Commands\DemoSeedCommand;
 use App\Console\Commands\ExpirePendingPaymentsCommand;
 use App\Console\Commands\FailedJobMonitorCommand;
@@ -54,6 +55,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PaymentTransactionRepositoryInterface::class, EloquentPaymentTransactionRepository::class);
         $this->commands([
             DemoSeedCommand::class,
+            CustomerDemoSeedCommand::class,
             ReconcileStalePaymentsCommand::class,
             ExpirePendingPaymentsCommand::class,
             SyncStaffNotificationsCommand::class,

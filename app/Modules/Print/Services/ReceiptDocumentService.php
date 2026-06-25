@@ -288,7 +288,7 @@ class ReceiptDocumentService
         ?int $orderSplitId,
     ): array {
         return match ($sourceType) {
-            'order' => $this->snapshotFromOrder($user, $outletId, $sourceId, $orderSplitId),
+            'order' => $this->snapshotFromOrder($user, $outletId, $sourceId, $orderSplitId, $kind),
             'pos_session' => $this->snapshotFromPosSession($outletId, $sourceId),
             'payment_transaction' => $this->snapshotFromPaymentTx($outletId, $sourceId),
             default => throw ValidationException::withMessages(['sourceType' => ['Unsupported document source type.']]),
@@ -298,11 +298,17 @@ class ReceiptDocumentService
     /**
      * @return array<string,mixed>
      */
-    private function snapshotFromOrder(User $user, int $outletId, int $orderId, ?int $splitId): array
+    private function snapshotFromOrder(User $user, int $outletId, int $orderId, ?int $splitId, ?ReceiptDocumentKind $kind = null): array
     {
         $order = Order::query()->find($orderId);
         if ($order === null) {
             throw ValidationException::withMessages(['sourceId' => ['Order not found for outlet.']]);
+        }
+
+        $branding = $this->resolveReceiptBranding($outletId);
+
+        if ($kind === ReceiptDocumentKind::CustomerBill) {
+            return $this->orderSnapshotBuilder->buildBillFromOrder($order, $outletId, $user, $branding);
         }
 
         return $this->orderSnapshotBuilder->buildFromOrder(
@@ -310,7 +316,7 @@ class ReceiptDocumentService
             $outletId,
             $user,
             $splitId,
-            $this->resolveReceiptBranding($outletId),
+            $branding,
         );
     }
 
@@ -430,6 +436,7 @@ class ReceiptDocumentService
             ReceiptDocumentKind::KitchenChit => 'KITCHEN TICKET',
             ReceiptDocumentKind::CashierCloseSummary => 'CLOSE SUMMARY',
             ReceiptDocumentKind::PaymentReceipt => 'PAYMENT',
+            ReceiptDocumentKind::CustomerBill => 'BILL',
             ReceiptDocumentKind::FiscalInvoice, ReceiptDocumentKind::CustomerReceipt => 'RECEIPT',
             ReceiptDocumentKind::QrReceipt => 'QR RECEIPT',
         };
@@ -495,7 +502,10 @@ class ReceiptDocumentService
      */
     private function buildBrandedCustomerReceiptLines(array $context, int $width): array
     {
-        $structured = $this->thermalReceiptLayout->buildCustomerReceipt($context, $width);
+        $isBill = (bool) ($context['is_proforma'] ?? false);
+        $structured = $isBill
+            ? $this->thermalReceiptLayout->buildCustomerBill($context, $width)
+            : $this->thermalReceiptLayout->buildCustomerReceipt($context, $width);
 
         return $this->thermalReceiptLayout->toPlainThermalLines($structured, $width);
     }
@@ -505,7 +515,7 @@ class ReceiptDocumentService
      */
     private function usesBrandedReceiptLayout(ReceiptDocumentKind $kind, array $context): bool
     {
-        if (! in_array($kind, [ReceiptDocumentKind::CustomerReceipt, ReceiptDocumentKind::FiscalInvoice], true)) {
+        if (! in_array($kind, [ReceiptDocumentKind::CustomerReceipt, ReceiptDocumentKind::FiscalInvoice, ReceiptDocumentKind::CustomerBill], true)) {
             return false;
         }
 
