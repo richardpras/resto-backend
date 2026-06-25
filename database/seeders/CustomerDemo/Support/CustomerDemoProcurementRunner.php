@@ -4,6 +4,7 @@ namespace Database\Seeders\CustomerDemo\Support;
 
 use App\Models\Modules\Inventory\Domain\Ingredient;
 use App\Models\User;
+use App\Modules\Procurement\Models\PurchaseRequest;
 use App\Modules\Procurement\Services\PurchaseRequestService;
 use App\Modules\Purchase\Services\GoodsReceivingLifecycleService;
 use App\Modules\Purchase\Services\PurchaseOrderLifecycleService;
@@ -37,6 +38,10 @@ final class CustomerDemoProcurementRunner
     public function runScenario(User $actor, array $spec): void
     {
         $outletId = CustomerDemoContext::outletId();
+        if ($this->scenarioAlreadySeeded($outletId, (string) $spec['prNo'])) {
+            return;
+        }
+
         $supplierId = (int) CustomerDemoContext::$supplierId;
         $warehouseId = (int) CustomerDemoContext::$warehouseId;
         $ingredient = $this->resolveIngredient($outletId, $spec['index']);
@@ -158,6 +163,17 @@ final class CustomerDemoProcurementRunner
 
         $this->payments->approve($payment, $actor);
         $this->payments->post($payment->fresh(), $actor);
+    }
+
+    private function scenarioAlreadySeeded(int $outletId, string $prNo): bool
+    {
+        return PurchaseRequest::query()
+            ->where('outlet_id', $outletId)
+            ->where(function ($query) use ($prNo): void {
+                $query->where('request_no', $prNo)
+                    ->orWhere('notes', $prNo);
+            })
+            ->exists();
     }
 
     private function resolveIngredient(int $outletId, int $index): Ingredient

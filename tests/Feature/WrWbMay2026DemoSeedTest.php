@@ -26,6 +26,22 @@ class WrWbMay2026DemoSeedTest extends TestCase
         Artisan::call('passport:keys', ['--force' => true]);
     }
 
+    public function test_wr_wb_demo_seed_is_idempotent_on_rerun(): void
+    {
+        $this->seed(WrWbMay2026Seeder::class);
+        $this->seed(WrWbMay2026Seeder::class);
+
+        $outlet = Outlet::query()->where('code', 'DEMO-WRWB')->firstOrFail();
+
+        $this->assertSame(
+            10,
+            DB::table('purchase_requests_v2')
+                ->where('outlet_id', $outlet->id)
+                ->where('request_no', 'like', 'WRWB-PR-202605-%')
+                ->count(),
+        );
+    }
+
     public function test_wr_wb_demo_seed_produces_expected_may_2026_dataset(): void
     {
         $this->seed(WrWbMay2026Seeder::class);
