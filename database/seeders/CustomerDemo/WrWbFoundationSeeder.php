@@ -3,6 +3,7 @@
 namespace Database\Seeders\CustomerDemo;
 
 use App\Models\Modules\Accounting\Domain\AccountingSetting;
+use App\Models\Modules\Hardware\Domain\HardwareBridgeDevice;
 use App\Models\Modules\Menu\Domain\MenuCategory;
 use App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping;
 use App\Models\Modules\Print\Domain\PrinterProfile;
@@ -166,20 +167,38 @@ class WrWbFoundationSeeder extends Seeder
             );
         }
 
+        $this->seedHardwareBridge((int) $outlet->id);
         $this->seedPrinterProfiles((int) $outlet->id);
         $this->seedMenuCategories((int) $outlet->id);
     }
 
+    private function seedHardwareBridge(int $outletId): void
+    {
+        HardwareBridgeDevice::query()->updateOrCreate(
+            ['outlet_id' => $outletId, 'device_key' => 'bridge-wrwb-main'],
+            [
+                'display_label' => 'WR WB Bridge',
+                'capabilities' => ['lan', 'print-queue'],
+                'metadata' => ['deployment' => ['headless' => true, 'serviceMode' => 'demo']],
+                'status' => 'active',
+                'last_seen_at' => now(),
+                'reconnect_count' => 0,
+            ],
+        );
+    }
+
     private function seedPrinterProfiles(int $outletId): void
     {
+        $deviceKey = 'bridge-wrwb-main';
         $profiles = [
-            ['code' => 'WRWB-CASHIER', 'name' => 'Kasir Receipt', 'station' => 'cashier'],
-            ['code' => 'WRWB-KITCHEN', 'name' => 'Kitchen Ticket', 'station' => 'kitchen'],
-            ['code' => 'WRWB-BAR', 'name' => 'Bar Ticket', 'station' => 'bar'],
+            ['code' => 'WRWB-CASHIER', 'name' => 'Kasir Receipt', 'station' => 'cashier', 'lanIp' => '10.10.1.20'],
+            ['code' => 'WRWB-KITCHEN', 'name' => 'Kitchen Ticket', 'station' => 'kitchen', 'lanIp' => '10.10.1.21'],
+            ['code' => 'WRWB-BAR', 'name' => 'Bar Ticket', 'station' => 'bar', 'lanIp' => '10.10.1.22'],
         ];
 
         $profileIds = [];
         foreach ($profiles as $row) {
+            $lanIp = (string) $row['lanIp'];
             $profile = PrinterProfile::query()->updateOrCreate(
                 ['outlet_id' => $outletId, 'code' => $row['code']],
                 [
@@ -187,9 +206,15 @@ class WrWbFoundationSeeder extends Seeder
                     'station' => $row['station'],
                     'connection_type' => 'bridge',
                     'device_identifier' => "bridge://{$outletId}/{$row['code']}",
+                    'ip_address' => $lanIp,
+                    'endpoint' => "tcp://{$lanIp}:9100",
                     'is_active' => true,
                     'health_status' => 'healthy',
                     'queue_state' => 'idle',
+                    'meta' => [
+                        'bridge' => ['deviceKey' => $deviceKey],
+                        'lan' => ['ip' => $lanIp, 'port' => 9100],
+                    ],
                 ],
             );
             $profileIds[$row['station']] = $profile->id;
