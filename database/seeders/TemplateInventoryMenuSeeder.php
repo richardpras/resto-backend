@@ -3,10 +3,12 @@
 namespace Database\Seeders;
 
 use App\Models\Modules\Inventory\Domain\Ingredient;
+use App\Models\Modules\Menu\Domain\MenuCategory;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Menu\Domain\MenuRecipe;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 
 /**
  * Seeds ingredients, menu items, and recipes from {@see database/data/template_inventory_menu.json}
@@ -16,12 +18,15 @@ class TemplateInventoryMenuSeeder extends Seeder
 {
     public function run(): void
     {
-        if (Ingredient::query()->exists() || MenuItem::query()->exists()) {
-            return;
-        }
-
         $path = database_path('data/template_inventory_menu.json');
         $data = json_decode(File::get($path), true, 512, JSON_THROW_ON_ERROR);
+        $categoryMap = $this->seedMenuCategories($data);
+
+        if (Ingredient::query()->exists() || MenuItem::query()->exists()) {
+            $this->linkExistingMenuItemsToCategories($data, $categoryMap);
+
+            return;
+        }
 
         /** @var array<string, int> $ingredientMap legacy_id -> DB id */
         $ingredientMap = [];
@@ -50,6 +55,7 @@ class TemplateInventoryMenuSeeder extends Seeder
                 'outlet_id' => null,
                 'name' => $row['name'],
                 'category' => $row['category'],
+                'menu_category_id' => $categoryMap[$row['category']] ?? null,
                 'emoji' => $row['emoji'],
                 'price' => $row['price'],
                 'available' => true,
@@ -75,6 +81,55 @@ class TemplateInventoryMenuSeeder extends Seeder
                     ['quantity' => $line['qty']],
                 );
             }
+        }
+    }
+
+    /**
+     * @param array{menu_items: list<array{category: string}>} $data
+     * @return array<string, int> category name -> menu_category id
+     */
+    private function seedMenuCategories(array $data): array
+    {
+        $names = collect($data['menu_items'])
+            ->pluck('category')
+            ->filter(static fn ($name): bool => is_string($name) && trim($name) !== '')
+            ->unique()
+            ->values();
+
+        $map = [];
+        $sort = 0;
+        foreach ($names as $name) {
+            $sort++;
+            $code = 'TMPL-'.strtoupper(Str::slug($name, '_'));
+            $category = MenuCategory::query()->updateOrCreate(
+                ['code' => $code],
+                [
+                    'name' => $name,
+                    'is_active' => true,
+                    'sort_order' => $sort,
+                ],
+            );
+            $map[$name] = (int) $category->id;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array{menu_items: list<array{name: string, category: string}>} $data
+     * @param array<string, int> $categoryMap
+     */
+    private function linkExistingMenuItemsToCategories(array $data, array $categoryMap): void
+    {
+        foreach ($data['menu_items'] as $row) {
+            $categoryId = $categoryMap[$row['category']] ?? null;
+            if ($categoryId === null) {
+                continue;
+            }
+            MenuItem::query()
+                ->where('name', $row['name'])
+                ->whereNull('menu_category_id')
+                ->update(['menu_category_id' => $categoryId]);
         }
     }
 }

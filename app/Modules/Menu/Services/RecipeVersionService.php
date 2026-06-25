@@ -288,12 +288,27 @@ final class RecipeVersionService
     private function bootstrapFromMenuRecipes(int $menuItemId): RecipeVersion
     {
         return DB::transaction(function () use ($menuItemId): RecipeVersion {
-            $existing = RecipeVersion::query()
+            $active = RecipeVersion::query()
                 ->where('menu_item_id', $menuItemId)
                 ->where('status', 'active')
+                ->lockForUpdate()
                 ->first();
-            if ($existing !== null) {
-                return $existing;
+            if ($active !== null) {
+                return $active;
+            }
+
+            $latest = RecipeVersion::query()
+                ->where('menu_item_id', $menuItemId)
+                ->orderByDesc('version_number')
+                ->lockForUpdate()
+                ->first();
+
+            if ($latest !== null) {
+                if ($latest->status !== 'active') {
+                    $this->activateVersionInternal($latest, null);
+                }
+
+                return $latest->fresh(['items.ingredient']);
             }
 
             $lines = MenuRecipe::query()->where('menu_item_id', $menuItemId)->get();
@@ -302,18 +317,6 @@ final class RecipeVersionService
                 'quantity' => (float) $recipe->quantity,
                 'unit' => $recipe->ingredient?->unit,
             ])->all();
-
-            if ($items === []) {
-                $version = RecipeVersion::query()->create([
-                    'menu_item_id' => $menuItemId,
-                    'version_number' => 1,
-                    'name' => 'Version 1',
-                    'status' => 'active',
-                    'activated_at' => now(),
-                ]);
-
-                return $version->fresh(['items.ingredient']);
-            }
 
             return $this->createVersion($menuItemId, $items, name: 'Version 1', activate: true);
         });

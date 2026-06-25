@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Http\Requests\AddOrderPaymentsRequest;
 use App\Modules\Orders\Http\Requests\KitchenReprintRequest;
+use App\Modules\Orders\Http\Requests\ListOrdersRequest;
 use App\Modules\Orders\Http\Requests\NextOrderCodeRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderSplitRequest;
 use App\Modules\Orders\Http\Requests\SyncOrderSplitsRequest;
