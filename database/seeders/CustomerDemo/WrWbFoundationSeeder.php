@@ -236,17 +236,22 @@ class WrWbFoundationSeeder extends Seeder
 
     private function seedMenuCategories(int $outletId): void
     {
-        foreach (['Food', 'Beverage', 'Dessert'] as $name) {
+        $categories = [
+            ['name' => 'Food', 'nameEn' => 'Food', 'nameId' => 'Makanan', 'sort' => 1],
+            ['name' => 'Beverage', 'nameEn' => 'Beverage', 'nameId' => 'Minuman', 'sort' => 2],
+            ['name' => 'Dessert', 'nameEn' => 'Dessert', 'nameId' => 'Pencuci Mulut', 'sort' => 3],
+        ];
+
+        foreach ($categories as $row) {
             MenuCategory::query()->updateOrCreate(
-                ['code' => 'WRWB-'.strtoupper(str_replace(' ', '_', $name))],
+                ['code' => 'WRWB-'.strtoupper(str_replace(' ', '_', $row['name']))],
                 [
-                    'name' => $name,
+                    'tenant_id' => CustomerDemoContext::TENANT_ID,
+                    'name' => $row['name'],
+                    'name_en' => $row['nameEn'],
+                    'name_id' => $row['nameId'],
                     'is_active' => true,
-                    'sort_order' => match ($name) {
-                        'Food' => 1,
-                        'Beverage' => 2,
-                        default => 3,
-                    },
+                    'sort_order' => $row['sort'],
                 ],
             );
         }

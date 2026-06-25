@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Modules\Loyalty\Domain\LoyaltyAccount;
+use App\Models\Modules\Menu\Domain\MenuCategory;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\QrOrderRequest;
@@ -85,6 +86,14 @@ class WrWbMay2026DemoSeedTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $payrollJournal);
 
         $this->assertGreaterThanOrEqual(1, LoyaltyAccount::query()->where('outlet_id', $outlet->id)->count());
+
+        $this->assertSame(
+            3,
+            MenuCategory::query()
+                ->where('tenant_id', 1)
+                ->whereIn('code', ['WRWB-FOOD', 'WRWB-BEVERAGE', 'WRWB-DESSERT'])
+                ->count(),
+        );
 
         $mayDebits = (float) DB::table('journal_entries')
             ->join('journals', 'journals.id', '=', 'journal_entries.journal_id')

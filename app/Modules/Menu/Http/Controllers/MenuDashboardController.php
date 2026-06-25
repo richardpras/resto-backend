@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Menu\Services\DashboardService;
 use App\Modules\Menu\Services\DashboardSnapshotService;
 use App\Modules\Menu\Services\MenuHealthService;
+use App\Modules\Menu\Services\MenuIntelligenceBundleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -16,6 +17,7 @@ class MenuDashboardController extends Controller
         private readonly DashboardService $dashboardService,
         private readonly DashboardSnapshotService $snapshotService,
         private readonly MenuHealthService $healthService,
+        private readonly MenuIntelligenceBundleService $intelligenceBundleService,
     ) {}
 
     public function summary(Request $request): JsonResponse
@@ -25,6 +27,20 @@ class MenuDashboardController extends Controller
 
         return response()->json([
             'data' => $this->dashboardService->getSummary($outletId, $request->user('api')),
+        ]);
+    }
+
+    public function intelligence(Request $request): JsonResponse
+    {
+        $outletId = $this->requireOutletId($request);
+
+        return response()->json([
+            'data' => $this->intelligenceBundleService->getBundle(
+                $outletId,
+                $request->user('api'),
+                $request->query('fromDate'),
+                $request->query('toDate'),
+            ),
         ]);
     }
 

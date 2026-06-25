@@ -381,6 +381,7 @@ Route::prefix('v1')->group(function (): void {
     });
 
     Route::prefix('menu-dashboard')->middleware(['auth:api', 'permission:dashboard.view'])->group(function (): void {
+        Route::get('intelligence', [MenuDashboardController::class, 'intelligence']);
         Route::get('summary', [MenuDashboardController::class, 'summary']);
         Route::get('kpis', [MenuDashboardController::class, 'kpis']);
         Route::get('engineering', [MenuDashboardController::class, 'engineering']);

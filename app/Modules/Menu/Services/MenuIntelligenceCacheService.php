@@ -16,6 +16,8 @@ final class MenuIntelligenceCacheService
 
     public const PREFIX_AUTOMATION = 'menu_automation_summary';
 
+    public const PREFIX_INTELLIGENCE_BUNDLE = 'menu_intelligence_bundle';
+
     public const TTL_DASHBOARD = 900;
 
     public const TTL_FORECAST = 1800;
@@ -35,6 +37,7 @@ final class MenuIntelligenceCacheService
             self::PREFIX_OPTIMIZATION,
             self::PREFIX_ENGINEERING,
             self::PREFIX_AUTOMATION,
+            self::PREFIX_INTELLIGENCE_BUNDLE,
         ];
     }
 

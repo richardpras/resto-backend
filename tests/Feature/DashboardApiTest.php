@@ -27,6 +27,29 @@ class DashboardApiTest extends TestCase
 
         $this->getJson('/api/v1/menu-dashboard/summary'.$q)->assertOk()
             ->assertJsonStructure(['data' => ['kpis', 'engineering', 'health']]);
+        $this->getJson('/api/v1/menu-dashboard/intelligence'.$q)->assertOk()
+            ->assertJsonStructure([
+                'data' => [
+                    'summary' => ['kpis', 'engineering', 'health'],
+                    'matrix',
+                    'snapshots',
+                    'executive',
+                    'foodCostTrend',
+                    'marginTrend',
+                    'inventory',
+                    'priceOpportunities',
+                    'bundleOpportunities',
+                    'ingredientOpportunities',
+                    'yieldOpportunities',
+                    'openAlerts',
+                    'criticalAlerts',
+                    'resolvedAlerts',
+                    'demandForecast',
+                    'revenueForecast',
+                    'productionForecast',
+                    'stockRisk',
+                ],
+            ]);
         $this->getJson('/api/v1/menu-dashboard/kpis'.$q)->assertOk();
         $this->getJson('/api/v1/menu-dashboard/engineering'.$q)->assertOk();
         $this->getJson('/api/v1/menu-dashboard/optimization'.$q)->assertOk();
