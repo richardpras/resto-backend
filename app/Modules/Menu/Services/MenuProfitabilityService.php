@@ -3,6 +3,7 @@
 namespace App\Modules\Menu\Services;
 
 use App\Models\User;
+use Symfony\Component\HttpFoundation\Response;
 
 final class MenuProfitabilityService
 {
@@ -75,6 +76,31 @@ final class MenuProfitabilityService
         ]);
 
         return $result;
+    }
+
+    /**
+     * @param list<int> $menuItemIds
+     * @return list<array<string,mixed>>
+     */
+    public function calculateProfitabilityBatch(array $menuItemIds, int $outletId, ?User $actor = null): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map(static fn ($id): int => (int) $id, $menuItemIds),
+            static fn (int $id): bool => $id >= 1,
+        )));
+
+        $results = [];
+        foreach ($ids as $menuItemId) {
+            try {
+                $results[] = $this->calculateProfitability($menuItemId, $outletId, $actor);
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                if ($e->getStatusCode() !== Response::HTTP_NOT_FOUND) {
+                    throw $e;
+                }
+            }
+        }
+
+        return $results;
     }
 
     /** @return array<string,mixed> */

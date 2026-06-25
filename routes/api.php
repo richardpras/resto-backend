@@ -252,6 +252,7 @@ Route::prefix('v1')->group(function (): void {
     });
 
     Route::prefix('menu-profitability')->middleware(['auth:api', 'permission:foodcost.view'])->group(function (): void {
+        Route::get('menu-items', [MenuProfitabilityController::class, 'index']);
         Route::get('menu-items/{menuItem}', [MenuProfitabilityController::class, 'show']);
         Route::get('menu-items/{menuItem}/history', [MenuProfitabilityController::class, 'history']);
         Route::post('menu-items/{menuItem}/simulate', [MenuProfitabilityController::class, 'simulate'])

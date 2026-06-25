@@ -35,6 +35,15 @@ class ProfitabilityApiTest extends TestCase
             ->assertJsonPath('data.marginPercent', 60)
             ->assertJsonPath('data.classification', 'PREMIUM');
 
+        $batchQuery = $q.'&menuItemIds[]='.$menu['menuId'];
+        $this->getJson('/api/v1/menu-profitability/menu-items'.$batchQuery)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.menuItemId', (string) $menu['menuId'])
+            ->assertJsonPath('data.0.margin', 60000)
+            ->assertJsonPath('data.0.marginPercent', 60)
+            ->assertJsonPath('data.0.classification', 'PREMIUM');
+
         $this->getJson('/api/v1/menu-profitability/menu-items/'.$menu['menuId'].'/history'.$q)
             ->assertOk()
             ->assertJsonStructure(['data' => ['currentCost', 'currentMargin', 'comparisons']]);

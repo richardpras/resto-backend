@@ -18,6 +18,29 @@ class MenuProfitabilityController extends Controller
         private readonly MenuPriceSimulationService $simulationService,
     ) {}
 
+    public function index(): JsonResponse
+    {
+        $outletId = $this->requireOutletId();
+        $rawIds = request()->query('menuItemIds', []);
+        $menuItemIds = is_array($rawIds)
+            ? array_values(array_filter(array_map(static fn ($id): int => (int) $id, $rawIds), static fn (int $id): bool => $id >= 1))
+            : [];
+
+        abort_if(
+            $menuItemIds === [],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+            'menuItemIds is required.',
+        );
+
+        return response()->json([
+            'data' => $this->profitabilityService->calculateProfitabilityBatch(
+                $menuItemIds,
+                $outletId,
+                request()->user('api'),
+            ),
+        ]);
+    }
+
     public function show(int $menuItem): JsonResponse
     {
         $outletId = $this->requireOutletId();
