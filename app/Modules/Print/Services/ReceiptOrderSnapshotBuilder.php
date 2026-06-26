@@ -90,6 +90,8 @@ final class ReceiptOrderSnapshotBuilder
             'paid_at' => $this->resolvePaidAt($order, $orderSplitId)?->toIso8601String(),
             'subtotal' => $subtotal,
             'tax' => $tax,
+            'apply_tax' => (bool) ($order->apply_tax ?? false),
+            'tax_lines' => $this->buildTaxLines($order, $ratio),
             'total' => $total,
             'paid_total' => $split !== null
                 ? $this->splitPaidAmount($order, (int) $split->id)
@@ -333,5 +335,41 @@ final class ReceiptOrderSnapshotBuilder
         $paidAt = $payments->pluck('paid_at')->filter()->max();
 
         return $paidAt instanceof Carbon ? $paidAt : null;
+    }
+
+  /**
+   * @return list<array{label: string, amount: float}>
+   */
+    private function buildTaxLines(Order $order, float $ratio = 1.0): array
+    {
+        if (! (bool) ($order->apply_tax ?? false)) {
+            return [];
+        }
+
+        $snapshot = is_array($order->tax_snapshot) ? $order->tax_snapshot : [];
+        if ($snapshot !== []) {
+            return collect($snapshot)
+                ->map(function (array $line) use ($ratio): array {
+                    $name = (string) ($line['name'] ?? 'Tax');
+                    $type = (string) ($line['type'] ?? 'percentage');
+                    $rate = (float) ($line['rate'] ?? 0);
+                    $label = $type === 'percentage' ? $name.' '.$rate.'%' : $name;
+
+                    return [
+                        'label' => $label,
+                        'amount' => round((float) ($line['amount'] ?? 0) * $ratio, 2),
+                    ];
+                })
+                ->filter(fn (array $line): bool => (float) $line['amount'] > 0)
+                ->values()
+                ->all();
+        }
+
+        $tax = round((float) $order->tax * $ratio, 2);
+        if ($tax <= 0) {
+            return [];
+        }
+
+        return [['label' => 'Tax', 'amount' => $tax]];
     }
 }

@@ -489,7 +489,21 @@ class ReceiptDocumentService
                 $lines[] = $label.' '.$this->money((float) ($payment['amount'] ?? 0.0));
             }
             $lines[] = 'Sub '.$this->money((float) ($context['subtotal'] ?? 0.0));
-            $lines[] = 'Tax '.$this->money((float) ($context['tax'] ?? 0.0));
+            if ((bool) ($context['apply_tax'] ?? false)) {
+                $taxLines = is_array($context['tax_lines'] ?? null) ? $context['tax_lines'] : [];
+                if ($taxLines !== []) {
+                    foreach ($taxLines as $taxLine) {
+                        $amount = (float) ($taxLine['amount'] ?? 0.0);
+                        if ($amount === 0.0) {
+                            continue;
+                        }
+                        $label = trim((string) ($taxLine['label'] ?? 'Tax'));
+                        $lines[] = $label.' '.$this->money($amount);
+                    }
+                } elseif ((float) ($context['tax'] ?? 0.0) > 0) {
+                    $lines[] = 'Tax '.$this->money((float) ($context['tax'] ?? 0.0));
+                }
+            }
             $lines[] = 'TOTAL '.$this->money((float) ($context['total'] ?? 0.0));
         }
 

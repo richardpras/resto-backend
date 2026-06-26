@@ -6,6 +6,7 @@ use App\Models\Modules\HR\Domain\AttendancePeriodLock;
 use App\Models\Modules\HR\Domain\Employee;
 use App\Models\Modules\HR\Domain\PayrollPreparationPeriod;
 use App\Models\Modules\HR\Domain\PayrollPreparationSnapshot;
+use App\Models\Modules\HR\Domain\PayrollPayslip;
 use App\Models\Modules\HR\Domain\PayrollRunV2;
 use App\Models\User;
 use App\Modules\HR\Services\AttendancePeriodService;
@@ -14,6 +15,7 @@ use App\Modules\HR\Services\PayrollPostingService;
 use App\Modules\HR\Services\PayrollPreparationPeriodService;
 use App\Modules\HR\Services\PayrollPreparationService;
 use App\Modules\HR\Services\PayrollRunServiceV2;
+use App\Modules\HR\Services\PayslipService;
 
 final class CustomerDemoPayrollBuilder
 {
@@ -24,6 +26,7 @@ final class CustomerDemoPayrollBuilder
         private readonly PayrollRunServiceV2 $runs,
         private readonly PayrollClosingService $closing,
         private readonly PayrollPostingService $posting,
+        private readonly PayslipService $payslips,
     ) {}
 
     /** @param list<Employee> $employees */
@@ -99,10 +102,14 @@ final class CustomerDemoPayrollBuilder
         }
 
         if ($run->status === PayrollRunV2::STATUS_PAID) {
+            $this->payslips->generateForRun($actor, (int) $run->id);
+            $this->payslips->renderPendingBatch((int) $run->id, $outletId, 50);
             $run = $this->closing->close($actor, (int) $run->id, 'WR WB demo payroll Mei 2026');
         }
 
         if ($run->status === PayrollRunV2::STATUS_CLOSED) {
+            $this->ensureDemoPayslips($actor, $run, $outletId);
+
             try {
                 $this->posting->post($actor, (int) $run->id);
             } catch (\Illuminate\Validation\ValidationException $e) {
@@ -111,5 +118,25 @@ final class CustomerDemoPayrollBuilder
         }
 
         return $run->refresh();
+    }
+
+    private function ensureDemoPayslips(User $actor, PayrollRunV2 $run, int $outletId): void
+    {
+        $run->loadCount('items');
+
+        if ($run->items_count === 0) {
+            return;
+        }
+
+        $existingCount = PayrollPayslip::query()
+            ->where('payroll_run_id', $run->id)
+            ->count();
+
+        if ($existingCount > 0) {
+            return;
+        }
+
+        $this->payslips->ensurePayslipsForDemoSeed($actor, (int) $run->id);
+        $this->payslips->renderPendingBatch((int) $run->id, $outletId, 50);
     }
 }

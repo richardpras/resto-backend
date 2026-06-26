@@ -38,4 +38,9 @@ class Outlet extends Model
     {
         return $this->hasMany(OutletPaymentMethodConfig::class, 'outlet_id');
     }
+
+    public function taxAssignments(): HasMany
+    {
+        return $this->hasMany(OutletTaxAssignment::class, 'outlet_id');
+    }
 }

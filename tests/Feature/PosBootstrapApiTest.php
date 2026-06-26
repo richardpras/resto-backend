@@ -44,6 +44,7 @@ class PosBootstrapApiTest extends TestCase
                     ],
                     'menuItems' => ['data', 'meta' => ['current_page', 'perPage', 'total', 'lastPage']],
                     'posSession',
+                    'outletTaxRules',
                 ],
             ])
             ->assertJsonPath('data.posSession', null);

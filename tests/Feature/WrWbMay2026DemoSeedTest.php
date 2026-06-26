@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Modules\HR\Domain\PayrollPayslip;
 use App\Models\Modules\Loyalty\Domain\LoyaltyAccount;
 use App\Models\Modules\Menu\Domain\MenuCategory;
 use App\Models\Modules\Orders\Domain\Order;
@@ -40,6 +41,11 @@ class WrWbMay2026DemoSeedTest extends TestCase
                 ->where('outlet_id', $outlet->id)
                 ->where('request_no', 'like', 'WRWB-PR-202605-%')
                 ->count(),
+        );
+
+        $this->assertSame(
+            5,
+            PayrollPayslip::query()->where('outlet_id', $outlet->id)->count(),
         );
     }
 
@@ -110,5 +116,15 @@ class WrWbMay2026DemoSeedTest extends TestCase
             ->sum('journal_entries.credit');
 
         $this->assertEquals(round($mayDebits, 2), round($mayCredits, 2));
+
+        $payslipCount = PayrollPayslip::query()->where('outlet_id', $outlet->id)->count();
+        $this->assertSame(5, $payslipCount);
+
+        $generatedCount = PayrollPayslip::query()
+            ->where('outlet_id', $outlet->id)
+            ->whereIn('status', [PayrollPayslip::STATUS_GENERATED, PayrollPayslip::STATUS_PUBLISHED])
+            ->whereNotNull('pdf_path')
+            ->count();
+        $this->assertGreaterThanOrEqual(1, $generatedCount);
     }
 }

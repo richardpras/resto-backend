@@ -30,6 +30,8 @@ class TaxSettingsCrudController extends Controller
             'applyTakeaway' => ['required', 'boolean'],
             'inclusive' => ['required', 'boolean'],
             'status' => ['required', 'string', 'in:active,inactive'],
+            'effectiveFrom' => ['nullable', 'date'],
+            'effectiveTo' => ['nullable', 'date', 'after_or_equal:effectiveFrom'],
         ]);
 
         return response()->json([
@@ -48,6 +50,8 @@ class TaxSettingsCrudController extends Controller
             'applyTakeaway' => ['required', 'boolean'],
             'inclusive' => ['required', 'boolean'],
             'status' => ['required', 'string', 'in:active,inactive'],
+            'effectiveFrom' => ['nullable', 'date'],
+            'effectiveTo' => ['nullable', 'date', 'after_or_equal:effectiveFrom'],
         ]);
 
         return response()->json([

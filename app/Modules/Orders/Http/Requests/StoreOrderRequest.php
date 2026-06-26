@@ -32,6 +32,7 @@ class StoreOrderRequest extends FormRequest
             'tax' => ['required', 'numeric', 'min:0'],
             'total' => ['required', 'numeric', 'min:0'],
             'discountAmount' => ['nullable', 'numeric', 'min:0'],
+            'applyTax' => ['nullable', 'boolean'],
             'customerName' => ['nullable', 'string', 'max:255'],
             'customerPhone' => ['nullable', 'string', 'max:50'],
             'memberId' => ['nullable', 'integer', 'exists:members,id'],

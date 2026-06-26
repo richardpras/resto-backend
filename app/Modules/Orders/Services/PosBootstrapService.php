@@ -40,6 +40,7 @@ class PosBootstrapService
                 ],
             ],
             'posSession' => $session !== null ? (new PosSessionResource($session))->resolve() : null,
+            'outletTaxRules' => $this->settingsDomainService->listOutletTaxRulesForPos($outletId),
         ];
     }
 

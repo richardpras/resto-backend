@@ -12,13 +12,16 @@ use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\PaymentMethod;
 use App\Models\Modules\Settings\Domain\SettingPrinter;
 use App\Models\Modules\Settings\Domain\SystemSetting;
+use App\Models\Modules\Settings\Domain\OutletTaxAssignment;
 use App\Models\Modules\Settings\Domain\Tax;
 use App\Models\User;
+use App\Modules\Orders\Services\OrderTaxResolverService;
 use App\Modules\Settings\Support\TemplateSettingsPayload;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\ValidationException;
 
 class SettingsDomainService
 {
@@ -213,6 +216,8 @@ class SettingsDomainService
             'apply_takeaway' => $data['applyTakeaway'],
             'inclusive' => $data['inclusive'],
             'status' => $data['status'],
+            'effective_from' => $data['effectiveFrom'] ?? null,
+            'effective_to' => $data['effectiveTo'] ?? null,
         ]);
 
         return $this->taxToCamel($t);
@@ -233,6 +238,8 @@ class SettingsDomainService
             'apply_takeaway' => $data['applyTakeaway'],
             'inclusive' => $data['inclusive'],
             'status' => $data['status'],
+            'effective_from' => $data['effectiveFrom'] ?? null,
+            'effective_to' => $data['effectiveTo'] ?? null,
         ]);
         $t->save();
 
@@ -246,6 +253,54 @@ class SettingsDomainService
             throw (new ModelNotFoundException)->setModel(Tax::class, [$id]);
         }
         $t->delete();
+    }
+
+    /** @return list<string> */
+    public function listOutletTaxAssignmentIds(User $user, int $outletId): array
+    {
+        $this->findScopedOutletOrFail($user, $outletId);
+
+        return OutletTaxAssignment::query()
+            ->where('outlet_id', $outletId)
+            ->pluck('tax_id')
+            ->map(fn ($id): string => (string) $id)
+            ->values()
+            ->all();
+    }
+
+    /** @param  list<string>  $taxIds */
+    public function syncOutletTaxAssignments(User $user, int $outletId, array $taxIds): array
+    {
+        $this->findScopedOutletOrFail($user, $outletId);
+
+        $normalized = collect($taxIds)
+            ->map(fn ($id): string => (string) $id)
+            ->filter(fn (string $id): bool => $id !== '')
+            ->unique()
+            ->values();
+
+        if ($normalized->isNotEmpty()) {
+            $existing = Tax::query()->whereIn('id', $normalized->all())->pluck('id')->map(fn ($id): string => (string) $id);
+            if ($existing->count() !== $normalized->count()) {
+                throw ValidationException::withMessages(['taxIds' => ['One or more tax rules were not found.']]);
+            }
+        }
+
+        OutletTaxAssignment::query()->where('outlet_id', $outletId)->delete();
+        foreach ($normalized as $taxId) {
+            OutletTaxAssignment::query()->create([
+                'outlet_id' => $outletId,
+                'tax_id' => $taxId,
+            ]);
+        }
+
+        return $this->listOutletTaxAssignmentIds($user, $outletId);
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listOutletTaxRulesForPos(int $outletId, ?string $asOfDate = null): array
+    {
+        return app(OrderTaxResolverService::class)->loadRulesForOutlet($outletId, $asOfDate);
     }
 
     /** @return list<array<string, mixed>> */
@@ -694,6 +749,8 @@ class SettingsDomainService
             'applyTakeaway' => $t->apply_takeaway,
             'inclusive' => $t->inclusive,
             'status' => $t->status,
+            'effectiveFrom' => $t->effective_from?->toDateString(),
+            'effectiveTo' => $t->effective_to?->toDateString(),
         ];
     }
 

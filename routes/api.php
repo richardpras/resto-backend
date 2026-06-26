@@ -131,6 +131,7 @@ use App\Modules\Settings\Http\Controllers\OutletLogoController;
 use App\Modules\Settings\Http\Controllers\PaymentMethodSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\PrinterSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\SystemSettingsController;
+use App\Modules\Settings\Http\Controllers\OutletTaxAssignmentsController;
 use App\Modules\Settings\Http\Controllers\TaxSettingsCrudController;
 use App\Modules\Suppliers\Http\Controllers\SupplierController;
 use App\Modules\Terminals\Http\Controllers\TerminalDeviceController;
@@ -854,6 +855,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('taxes', [TaxSettingsCrudController::class, 'store'])->middleware('permission:settings.update');
         Route::patch('taxes/{taxId}', [TaxSettingsCrudController::class, 'update'])->middleware('permission:settings.update');
         Route::delete('taxes/{taxId}', [TaxSettingsCrudController::class, 'destroy'])->middleware('permission:settings.update');
+        Route::get('outlets/{outletId}/tax-assignments', [OutletTaxAssignmentsController::class, 'show'])->middleware('permission:settings.view');
+        Route::put('outlets/{outletId}/tax-assignments', [OutletTaxAssignmentsController::class, 'update'])->middleware('permission:settings.update');
 
         Route::get('printers', [PrinterSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
         Route::post('printers', [PrinterSettingsCrudController::class, 'store'])->middleware('permission:settings.update');

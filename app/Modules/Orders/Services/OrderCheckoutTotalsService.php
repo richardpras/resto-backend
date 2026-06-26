@@ -11,11 +11,10 @@ use App\Modules\Orders\Repositories\OrderRepositoryInterface;
 
 class OrderCheckoutTotalsService
 {
-    public const DEFAULT_TAX_RATE = 0.10;
-
     public function __construct(
         private readonly PromotionEvaluationService $promotionEvaluationService,
         private readonly OrderRepositoryInterface $orderRepository,
+        private readonly OrderTaxResolverService $taxResolverService,
     ) {}
 
     /**
@@ -25,38 +24,45 @@ class OrderCheckoutTotalsService
      *     subtotalAfterDiscount: float,
      *     tax: float,
      *     total: float,
-     *     balanceDue: float
+     *     balanceDue: float,
+     *     taxLines: list<array<string, mixed>>
      * }
      */
-    public function buildPreview(Order $order, ?float $taxRate = null): array
+    public function buildPreview(Order $order): array
     {
-        $taxRate ??= self::DEFAULT_TAX_RATE;
         $subtotal = (float) $order->subtotal;
         $discount = $this->resolveCheckoutDiscount($order);
-        $subtotalAfterDiscount = max(0.0, $subtotal - $discount);
-        $tax = round($subtotalAfterDiscount * $taxRate, 2);
-        $total = round($subtotalAfterDiscount + $tax, 2);
+        $taxResult = $this->taxResolverService->resolve(
+            outletId: $order->outlet_id !== null ? (int) $order->outlet_id : null,
+            serviceMode: $order->service_mode,
+            orderType: $order->order_type,
+            subtotal: $subtotal,
+            discount: $discount,
+            applyTax: (bool) ($order->apply_tax ?? false),
+        );
         $paid = (float) ($order->paid_total ?? 0);
 
         return [
             'subtotal' => $subtotal,
             'discount' => $discount,
-            'subtotalAfterDiscount' => $subtotalAfterDiscount,
-            'tax' => $tax,
-            'total' => $total,
-            'balanceDue' => max(0.0, round($total - $paid, 2)),
+            'subtotalAfterDiscount' => $taxResult['subtotalAfterDiscount'],
+            'tax' => $taxResult['tax'],
+            'total' => $taxResult['total'],
+            'balanceDue' => max(0.0, round($taxResult['total'] - $paid, 2)),
+            'taxLines' => $taxResult['taxLines'],
         ];
     }
 
-    public function syncOrderFinancials(Order $order, ?float $taxRate = null): Order
+    public function syncOrderFinancials(Order $order): Order
     {
-        $preview = $this->buildPreview($order, $taxRate);
+        $preview = $this->buildPreview($order);
 
         $order->update([
             'discount_amount' => $preview['discount'],
             'tax' => $preview['tax'],
             'total' => $preview['total'],
             'balance_due' => $preview['balanceDue'],
+            'tax_snapshot' => $preview['taxLines'] !== [] ? $preview['taxLines'] : null,
         ]);
 
         return $this->orderRepository->findWithRelations((int) $order->id) ?? $order->fresh() ?? $order;
@@ -82,7 +88,7 @@ class OrderCheckoutTotalsService
             return $this->resolvePromotionDiscount($order, $orderPromotion);
         }
 
-        return 0.0;
+        return (float) ($order->discount_amount ?? 0);
     }
 
     private function resolveVoucherDiscount(Order $order, OrderVoucher $orderVoucher): float

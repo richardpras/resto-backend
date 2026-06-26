@@ -70,7 +70,7 @@ class OutletReceiptThermalLayoutTest extends TestCase
         $this->assertStringContainsString('Nasi Goreng', $thermal);
         $this->assertStringContainsString('1 x 45,000.00', $thermal);
         $this->assertStringContainsString('Subtotal', $thermal);
-        $this->assertStringContainsString('Tax', $thermal);
+        $this->assertStringContainsString('PB1 10%', $thermal);
         $this->assertStringContainsString('TOTAL', $thermal);
         $this->assertStringNotContainsString('RECEIPT', $thermal);
         $this->assertStringNotContainsString('LOGO', $thermal);
@@ -203,6 +203,10 @@ class OutletReceiptThermalLayoutTest extends TestCase
             'payment_status' => 'paid',
             'subtotal' => $subtotal,
             'tax' => $tax,
+            'apply_tax' => $tax > 0,
+            'tax_snapshot' => $tax > 0
+                ? [['taxId' => 'tax-default', 'name' => 'PB1', 'type' => 'percentage', 'rate' => 10, 'inclusive' => false, 'amount' => $tax]]
+                : null,
             'total' => $total,
             'paid_total' => $total,
             'balance_due' => 0,

@@ -75,6 +75,51 @@ class PayslipService
     }
 
     /**
+     * Seed-only repair: upsert payslips for a run even when already closed.
+     *
+     * @return Collection<int, PayrollPayslip>
+     */
+    public function ensurePayslipsForDemoSeed(?User $user, int $payrollRunId): Collection
+    {
+        $run = $this->payrollRuns->findAccessible($user, $payrollRunId);
+        $run->load(['preparationPeriod', 'outlet', 'items.employee']);
+
+        $period = $run->preparationPeriod;
+        abort_if($period === null, 422, 'Preparation period missing for this run.');
+
+        if ($run->items->isEmpty()) {
+            return collect();
+        }
+
+        $companyName = $this->resolveCompanyName((int) $run->outlet_id);
+        $outletName = (string) ($run->outlet?->name ?? '');
+        $periodLabel = $period->period_start->format('Y-m-d').' — '.$period->period_end->format('Y-m-d');
+        $periodYear = $period->period_start->format('Y');
+        $periodMonth = $period->period_start->format('m');
+
+        return DB::transaction(function () use ($run, $period, $companyName, $outletName, $periodLabel, $periodYear, $periodMonth) {
+            $created = collect();
+
+            foreach ($run->items as $item) {
+                $payslip = $this->upsertPayslipFromItem(
+                    $run,
+                    $item,
+                    $period->id,
+                    $companyName,
+                    $outletName,
+                    $periodLabel,
+                    $periodYear,
+                    $periodMonth,
+                );
+
+                $created->push($payslip->load(['employee', 'payrollPeriod']));
+            }
+
+            return $created;
+        });
+    }
+
+    /**
      * @return Collection<int, PayrollPayslip>
      */
     public function generateForRun(?User $user, int $payrollRunId): Collection

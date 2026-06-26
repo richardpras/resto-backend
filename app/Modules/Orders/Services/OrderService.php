@@ -65,6 +65,8 @@ class OrderService
         private readonly OrderCodeAllocationService $orderCodeAllocationService,
         private readonly OrderPromotionService $orderPromotionService,
         private readonly PosSessionOrderLockService $posSessionOrderLockService,
+        private readonly OrderCheckoutTotalsService $checkoutTotalsService,
+        private readonly OrderTaxResolverService $taxResolverService,
     ) {}
 
     /** @var array<string, mixed>|null */
@@ -243,13 +245,24 @@ class OrderService
             }
 
             $normalizedPayments = $this->normalizePayments($data->payments);
+            $financials = $this->taxResolverService->resolve(
+                outletId: $data->outletId,
+                serviceMode: $serviceMode,
+                orderType: $data->orderType,
+                subtotal: $data->subtotal,
+                discount: $data->discountAmount,
+                applyTax: $data->applyTax,
+            );
+            $this->assertClientFinancialsMatch($data->tax, $data->total, $financials);
+            $orderTotal = $financials['total'];
+
             $paidTotal = collect($normalizedPayments)->sum(fn (array $payment): float => (float) $payment['amount']);
-            if ($paidTotal > ((float) $data->total + 0.00001)) {
+            if ($paidTotal > ($orderTotal + 0.00001)) {
                 throw ValidationException::withMessages([
                     'payments' => ['Total allocated payment cannot exceed order total.'],
                 ]);
             }
-            $paymentStatus = $paidTotal >= $data->total ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
+            $paymentStatus = $paidTotal >= $orderTotal ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid');
             $status = $paymentStatus === 'paid' && $data->status !== 'cancelled' ? 'completed' : $data->status;
 
             if ($paymentStatus === 'paid' && $data->outletId !== null && (int) $data->outletId > 0) {
@@ -277,11 +290,13 @@ class OrderService
                 'payment_status' => $paymentStatus,
                 'kitchen_status' => 'queued',
                 'subtotal' => $data->subtotal,
-                'tax' => $data->tax,
-                'total' => $data->total,
+                'tax' => $financials['tax'],
+                'apply_tax' => $data->applyTax,
+                'tax_snapshot' => $financials['taxLines'] !== [] ? $financials['taxLines'] : null,
+                'total' => $financials['total'],
                 'discount_amount' => $data->discountAmount,
                 'paid_total' => $paidTotal,
-                'balance_due' => max(0, $data->total - $paidTotal),
+                'balance_due' => max(0, $financials['total'] - $paidTotal),
                 'member_id' => $member?->id,
                 'customer_name' => $data->customerName ?? $member?->displayName(),
                 'customer_phone' => $data->customerPhone ?? $member?->phone,
@@ -396,6 +411,9 @@ class OrderService
             if (array_key_exists('discountAmount', $payload)) {
                 $attributes['discount_amount'] = (float) $payload['discountAmount'];
             }
+            if (array_key_exists('applyTax', $payload)) {
+                $attributes['apply_tax'] = (bool) $payload['applyTax'];
+            }
             if (array_key_exists('customerName', $payload)) {
                 $attributes['customer_name'] = $payload['customerName'];
             }
@@ -413,6 +431,17 @@ class OrderService
             $fresh = $this->orderRepository->findWithRelations($order->id);
             if ($fresh === null) {
                 throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+            }
+
+            $shouldRecalcFinancials = $orderItemsUpdated
+                || array_key_exists('applyTax', $payload)
+                || array_key_exists('subtotal', $payload)
+                || array_key_exists('tax', $payload)
+                || array_key_exists('total', $payload)
+                || array_key_exists('discountAmount', $payload);
+
+            if ($shouldRecalcFinancials) {
+                $fresh = $this->checkoutTotalsService->syncOrderFinancials($fresh);
             }
 
             if ($orderItemsUpdated) {
@@ -1017,6 +1046,22 @@ class OrderService
 
         if ($journal !== null) {
             Order::query()->where('id', $order->id)->update(['is_posted' => true]);
+        }
+    }
+
+    /**
+     * @param  array{tax: float, total: float}  $serverFinancials
+     */
+    private function assertClientFinancialsMatch(float $clientTax, float $clientTotal, array $serverFinancials): void
+    {
+        $serverTax = (float) ($serverFinancials['tax'] ?? 0);
+        $serverTotal = (float) ($serverFinancials['total'] ?? 0);
+
+        if (abs($clientTax - $serverTax) > 1.0 || abs($clientTotal - $serverTotal) > 1.0) {
+            throw ValidationException::withMessages([
+                'tax' => ['Order tax does not match server calculation.'],
+                'total' => ['Order total does not match server calculation.'],
+            ]);
         }
     }
 }

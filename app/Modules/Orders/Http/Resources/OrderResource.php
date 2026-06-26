@@ -30,6 +30,8 @@ class OrderResource extends JsonResource
             'status' => $this->status,
             'subtotal' => (float) $this->subtotal,
             'tax' => (float) $this->tax,
+            'applyTax' => (bool) ($this->apply_tax ?? false),
+            'taxSnapshot' => $this->tax_snapshot,
             'total' => (float) $this->total,
             'discountAmount' => (float) ($this->discount_amount ?? 0),
             'balanceDue' => max(0.0, (float) $this->total - (float) ($this->paid_total ?? 0)),

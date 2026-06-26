@@ -113,8 +113,21 @@ class ThermalReceiptLayoutBuilder
             $lines[] = ['text' => $this->formatColumns($label, $this->money($amount), $width)];
         }
 
-        if ((bool) ($branding['showTaxBreakdown'] ?? false)) {
-            $lines[] = ['text' => $this->formatColumns('Tax', $this->money((float) ($snapshot['tax'] ?? 0.0)), $width)];
+        if ((bool) ($branding['showTaxBreakdown'] ?? false) && (bool) ($snapshot['apply_tax'] ?? false)) {
+            /** @var list<array<string,mixed>> $taxLines */
+            $taxLines = is_array($snapshot['tax_lines'] ?? null) ? $snapshot['tax_lines'] : [];
+            if ($taxLines !== []) {
+                foreach ($taxLines as $taxLine) {
+                    $amount = (float) ($taxLine['amount'] ?? 0.0);
+                    if ($amount === 0.0) {
+                        continue;
+                    }
+                    $label = trim((string) ($taxLine['label'] ?? 'Tax'));
+                    $lines[] = ['text' => $this->formatColumns($label, $this->money($amount), $width)];
+                }
+            } elseif ((float) ($snapshot['tax'] ?? 0.0) > 0) {
+                $lines[] = ['text' => $this->formatColumns('Tax', $this->money((float) ($snapshot['tax'] ?? 0.0)), $width)];
+            }
         }
 
         $lines[] = ['text' => $this->formatColumns(

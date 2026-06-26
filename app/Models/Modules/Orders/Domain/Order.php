@@ -27,6 +27,8 @@ class Order extends Model
         'kitchen_status',
         'subtotal',
         'tax',
+        'apply_tax',
+        'tax_snapshot',
         'total',
         'discount_amount',
         'paid_total',
@@ -44,6 +46,8 @@ class Order extends Model
     ];
 
     protected $casts = [
+        'apply_tax' => 'boolean',
+        'tax_snapshot' => 'array',
         'split_bill' => 'array',
         'confirmed_at' => 'datetime',
         'stock_deducted_at' => 'datetime',

@@ -145,6 +145,8 @@ class SettingsDomainFromTemplateSeeder extends Seeder
                     'apply_takeaway' => filter_var($row['applyTakeaway'] ?? false, FILTER_VALIDATE_BOOLEAN),
                     'inclusive' => filter_var($row['inclusive'] ?? false, FILTER_VALIDATE_BOOLEAN),
                     'status' => (string) ($row['status'] ?? 'active'),
+                    'effective_from' => $row['effectiveFrom'] ?? null,
+                    'effective_to' => $row['effectiveTo'] ?? null,
                 ],
             );
         }

@@ -25,6 +25,7 @@ class UpdateOrderRequest extends FormRequest
             'tax' => ['sometimes', 'numeric', 'min:0'],
             'total' => ['sometimes', 'numeric', 'min:0'],
             'discountAmount' => ['sometimes', 'numeric', 'min:0'],
+            'applyTax' => ['sometimes', 'boolean'],
             'customerName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'customerPhone' => ['sometimes', 'nullable', 'string', 'max:50'],
             'memberId' => ['sometimes', 'nullable', 'integer', 'exists:members,id'],
