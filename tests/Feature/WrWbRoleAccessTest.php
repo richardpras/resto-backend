@@ -37,12 +37,15 @@ class WrWbRoleAccessTest extends TestCase
         $codes = Role::query()->where('name', 'WR WB Owner')->firstOrFail()
             ->permissions()->pluck('code')->all();
 
-        foreach (['settings.manage', 'users.manage', 'users.view', 'roles.view'] as $code) {
+        foreach (['settings.manage', 'merchant.manage', 'users.manage', 'roles.view'] as $code) {
             $this->assertNotContains($code, $codes, "WR WB Owner must not have {$code}");
         }
 
         $this->assertContains('settings.view', $codes);
         $this->assertContains('settings.update', $codes);
+        $this->assertContains('users.view', $codes);
+        $this->assertContains('users.create', $codes);
+        $this->assertContains('users.assign_roles', $codes);
     }
 
     public function test_wr_wb_manager_has_operational_settings_only(): void

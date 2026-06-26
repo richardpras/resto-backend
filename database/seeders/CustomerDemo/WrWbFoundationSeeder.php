@@ -34,6 +34,7 @@ class WrWbFoundationSeeder extends Seeder
         'forecasting.view', 'purchase.manage', 'purchase.approve', 'promotions.manage',
         'suppliers.manage', 'members.manage', 'employees.view', 'attendance.view',
         'tables.view', 'tables.manage', 'qr_orders.view', 'settings.view', 'settings.update',
+        'users.view', 'users.create', 'users.assign_roles',
     ];
 
     public function run(): void
@@ -75,24 +76,38 @@ class WrWbFoundationSeeder extends Seeder
         $allPermissionIds = Permission::query()->pluck('id')->all();
 
         $roleSpecs = [
-            'WR WB Admin' => null,
-            'WR WB Owner' => self::OWNER_PERMISSIONS,
+            'WR WB Admin' => ['permissions' => null, 'staff_assignable' => false],
+            'WR WB Owner' => ['permissions' => self::OWNER_PERMISSIONS, 'staff_assignable' => false],
             'WR WB Manager' => [
-                'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
-                'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view',
-                'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage',
-                'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
+                'permissions' => [
+                    'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
+                    'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view',
+                    'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage',
+                    'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
+                    'users.view', 'users.create', 'users.assign_roles',
+                ],
+                'staff_assignable' => true,
             ],
-            'WR WB Cashier' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'finance.shift_close'],
-            'WR WB Kitchen' => ['kitchen.use'],
+            'WR WB Cashier' => [
+                'permissions' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'finance.shift_close'],
+                'staff_assignable' => true,
+            ],
+            'WR WB Kitchen' => [
+                'permissions' => ['kitchen.use'],
+                'staff_assignable' => true,
+            ],
         ];
 
         $roleIds = [];
-        foreach ($roleSpecs as $name => $codes) {
+        foreach ($roleSpecs as $name => $spec) {
             $role = Role::query()->updateOrCreate(
                 ['name' => $name],
-                ['description' => 'WR WB customer demo role'],
+                [
+                    'description' => 'WR WB customer demo role',
+                    'staff_assignable' => (bool) $spec['staff_assignable'],
+                ],
             );
+            $codes = $spec['permissions'];
             $ids = $codes === null
                 ? $allPermissionIds
                 : array_values(array_filter(array_map(

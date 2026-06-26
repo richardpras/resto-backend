@@ -16,7 +16,7 @@ class UserManagementAuditLogController extends Controller
 
     public function index(ListUserManagementAuditLogsRequest $request): JsonResponse
     {
-        $paginator = $this->auditService->list($request->validated());
+        $paginator = $this->auditService->list($request->validated(), $request->user());
 
         return response()->json([
             'data' => UserManagementAuditLogResource::collection($paginator->items()),

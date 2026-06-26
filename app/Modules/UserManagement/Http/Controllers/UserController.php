@@ -20,7 +20,7 @@ class UserController extends Controller
     public function index(): JsonResponse
     {
         return response()->json([
-            'data' => UserResource::collection($this->service->listUsers()),
+            'data' => UserResource::collection($this->service->listUsers(request()->user())),
         ]);
     }
 

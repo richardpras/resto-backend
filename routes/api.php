@@ -834,7 +834,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('user-management/audit-logs', [UserManagementAuditLogController::class, 'index'])
             ->middleware('permission:users.view');
 
-        Route::get('roles', [RoleController::class, 'index'])->middleware('permission:roles.view');
+        Route::get('roles', [RoleController::class, 'index'])->middleware('permission.any:roles.view,users.assign_roles');
         Route::post('roles', [RoleController::class, 'store'])->middleware('permission:roles.create');
         Route::post('roles/{role}/permissions', [RoleController::class, 'assignPermissions'])->middleware('permission:roles.assign_permissions');
 
@@ -842,7 +842,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('permissions', [PermissionController::class, 'store'])->middleware('permission:permissions.create');
 
         Route::get('merchant-settings', [MerchantSettingsController::class, 'show'])->middleware('permission:settings.view');
-        Route::patch('merchant-settings', [MerchantSettingsController::class, 'update'])->middleware('permission:settings.manage');
+        Route::patch('merchant-settings', [MerchantSettingsController::class, 'update'])->middleware('permission:merchant.manage');
 
         Route::get('outlets', [OutletSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
         Route::post('outlets', [OutletSettingsCrudController::class, 'store'])->middleware('permission:settings.manage');

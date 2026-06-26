@@ -18,8 +18,8 @@ class DemoRoleHierarchyTest extends TestCase
 
     private const PLATFORM_PERMISSIONS = [
         'settings.manage',
-        'users.view',
-        'users.create',
+        'merchant.manage',
+        'users.manage',
         'roles.view',
         'roles.assign_permissions',
         'permissions.view',

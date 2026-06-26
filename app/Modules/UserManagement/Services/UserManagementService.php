@@ -6,16 +6,21 @@ use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\Modules\UserManagement\Domain\UserManagementAuditLog;
 use App\Models\User;
+use Illuminate\Validation\ValidationException;
 
 class UserManagementService
 {
     public function __construct(
         private readonly UserManagementAuditService $audit,
+        private readonly UserManagementScopeService $scope,
     ) {}
 
-    public function listUsers()
+    public function listUsers(?User $actor = null)
     {
-        return User::query()->with('roles')->latest('id')->get();
+        return $this->scope->visibleUsersQuery($actor)
+            ->with('roles')
+            ->latest('id')
+            ->get();
     }
 
     public function createUser(?User $actor, array $payload): User
@@ -67,6 +72,8 @@ class UserManagementService
             return null;
         }
 
+        $this->assertCanModifyUser($actor, $user);
+
         $beforePinSet = $user->pin_hash !== null;
         $user->pin_hash = $pin;
         $user->save();
@@ -92,6 +99,8 @@ class UserManagementService
         if ($user === null) {
             return null;
         }
+
+        $this->assertCanModifyUser($actor, $user);
 
         $beforePinSet = $user->pin_hash !== null;
         $user->pin_hash = null;
@@ -119,6 +128,8 @@ class UserManagementService
             return null;
         }
 
+        $this->scope->assertCanAssignRoles($actor, $user, $roleIds);
+
         $before = $this->audit->snapshotUser($user);
         $beforeRoleIds = $before['roleIds'];
 
@@ -145,9 +156,15 @@ class UserManagementService
         return $user;
     }
 
-    public function listRoles()
+    public function listRoles(?User $actor = null)
     {
-        return Role::query()->with('permissions')->latest('id')->get();
+        $query = Role::query()->with('permissions')->latest('id');
+
+        if (! $this->scope->isFullAdministrator($actor)) {
+            $query->where('staff_assignable', true);
+        }
+
+        return $query->get();
     }
 
     public function createRole(?User $actor, array $payload): Role
@@ -227,5 +244,18 @@ class UserManagementService
         );
 
         return $permission;
+    }
+
+    private function assertCanModifyUser(?User $actor, User $target): void
+    {
+        if ($this->scope->isFullAdministrator($actor)) {
+            return;
+        }
+
+        if ($this->scope->isPrivilegedUser($target)) {
+            throw ValidationException::withMessages([
+                'user' => ['You cannot modify this user.'],
+            ]);
+        }
     }
 }

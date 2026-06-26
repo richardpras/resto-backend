@@ -50,6 +50,9 @@ class DemoFoundationSeeder extends Seeder
         'qr_orders.view',
         'settings.view',
         'settings.update',
+        'users.view',
+        'users.create',
+        'users.assign_roles',
     ];
 
     public function run(): void
@@ -73,34 +76,53 @@ class DemoFoundationSeeder extends Seeder
             $permissionMap = Permission::query()->pluck('id', 'code');
             $allPermissionIds = Permission::query()->pluck('id')->all();
 
-            $roles = [
-                'Demo Admin' => $allPermissionIds,
-                'Demo Owner' => $this->permissionIds($permissionMap, self::OWNER_PERMISSION_CODES),
-                'Demo Manager' => $this->permissionIds($permissionMap, [
-                    'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
-                    'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view', 'reports.view',
-                    'members.manage', 'suppliers.manage', 'promotions.manage', 'accounting.manage',
-                    'payroll.manage', 'employees.view', 'attendance.view', 'settings.manage',
-                ]),
-                'Demo Cashier' => $this->permissionIds($permissionMap, [
-                    'pos.use', 'members.manage', 'tables.view', 'qr_orders.view',
-                ]),
-                'Demo Kitchen' => $this->permissionIds($permissionMap, ['kitchen.use']),
-                'Demo Accountant' => $this->permissionIds($permissionMap, [
-                    'accounting.manage', 'reports.view', 'finance.reconcile',
-                ]),
-                'Demo Auditor' => $this->permissionIds($permissionMap, [
-                    'reports.view', 'settings.manage', 'accounting.manage',
-                ]),
+            $roleSpecs = [
+                'Demo Admin' => ['permissionIds' => $allPermissionIds, 'staff_assignable' => false],
+                'Demo Owner' => ['permissionIds' => $this->permissionIds($permissionMap, self::OWNER_PERMISSION_CODES), 'staff_assignable' => false],
+                'Demo Manager' => [
+                    'permissionIds' => $this->permissionIds($permissionMap, [
+                        'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
+                        'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view', 'reports.view',
+                        'members.manage', 'suppliers.manage', 'promotions.manage', 'accounting.manage',
+                        'payroll.manage', 'employees.view', 'attendance.view', 'settings.manage',
+                        'users.view', 'users.create', 'users.assign_roles',
+                    ]),
+                    'staff_assignable' => true,
+                ],
+                'Demo Cashier' => [
+                    'permissionIds' => $this->permissionIds($permissionMap, [
+                        'pos.use', 'members.manage', 'tables.view', 'qr_orders.view',
+                    ]),
+                    'staff_assignable' => true,
+                ],
+                'Demo Kitchen' => [
+                    'permissionIds' => $this->permissionIds($permissionMap, ['kitchen.use']),
+                    'staff_assignable' => true,
+                ],
+                'Demo Accountant' => [
+                    'permissionIds' => $this->permissionIds($permissionMap, [
+                        'accounting.manage', 'reports.view', 'finance.reconcile',
+                    ]),
+                    'staff_assignable' => true,
+                ],
+                'Demo Auditor' => [
+                    'permissionIds' => $this->permissionIds($permissionMap, [
+                        'reports.view', 'settings.manage', 'accounting.manage',
+                    ]),
+                    'staff_assignable' => false,
+                ],
             ];
 
             $roleIds = [];
-            foreach ($roles as $name => $ids) {
+            foreach ($roleSpecs as $name => $spec) {
                 $role = Role::query()->updateOrCreate(
                     ['name' => $name],
-                    ['description' => 'DEMO-DATA-SEEDER-01 role'],
+                    [
+                        'description' => 'DEMO-DATA-SEEDER-01 role',
+                        'staff_assignable' => (bool) $spec['staff_assignable'],
+                    ],
                 );
-                $role->permissions()->sync($ids);
+                $role->permissions()->sync($spec['permissionIds']);
                 $roleIds[$name] = $role->id;
             }
 

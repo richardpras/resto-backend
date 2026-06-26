@@ -19,7 +19,7 @@ class RoleController extends Controller
     public function index(): JsonResponse
     {
         return response()->json([
-            'data' => RoleResource::collection($this->service->listRoles()),
+            'data' => RoleResource::collection($this->service->listRoles(request()->user())),
         ]);
     }
 

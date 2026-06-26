@@ -11,7 +11,15 @@ class Role extends Model
     protected $fillable = [
         'name',
         'description',
+        'staff_assignable',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'staff_assignable' => 'boolean',
+        ];
+    }
 
     public function users(): BelongsToMany
     {

@@ -40,7 +40,7 @@ class UserManagementAuditService
     /**
      * @param  array<string, mixed>  $filters
      */
-    public function list(array $filters): LengthAwarePaginator
+    public function list(array $filters, ?User $actor = null): LengthAwarePaginator
     {
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = min(100, max(1, (int) ($filters['limit'] ?? 25)));
@@ -51,6 +51,7 @@ class UserManagementAuditService
             ->orderByDesc('id');
 
         $this->applyFilters($query, $filters);
+        app(UserManagementScopeService::class)->applyScopedAuditFilters($query, $actor);
 
         return $query->paginate($perPage, ['*'], 'page', $page);
     }
