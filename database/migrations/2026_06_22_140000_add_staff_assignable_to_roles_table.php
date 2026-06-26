@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('roles', function (Blueprint $table): void {
-            $table->boolean('staff_assignable')->default(false)->after('description');
+            $table->boolean('staff_assignable')->default(true)->after('description');
         });
     }
 
