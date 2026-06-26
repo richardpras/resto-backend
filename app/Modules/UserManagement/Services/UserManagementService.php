@@ -6,7 +6,6 @@ use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\Modules\UserManagement\Domain\UserManagementAuditLog;
 use App\Models\User;
-use Illuminate\Validation\ValidationException;
 
 class UserManagementService
 {
@@ -156,15 +155,54 @@ class UserManagementService
         return $user;
     }
 
-    public function listRoles(?User $actor = null)
+    public function updateUser(?User $actor, int $userId, array $payload): ?User
     {
-        $query = Role::query()->with('permissions')->latest('id');
-
-        if (! $this->scope->isFullAdministrator($actor)) {
-            $query->where('staff_assignable', true);
+        $user = User::query()->with('roles')->find($userId);
+        if ($user === null) {
+            return null;
         }
 
-        return $query->get();
+        $this->scope->assertCanModifyUser($actor, $user);
+
+        $before = $this->audit->snapshotUser($user);
+        $passwordChanged = false;
+
+        if (array_key_exists('name', $payload)) {
+            $user->name = $payload['name'];
+        }
+        if (array_key_exists('email', $payload)) {
+            $user->email = $payload['email'];
+        }
+        if (! empty($payload['password'])) {
+            $user->password = $payload['password'];
+            $passwordChanged = true;
+        }
+
+        $user->save();
+        $user = $user->load('roles');
+        $after = $this->audit->snapshotUser($user);
+
+        $this->audit->record(
+            $actor,
+            UserManagementAuditLog::ACTION_USER_UPDATED,
+            UserManagementAuditLog::ENTITY_USER,
+            (int) $user->id,
+            (int) $user->id,
+            $before,
+            $after,
+            $passwordChanged ? ['passwordChanged' => true] : null,
+        );
+
+        return $user;
+    }
+
+    public function listRoles(?User $actor = null)
+    {
+        $query = $this->scope->isFullAdministrator($actor)
+            ? Role::query()
+            : $this->scope->assignableRolesQuery($actor);
+
+        return $query->with('permissions')->latest('id')->get();
     }
 
     public function createRole(?User $actor, array $payload): Role
@@ -248,14 +286,6 @@ class UserManagementService
 
     private function assertCanModifyUser(?User $actor, User $target): void
     {
-        if ($this->scope->isFullAdministrator($actor)) {
-            return;
-        }
-
-        if ($this->scope->isPrivilegedUser($target)) {
-            throw ValidationException::withMessages([
-                'user' => ['You cannot modify this user.'],
-            ]);
-        }
+        $this->scope->assertCanModifyUser($actor, $target);
     }
 }

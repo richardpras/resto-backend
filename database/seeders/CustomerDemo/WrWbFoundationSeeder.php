@@ -20,7 +20,7 @@ use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\User;
 use App\Modules\Production\Services\ProductionStationProvisioner;
 use App\Modules\Settings\Services\OutletPaymentMethodConfigService;
-use Database\Seeders\AppSettingsFromTemplateSeeder;
+use App\Modules\UserManagement\Support\RoleHierarchy;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -34,7 +34,15 @@ class WrWbFoundationSeeder extends Seeder
         'forecasting.view', 'purchase.manage', 'purchase.approve', 'promotions.manage',
         'suppliers.manage', 'members.manage', 'employees.view', 'attendance.view',
         'tables.view', 'tables.manage', 'qr_orders.view', 'settings.view', 'settings.update',
-        'users.view', 'users.create', 'users.assign_roles',
+        'users.view', 'users.create', 'users.assign_roles', 'users.update',
+    ];
+
+    private const MANAGER_PERMISSIONS = [
+        'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
+        'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view',
+        'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage',
+        'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
+        'users.view', 'users.create', 'users.assign_roles', 'users.update',
     ];
 
     public function run(): void
@@ -76,25 +84,19 @@ class WrWbFoundationSeeder extends Seeder
         $allPermissionIds = Permission::query()->pluck('id')->all();
 
         $roleSpecs = [
-            'WR WB Admin' => ['permissions' => null, 'staff_assignable' => false],
-            'WR WB Owner' => ['permissions' => self::OWNER_PERMISSIONS, 'staff_assignable' => false],
+            'WR WB Admin' => ['permissions' => null, ...RoleHierarchy::defaultsForRoleName('WR WB Admin')],
+            'WR WB Owner' => ['permissions' => self::OWNER_PERMISSIONS, ...RoleHierarchy::defaultsForRoleName('WR WB Owner')],
             'WR WB Manager' => [
-                'permissions' => [
-                    'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
-                    'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view',
-                    'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage',
-                    'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
-                    'users.view', 'users.create', 'users.assign_roles',
-                ],
-                'staff_assignable' => true,
+                'permissions' => self::MANAGER_PERMISSIONS,
+                ...RoleHierarchy::defaultsForRoleName('WR WB Manager'),
             ],
             'WR WB Cashier' => [
                 'permissions' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'finance.shift_close'],
-                'staff_assignable' => true,
+                ...RoleHierarchy::defaultsForRoleName('WR WB Cashier'),
             ],
             'WR WB Kitchen' => [
                 'permissions' => ['kitchen.use'],
-                'staff_assignable' => true,
+                ...RoleHierarchy::defaultsForRoleName('WR WB Kitchen'),
             ],
         ];
 
@@ -105,6 +107,7 @@ class WrWbFoundationSeeder extends Seeder
                 [
                     'description' => 'WR WB customer demo role',
                     'staff_assignable' => (bool) $spec['staff_assignable'],
+                    'hierarchy_rank' => (int) $spec['hierarchy_rank'],
                 ],
             );
             $codes = $spec['permissions'];

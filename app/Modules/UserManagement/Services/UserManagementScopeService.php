@@ -5,6 +5,7 @@ namespace App\Modules\UserManagement\Services;
 use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\Modules\UserManagement\Domain\UserManagementAuditLog;
 use App\Models\User;
+use App\Modules\UserManagement\Support\RoleHierarchy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
 
@@ -15,17 +16,79 @@ class UserManagementScopeService
         return $actor !== null && $actor->hasPermission('users.manage');
     }
 
+    public function actorHierarchyRank(?User $actor): int
+    {
+        if ($actor === null) {
+            return 0;
+        }
+
+        if ($this->isFullAdministrator($actor)) {
+            return RoleHierarchy::RANK_PLATFORM_ADMIN;
+        }
+
+        $rank = (int) $actor->roles()->max('hierarchy_rank');
+
+        return $rank > 0 ? $rank : 0;
+    }
+
+    public function userHierarchyRank(User $user): int
+    {
+        $user->loadMissing('roles');
+
+        if ($user->roles->isEmpty()) {
+            return 0;
+        }
+
+        return (int) $user->roles->max('hierarchy_rank');
+    }
+
     public function isPrivilegedUser(User $target): bool
     {
         return $target->roles()->where('staff_assignable', false)->exists();
     }
 
+    public function canModifyUser(?User $actor, User $target): bool
+    {
+        if ($this->isFullAdministrator($actor)) {
+            return true;
+        }
+
+        $actorRank = $this->actorHierarchyRank($actor);
+        $targetRank = $this->userHierarchyRank($target);
+
+        return $actorRank > $targetRank;
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    public function assertCanModifyUser(?User $actor, User $target): void
+    {
+        if ($this->canModifyUser($actor, $target)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'user' => ['You cannot modify this user.'],
+        ]);
+    }
+
     /**
      * @return Builder<Role>
      */
-    public function assignableRolesQuery(): Builder
+    public function assignableRolesQuery(?User $actor): Builder
     {
-        return Role::query()->where('staff_assignable', true);
+        $query = Role::query();
+
+        if ($this->isFullAdministrator($actor)) {
+            return $query;
+        }
+
+        $actorRank = $this->actorHierarchyRank($actor);
+
+        return $query
+            ->where('staff_assignable', true)
+            ->where('hierarchy_rank', '<', $actorRank);
     }
 
     /**
@@ -51,15 +114,16 @@ class UserManagementScopeService
             return;
         }
 
-        if ($this->isPrivilegedUser($target)) {
-            throw ValidationException::withMessages([
-                'roleIds' => ['You cannot modify roles for this user.'],
-            ]);
-        }
+        $this->assertCanModifyUser($actor, $target);
 
         $invalidCount = Role::query()
             ->whereIn('id', $roleIds)
-            ->where('staff_assignable', false)
+            ->where(function (Builder $q) use ($actor): void {
+                $q->where('staff_assignable', false);
+                if (! $this->isFullAdministrator($actor)) {
+                    $q->orWhere('hierarchy_rank', '>=', $this->actorHierarchyRank($actor));
+                }
+            })
             ->count();
 
         if ($invalidCount > 0) {

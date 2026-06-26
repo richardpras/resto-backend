@@ -12,12 +12,14 @@ class Role extends Model
         'name',
         'description',
         'staff_assignable',
+        'hierarchy_rank',
     ];
 
     protected function casts(): array
     {
         return [
             'staff_assignable' => 'boolean',
+            'hierarchy_rank' => 'integer',
         ];
     }
 

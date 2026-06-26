@@ -139,7 +139,63 @@ class ScopedUserManagementTest extends TestCase
         $this->assertNotContains('merchant.manage', $ownerCodes);
         $this->assertNotContains('merchant.manage', $managerCodes);
         $this->assertContains('users.view', $ownerCodes);
+        $this->assertContains('users.update', $ownerCodes);
         $this->assertContains('users.create', $managerCodes);
+        $this->assertContains('users.update', $managerCodes);
+    }
+
+    public function test_owner_can_update_cashier_profile(): void
+    {
+        $owner = User::query()->where('email', 'owner@restohub.demo')->firstOrFail();
+        $cashier = User::query()->where('email', 'cashier.morning@sunset.demo.resto.local')->firstOrFail();
+        Passport::actingAs($owner);
+
+        $this->patchJson('/api/v1/users/'.$cashier->id, [
+            'name' => 'Cashier Morning Updated',
+            'email' => $cashier->email,
+            'password' => 'newpass123',
+        ])->assertOk()
+            ->assertJsonPath('data.name', 'Cashier Morning Updated');
+    }
+
+    public function test_manager_cannot_update_owner_profile(): void
+    {
+        $manager = User::query()->where('email', 'manager@sunset.demo.resto.local')->firstOrFail();
+        $owner = User::query()->where('email', 'owner@restohub.demo')->firstOrFail();
+        Passport::actingAs($manager);
+
+        $this->patchJson('/api/v1/users/'.$owner->id, [
+            'name' => 'Hacked Owner',
+            'email' => $owner->email,
+        ])->assertUnprocessable();
+    }
+
+    public function test_manager_cannot_assign_manager_role_to_cashier(): void
+    {
+        $manager = User::query()->where('email', 'manager@sunset.demo.resto.local')->firstOrFail();
+        $cashier = User::query()->where('email', 'cashier.morning@sunset.demo.resto.local')->firstOrFail();
+        $managerRoleId = (int) Role::query()->where('name', 'Demo Manager')->value('id');
+
+        Passport::actingAs($manager);
+
+        $this->postJson("/api/v1/users/{$cashier->id}/roles", [
+            'roleIds' => [$managerRoleId],
+        ])->assertUnprocessable();
+    }
+
+    public function test_manager_role_list_excludes_manager_and_owner_roles(): void
+    {
+        $manager = User::query()->where('email', 'manager@sunset.demo.resto.local')->firstOrFail();
+        Passport::actingAs($manager);
+
+        $roleNames = collect($this->getJson('/api/v1/roles')->assertOk()->json('data'))
+            ->pluck('name')
+            ->all();
+
+        $this->assertContains('Demo Cashier', $roleNames);
+        $this->assertNotContains('Demo Manager', $roleNames);
+        $this->assertNotContains('Demo Owner', $roleNames);
+        $this->assertNotContains('Demo Admin', $roleNames);
     }
 
     public function test_owner_audit_logs_exclude_privileged_users(): void

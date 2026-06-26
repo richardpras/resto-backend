@@ -18,6 +18,7 @@ class UserManagementPermissionsSeeder extends Seeder
             ['code' => 'users.view', 'name' => 'View users'],
             ['code' => 'users.create', 'name' => 'Create users'],
             ['code' => 'users.assign_roles', 'name' => 'Assign user roles'],
+            ['code' => 'users.update', 'name' => 'Update user profile and password'],
             ['code' => 'users.manage', 'name' => 'User management (web /template guard)'],
             ['code' => 'roles.view', 'name' => 'View roles'],
             ['code' => 'roles.create', 'name' => 'Create roles'],

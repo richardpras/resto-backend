@@ -16,6 +16,8 @@ class UserManagementAuditLog extends Model
 
     public const ACTION_USER_CREATED = 'user.created';
 
+    public const ACTION_USER_UPDATED = 'user.updated';
+
     public const ACTION_ROLE_PERMISSION_CHANGED = 'role_permission_changed';
 
     public const ACTION_USER_PIN_SET = 'user.pin_set';

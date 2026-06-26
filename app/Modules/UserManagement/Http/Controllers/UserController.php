@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\UserManagement\Http\Requests\AdminSetUserScreenPinRequest;
 use App\Modules\UserManagement\Http\Requests\AssignUserRolesRequest;
 use App\Modules\UserManagement\Http\Requests\StoreUserRequest;
+use App\Modules\UserManagement\Http\Requests\UpdateUserRequest;
 use App\Modules\UserManagement\Http\Resources\UserResource;
 use App\Modules\UserManagement\Services\UserManagementService;
 use Illuminate\Http\JsonResponse;
@@ -34,6 +35,17 @@ class UserController extends Controller
         ], Response::HTTP_CREATED);
     }
 
+    public function update(UpdateUserRequest $request, int $user): JsonResponse
+    {
+        $updated = $this->service->updateUser($request->user(), $user, $request->validated());
+        abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
+
+        return response()->json([
+            'message' => 'User updated successfully.',
+            'data' => new UserResource($updated),
+        ]);
+    }
+
     public function assignRoles(AssignUserRolesRequest $request, int $user): JsonResponse
     {
         $updated = $this->service->assignRoles($request->user(), $user, $request->validated('roleIds'));
@@ -58,7 +70,7 @@ class UserController extends Controller
 
     public function adminClearScreenPin(int $user): JsonResponse
     {
-        $updated = $this->service->adminClearUserScreenPin($request->user(), $user);
+        $updated = $this->service->adminClearUserScreenPin(request()->user(), $user);
         abort_if($updated === null, Response::HTTP_NOT_FOUND, 'User not found');
 
         return response()->json([
