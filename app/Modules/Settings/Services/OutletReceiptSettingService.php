@@ -13,6 +13,16 @@ class OutletReceiptSettingService
     ) {}
 
     /**
+     * @return array{outletId: int, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool, logoUrl?: string, hasLogo: bool, logoVersion: int}
+     */
+    public function forOutlet(Outlet $outlet): array
+    {
+        $outlet->loadMissing('receiptSetting');
+
+        return $this->serializeOutlet($outlet);
+    }
+
+    /**
      * @return list<array{outletId: int, outletName: string, receiptHeader: string, receiptFooter: string, showLogo: bool, showTaxBreakdown: bool, logoUrl: ?string, hasLogo: bool, logoVersion: int}>
      */
     public function listForResponse(): array

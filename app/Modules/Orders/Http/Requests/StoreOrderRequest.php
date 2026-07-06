@@ -50,6 +50,7 @@ class StoreOrderRequest extends FormRequest
             'payments.*.amount' => ['required', 'numeric', 'gt:0'],
             'payments.*.paidAt' => ['nullable', 'date'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],
+            'clientLocalRef' => ['nullable', 'string', 'max:120'],
         ];
     }
 }

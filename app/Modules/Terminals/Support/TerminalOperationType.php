@@ -15,6 +15,8 @@ final class TerminalOperationType
 
     public const ORDER_ADD_PAYMENTS = 'order.add_payments';
 
+    public const ORDER_SPLITS_SYNC = 'order.splits.sync';
+
     public const PAYMENT_TRANSACTION_INITIATE = 'payment.transaction.initiate';
 
     public const KITCHEN_TICKET_STATUS = 'kitchen.ticket.status';
@@ -42,6 +44,7 @@ final class TerminalOperationType
             self::ORDER_UPDATE,
             self::ORDER_UPDATE_STATUS,
             self::ORDER_ADD_PAYMENTS,
+            self::ORDER_SPLITS_SYNC,
             self::PAYMENT_TRANSACTION_INITIATE,
             self::KITCHEN_TICKET_STATUS,
             self::QR_ORDER_CONFIRM,

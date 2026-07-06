@@ -214,6 +214,7 @@ Route::prefix('v1')->group(function (): void {
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('pos/bootstrap', [\App\Modules\Orders\Http\Controllers\PosBootstrapController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('pos/offline-bootstrap', [\App\Modules\Orders\Http\Controllers\PosOfflineBootstrapController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('pos/checkout-integrity-health', [\App\Modules\Orders\Http\Controllers\PosCheckoutIntegrityController::class, 'health'])->middleware(['auth:api', 'permission.any:pos.use,settings.manage']);
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments'])->middleware('auth:api');
     Route::get('orders/{order}/events', [OrderController::class, 'listEvents'])->middleware('auth:api');
