@@ -71,6 +71,37 @@ class DashboardSummaryApiTest extends TestCase
         $second->assertJsonPath('data.kpis.orderCountToday', 1);
     }
 
+    public function test_dashboard_summary_filters_by_start_and_end_date(): void
+    {
+        $user = $this->actingAsScopedPosUser();
+        $outletA = $this->createOutlet('DSD');
+        $this->assignUserToOutlets($user, [(int) $outletA->id]);
+
+        $this->createOrderWithItem((int) $outletA->id, 'RANGE-TODAY', 'Today Item', 1, 40000);
+        $this->createOrderWithItem(
+            (int) $outletA->id,
+            'RANGE-YESTERDAY',
+            'Yesterday Item',
+            1,
+            50000,
+            now()->subDay(),
+        );
+
+        $today = now()->toDateString();
+        $response = $this->getJson('/api/v1/dashboard/summary?outletId='.(int) $outletA->id.'&startDate='.$today.'&endDate='.$today);
+        $response->assertOk();
+        $response->assertJsonPath('data.kpis.orderCountToday', 1);
+        $response->assertJsonPath('data.kpis.revenueToday', 40000);
+
+        $yesterday = now()->subDay()->toDateString();
+        $rangeResponse = $this->getJson(
+            '/api/v1/dashboard/summary?outletId='.(int) $outletA->id.'&startDate='.$yesterday.'&endDate='.$today,
+        );
+        $rangeResponse->assertOk();
+        $rangeResponse->assertJsonPath('data.kpis.orderCountToday', 2);
+        $rangeResponse->assertJsonPath('data.kpis.revenueToday', 90000);
+    }
+
     private function createOutlet(string $prefix): Outlet
     {
         return Outlet::query()->create([
@@ -106,8 +137,9 @@ class DashboardSummaryApiTest extends TestCase
         return $user;
     }
 
-    private function createOrderWithItem(int $outletId, string $code, string $itemName, int $qty, int $lineTotal): void
+    private function createOrderWithItem(int $outletId, string $code, string $itemName, int $qty, int $lineTotal, ?\DateTimeInterface $createdAt = null): void
     {
+        $timestamp = $createdAt ?? now();
         $orderId = (int) DB::table('orders')->insertGetId([
             'tenant_id' => 1,
             'outlet_id' => $outletId,
@@ -125,8 +157,8 @@ class DashboardSummaryApiTest extends TestCase
             'total' => $lineTotal,
             'paid_total' => $lineTotal,
             'balance_due' => 0,
-            'created_at' => now(),
-            'updated_at' => now(),
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
         ]);
 
         DB::table('order_items')->insert([
@@ -138,8 +170,8 @@ class DashboardSummaryApiTest extends TestCase
             'price' => (int) floor($lineTotal / max(1, $qty)),
             'line_total' => $lineTotal,
             'notes' => null,
-            'created_at' => now(),
-            'updated_at' => now(),
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
         ]);
     }
 }

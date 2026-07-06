@@ -62,4 +62,44 @@ class BugReportListPermissionTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.currentRoute', '/dashboard');
     }
+
+    public function test_admin_can_filter_bug_reports_by_created_date_range(): void
+    {
+        $outlet = $this->createBugReportOutlet();
+        $reporter = $this->actingAsBugReporter($outlet);
+
+        BugReport::query()->create([
+            'outlet_id' => $outlet->id,
+            'reporter_user_id' => $reporter->id,
+            'title' => 'Recent report',
+            'message' => 'Within range',
+            'severity' => BugReport::SEVERITY_LOW,
+            'status' => BugReport::STATUS_OPEN,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        BugReport::query()->create([
+            'outlet_id' => $outlet->id,
+            'reporter_user_id' => $reporter->id,
+            'title' => 'Old report',
+            'message' => 'Outside range',
+            'severity' => BugReport::SEVERITY_LOW,
+            'status' => BugReport::STATUS_OPEN,
+        ])->forceFill([
+            'created_at' => now()->subDays(10),
+            'updated_at' => now()->subDays(10),
+        ])->save();
+
+        $admin = $this->createUserWithPermission('settings.manage', $outlet);
+        Passport::actingAs($admin);
+
+        $from = now()->subDays(2)->toDateString();
+        $to = now()->toDateString();
+
+        $this->getJson('/api/v1/bug-reports?createdFrom='.$from.'&createdTo='.$to)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.title', 'Recent report');
+    }
 }

@@ -17,6 +17,8 @@ class GetDashboardSummaryRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date', 'after_or_equal:startDate'],
             'outletId' => ['nullable', 'integer', 'min:1', 'exists:outlets,id'],
         ];
     }

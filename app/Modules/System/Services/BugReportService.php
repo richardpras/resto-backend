@@ -101,6 +101,14 @@ final class BugReportService
             });
         }
 
+        if (isset($filters['createdFrom']) && is_string($filters['createdFrom']) && $filters['createdFrom'] !== '') {
+            $query->whereDate('created_at', '>=', $filters['createdFrom']);
+        }
+
+        if (isset($filters['createdTo']) && is_string($filters['createdTo']) && $filters['createdTo'] !== '') {
+            $query->whereDate('created_at', '<=', $filters['createdTo']);
+        }
+
         $perPage = min(100, max(1, (int) ($filters['limit'] ?? 25)));
 
         return $query->paginate($perPage, ['*'], 'page', max(1, (int) ($filters['page'] ?? 1)));
