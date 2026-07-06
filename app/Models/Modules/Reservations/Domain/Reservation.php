@@ -30,10 +30,19 @@ class Reservation extends Model
         'linked_order_id',
         'service_started_at',
         'status',
+        'source',
+        'required_deposit_amount',
+        'approved_deposit_amount',
+        'deposit_reviewed_at',
+        'deposit_reviewed_by',
+        'deposit_rejection_reason',
     ];
 
     protected $casts = [
         'party_size' => 'integer',
+        'required_deposit_amount' => 'decimal:2',
+        'approved_deposit_amount' => 'decimal:2',
+        'deposit_reviewed_at' => 'datetime',
         'reservation_at' => 'datetime',
         'confirmed_at' => 'datetime',
         'checked_in_at' => 'datetime',
@@ -67,5 +76,10 @@ class Reservation extends Model
     public function member(): BelongsTo
     {
         return $this->belongsTo(Member::class, 'member_id');
+    }
+
+    public function depositProofs(): HasMany
+    {
+        return $this->hasMany(ReservationDepositProof::class, 'reservation_id');
     }
 }

@@ -105,7 +105,7 @@ class ReservationService
     public function show(User $user, int $reservationId): Reservation
     {
         $reservation = $this->findScopedOrFail($user, $reservationId);
-        $reservation->load(['member', 'tableAllocations']);
+        $reservation->load(['member', 'tableAllocations', 'depositProofs', 'linkedOrder.items']);
 
         return $reservation;
     }
@@ -257,37 +257,53 @@ class ReservationService
                 );
             }
 
-            $order = $this->normalizeZeroTotalServiceShell($this->orderService->create(
-                new CreateOrderData(
-                    tenantId: 1,
-                    outletId: $outletId,
-                    code: $this->generateServiceOrderCode($reservation),
-                    source: 'pos',
-                    orderType: 'Dine In',
-                    status: 'confirmed',
-                    paymentStatus: 'unpaid',
-                    items: [],
-                    payments: [],
-                    subtotal: 0,
-                    tax: 0,
-                    total: 0,
-                    discountAmount: 0,
-                    customerName: (string) $reservation->customer_name,
-                    customerPhone: $reservation->customer_phone,
-                    memberId: $reservation->member_id !== null ? (int) $reservation->member_id : null,
-                    tableId: $tableId,
-                    tableNumber: null,
-                    createdAt: $startedAt->toISOString(),
-                    confirmedAt: $startedAt->toISOString(),
-                    splitBill: null,
-                    serviceMode: 'dine_in',
-                    orderChannel: 'dine_in',
-                    posSessionId: (int) $posSession->id,
-                ),
-                $user,
-            ));
+            $existingOrderId = $reservation->linked_order_id !== null ? (int) $reservation->linked_order_id : null;
+            if ($existingOrderId !== null) {
+                $order = Order::query()->whereKey($existingOrderId)->lockForUpdate()->first();
+                if ($order === null) {
+                    throw ValidationException::withMessages([
+                        'linkedOrder' => ['Linked pre-order was not found.'],
+                    ]);
+                }
+                $order->table_id = $tableId;
+                $order->pos_session_id = (int) $posSession->id;
+                $order->service_mode = 'dine_in';
+                $order->order_channel = $order->order_channel ?: 'reservation_deposit';
+                $order->save();
+            } else {
+                $order = $this->normalizeZeroTotalServiceShell($this->orderService->create(
+                    new CreateOrderData(
+                        tenantId: 1,
+                        outletId: $outletId,
+                        code: $this->generateServiceOrderCode($reservation),
+                        source: 'pos',
+                        orderType: 'Dine In',
+                        status: 'confirmed',
+                        paymentStatus: 'unpaid',
+                        items: [],
+                        payments: [],
+                        subtotal: 0,
+                        tax: 0,
+                        total: 0,
+                        discountAmount: 0,
+                        customerName: (string) $reservation->customer_name,
+                        customerPhone: $reservation->customer_phone,
+                        memberId: $reservation->member_id !== null ? (int) $reservation->member_id : null,
+                        tableId: $tableId,
+                        tableNumber: null,
+                        createdAt: $startedAt->toISOString(),
+                        confirmedAt: $startedAt->toISOString(),
+                        splitBill: null,
+                        serviceMode: 'dine_in',
+                        orderChannel: 'dine_in',
+                        posSessionId: (int) $posSession->id,
+                    ),
+                    $user,
+                ));
 
-            $reservation->linked_order_id = (int) $order->id;
+                $reservation->linked_order_id = (int) $order->id;
+            }
+
             $reservation->service_started_at = $startedAt;
             $reservation->save();
 
