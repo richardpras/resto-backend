@@ -8,6 +8,9 @@ use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Orders\Domain\QrOrderRequest;
 use App\Models\User;
+use App\Modules\Inventory\Services\DailyStocktakeService;
+use App\Modules\Inventory\Services\InventoryPostingPolicyService;
+use App\Modules\Inventory\Support\DeferredConsumptionTrigger;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -18,6 +21,8 @@ class ShiftClosePreflightService
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly ShiftClosePolicyService $policyService,
         private readonly ShiftCloseCashReconciliationService $cashReconciliationService,
+        private readonly InventoryPostingPolicyService $postingPolicyService,
+        private readonly DailyStocktakeService $dailyStocktakeService,
     ) {}
 
     /** @return array<string, mixed> */
@@ -65,7 +70,11 @@ class ShiftClosePreflightService
         if ($checks['failedPrintJobs'] > 0) {
             $warnings[] = 'print_jobs';
         }
-        if ($checks['pendingConsumption'] > 0) {
+        if ($this->postingPolicyService->getDeferredConsumptionTrigger($outletId) === DeferredConsumptionTrigger::DAILY_STOCKTAKE) {
+            if (! $this->dailyStocktakeService->hasPostedSessionForDate($outletId, now()->toDateString())) {
+                $warnings[] = 'stocktake_not_posted';
+            }
+        } elseif ($checks['pendingConsumption'] > 0) {
             $warnings[] = 'pending_consumption';
         }
         if ($checks['failedAccountingPostings'] > 0) {

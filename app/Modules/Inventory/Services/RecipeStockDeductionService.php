@@ -18,6 +18,7 @@ class RecipeStockDeductionService
         private readonly OrderItemCostSnapshotService $orderItemCostSnapshotService,
         private readonly OrderStockValidationService $orderStockValidationService,
         private readonly InventorySalePolicyService $inventorySalePolicyService,
+        private readonly InventoryCostingPolicyService $inventoryCostingPolicyService,
         private readonly InventoryIncidentService $incidentService,
         private readonly PosAuditLogService $auditLogService,
     ) {}
@@ -99,9 +100,11 @@ class RecipeStockDeductionService
 
             $numericOutlet = (int) $outletId;
 
+            $costMethod = $this->inventoryCostingPolicyService->getMethod();
+
             foreach ($requiredByIngredient as $ingredientId => $requiredQty) {
                 $ingredientId = (int) $ingredientId;
-                $unitCost = $this->inventoryValuationService->getAverageCost($ingredientId, $numericOutlet);
+                $unitCost = $this->inventoryValuationService->recordConsumption($ingredientId, $numericOutlet, $requiredQty);
                 if ($unitCost <= 0) {
                     $unitCost = $this->inventoryCostService->resolveUnitCost($ingredientId, $numericOutlet);
                 }
@@ -115,7 +118,7 @@ class RecipeStockDeductionService
                         'order_payment',
                         $locked->code,
                         [
-                            'cost_method' => 'moving_average',
+                            'cost_method' => $costMethod,
                             'unit_cost' => $unitCost,
                             'event' => 'cogs_recognition_pending',
                             'order_id' => (int) $locked->id,
@@ -135,7 +138,6 @@ class RecipeStockDeductionService
                     );
                 }
 
-                $this->inventoryValuationService->recordConsumption($ingredientId, $numericOutlet, $requiredQty);
             }
 
             $locked->update(['stock_deducted_at' => now()]);

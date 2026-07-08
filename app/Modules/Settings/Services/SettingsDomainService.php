@@ -15,9 +15,13 @@ use App\Models\Modules\Settings\Domain\SystemSetting;
 use App\Models\Modules\Settings\Domain\OutletTaxAssignment;
 use App\Models\Modules\Settings\Domain\Tax;
 use App\Models\User;
-use App\Modules\Orders\Services\OrderTaxResolverService;
-use App\Modules\Settings\Support\TemplateSettingsPayload;
+use App\Modules\Inventory\Services\InventoryCostingPolicyService;
+use App\Modules\Inventory\Services\InventoryValuationService;
+use App\Modules\Inventory\Support\DeferredConsumptionTrigger;
+use App\Modules\Inventory\Support\InventoryCostingMethod;
+use App\Modules\Orders\Services\PosAuditLogService;
 use App\Modules\Settings\Support\OutletAccessResolver;
+use App\Modules\Settings\Support\TemplateSettingsPayload;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -31,6 +35,9 @@ class SettingsDomainService
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly SettingPrinterSyncService $settingPrinterSync,
         private readonly OutletLogoService $outletLogoService,
+        private readonly InventoryCostingPolicyService $inventoryCostingPolicyService,
+        private readonly InventoryValuationService $inventoryValuationService,
+        private readonly PosAuditLogService $auditLogService,
     ) {}
 
     /** @return array<string, mixed> */
@@ -466,7 +473,7 @@ class SettingsDomainService
     /** @return array<string, mixed> */
     public function getSystem(): array
     {
-        $row = SystemSetting::query()->first();
+        $row = SystemSetting::query()->find(self::SINGLETON_ID);
         if ($row === null) {
             $s = TemplateSettingsPayload::load()['system'] ?? [];
 
@@ -479,6 +486,8 @@ class SettingsDomainService
                 'enforceStockOnSale' => (bool) ($s['enforceStockOnSale'] ?? true),
                 'stockEnforcementMode' => (string) ($s['stockEnforcementMode'] ?? 'deferred'),
                 'allowNegativeStock' => (bool) ($s['allowNegativeStock'] ?? true),
+                'inventoryCostingMethod' => (string) ($s['inventoryCostingMethod'] ?? InventoryCostingMethod::MOVING_AVERAGE),
+                'deferredConsumptionTrigger' => (string) ($s['deferredConsumptionTrigger'] ?? DeferredConsumptionTrigger::SHIFT_CLOSE),
                 'customerAppUrl' => $s['customerAppUrl'] ?? null,
                 'employeeSelfServiceEnabled' => (bool) ($s['employeeSelfServiceEnabled'] ?? false),
             ];
@@ -510,9 +519,24 @@ class SettingsDomainService
     }
 
     /** @param  array<string, mixed>  $data */
-    public function putSystem(array $data): array
+    public function putSystem(array $data, ?User $actor = null): array
     {
         $mode = $this->resolveStockEnforcementMode($data);
+        $currentMethod = $this->inventoryCostingPolicyService->getMethod();
+        $nextMethod = isset($data['inventoryCostingMethod']) && is_string($data['inventoryCostingMethod'])
+            ? InventoryCostingMethod::normalize($data['inventoryCostingMethod'])
+            : $currentMethod;
+        $forceRecalculate = (bool) ($data['forceRecalculateOnMethodChange'] ?? false);
+
+        $this->inventoryCostingPolicyService->assertMethodChangeAllowed($currentMethod, $nextMethod, $forceRecalculate);
+
+        $existingRow = SystemSetting::query()->find(self::SINGLETON_ID);
+        $currentTrigger = DeferredConsumptionTrigger::normalize(
+            (string) ($existingRow?->deferred_consumption_trigger ?? DeferredConsumptionTrigger::SHIFT_CLOSE),
+        );
+        $nextTrigger = isset($data['deferredConsumptionTrigger']) && is_string($data['deferredConsumptionTrigger'])
+            ? DeferredConsumptionTrigger::normalize($data['deferredConsumptionTrigger'])
+            : $currentTrigger;
 
         $row = SystemSetting::query()->updateOrCreate(
             ['id' => self::SINGLETON_ID],
@@ -527,9 +551,30 @@ class SettingsDomainService
                 'stock_enforcement_mode' => $mode,
                 'enforce_stock_on_sale' => $mode === 'strict',
                 'allow_negative_stock' => (bool) ($data['allowNegativeStock'] ?? true),
+                'inventory_costing_method' => $nextMethod,
+                'deferred_consumption_trigger' => $nextTrigger,
                 'employee_self_service_enabled' => (bool) ($data['employeeSelfServiceEnabled'] ?? false),
             ],
         );
+
+        if ($currentMethod !== $nextMethod) {
+            $this->auditLogService->log(
+                'inventory_costing_method_changed',
+                'system_settings',
+                self::SINGLETON_ID,
+                null,
+                $actor,
+                [
+                    'from' => $currentMethod,
+                    'to' => $nextMethod,
+                    'forceRecalculate' => $forceRecalculate,
+                ],
+            );
+
+            if ($forceRecalculate) {
+                $this->inventoryValuationService->recalculate(actor: $actor);
+            }
+        }
 
         return $this->mapSystemRow($row);
     }
@@ -564,6 +609,12 @@ class SettingsDomainService
             'enforceStockOnSale' => $mode === 'strict',
             'stockEnforcementMode' => $mode,
             'allowNegativeStock' => (bool) ($row->allow_negative_stock ?? true),
+            'inventoryCostingMethod' => InventoryCostingMethod::normalize(
+                (string) ($row->inventory_costing_method ?? InventoryCostingMethod::MOVING_AVERAGE),
+            ),
+            'deferredConsumptionTrigger' => DeferredConsumptionTrigger::normalize(
+                (string) ($row->deferred_consumption_trigger ?? DeferredConsumptionTrigger::SHIFT_CLOSE),
+            ),
             'employeeSelfServiceEnabled' => (bool) $row->employee_self_service_enabled,
         ];
     }

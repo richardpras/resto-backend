@@ -22,6 +22,7 @@ trait InventoryValuationFixture
     protected function actingAsInventoryUser(?Outlet $outlet = null): User
     {
         $this->seedInventoryValuationPermissions();
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
         Artisan::call('passport:keys', ['--force' => true]);
 
         $role = Role::query()->firstOrCreate(
@@ -31,6 +32,7 @@ trait InventoryValuationFixture
         $role->permissions()->sync(
             Permission::query()->whereIn('code', [
                 'pos.use', 'inventory.manage', 'menu.manage', 'foodcost.view',
+                'settings.view', 'settings.update',
                 'recipe.view', 'recipe.manage', 'production.view', 'production.manage', 'forecast.view',
                 'analytics.view', 'analytics.manage',
                 'optimization.view', 'optimization.manage',

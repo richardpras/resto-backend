@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class SystemSetting extends Model
 {
     protected $fillable = [
+        'id',
         'enable_split_bill',
         'enable_multi_payment',
         'confirm_before_payment',
@@ -17,6 +18,8 @@ class SystemSetting extends Model
         'enforce_stock_on_sale',
         'stock_enforcement_mode',
         'allow_negative_stock',
+        'inventory_costing_method',
+        'deferred_consumption_trigger',
         'shift_close_open_bill_policy',
         'customer_app_url',
         'employee_self_service_enabled',

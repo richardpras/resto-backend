@@ -78,6 +78,28 @@ class InventoryConsumptionQueueService
         return $query->get()->all();
     }
 
+    /** @return list<InventoryConsumptionQueue> */
+    public function pendingForOutletOnBusinessDate(int $outletId, string $businessDate, ?int $limit = null): array
+    {
+        $query = InventoryConsumptionQueue::query()
+            ->where('outlet_id', $outletId)
+            ->whereIn('status', [
+                InventoryConsumptionQueue::STATUS_PENDING,
+                InventoryConsumptionQueue::STATUS_REVIEW_REQUIRED,
+            ])
+            ->whereHas('order', function ($q) use ($businessDate): void {
+                $q->where('payment_status', 'paid')
+                    ->whereDate('updated_at', $businessDate);
+            })
+            ->orderBy('id');
+
+        if ($limit !== null && $limit > 0) {
+            $query->limit($limit);
+        }
+
+        return $query->get()->all();
+    }
+
     /**
      * @return list<array<string, mixed>>
      */

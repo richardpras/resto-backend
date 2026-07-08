@@ -6,6 +6,7 @@ use App\Models\Modules\Inventory\Domain\InventoryValuation;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\OrderItemCostSnapshot;
 use App\Models\User;
+use App\Modules\Inventory\Services\InventoryCostingPolicyService;
 use App\Modules\Menu\Services\OrderItemRecipeSnapshotService;
 use App\Modules\Menu\Services\RecipeCostService;
 use App\Modules\Menu\Services\RecipeVersionService;
@@ -18,6 +19,7 @@ final class OrderItemCostSnapshotService
         private readonly RecipeVersionService $recipeVersionService,
         private readonly OrderItemRecipeSnapshotService $recipeSnapshotService,
         private readonly InventoryValuationAuditService $auditService,
+        private readonly InventoryCostingPolicyService $costingPolicyService,
     ) {}
 
     public function snapshotForPaidOrder(Order $order, ?User $actor = null): void
@@ -61,6 +63,7 @@ final class OrderItemCostSnapshotService
                     'cost_per_unit' => $costPerUnit,
                     'total_cost' => $totalCost,
                     'average_cost_version' => $version,
+                    'costing_method_snapshot' => $this->costingPolicyService->getMethod(),
                     'created_at' => now(),
                 ]);
 

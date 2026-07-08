@@ -26,7 +26,7 @@ class InventorySalePolicyService
             }
         }
 
-        $system = SystemSetting::query()->first();
+        $system = SystemSetting::query()->find(1);
         if ($system !== null) {
             $mode = $system->stock_enforcement_mode ?? null;
             if (is_string($mode) && $mode !== '') {
@@ -72,7 +72,7 @@ class InventorySalePolicyService
             }
         }
 
-        $system = SystemSetting::query()->first();
+        $system = SystemSetting::query()->find(1);
         if ($system !== null && $system->allow_negative_stock !== null) {
             return (bool) $system->allow_negative_stock;
         }
