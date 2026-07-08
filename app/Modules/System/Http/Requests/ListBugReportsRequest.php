@@ -23,6 +23,8 @@ class ListBugReportsRequest extends FormRequest
             'status' => ['nullable', 'string', Rule::in(BugReport::STATUSES)],
             'severity' => ['nullable', 'string', Rule::in(BugReport::SEVERITIES)],
             'search' => ['nullable', 'string', 'max:200'],
+            'createdFrom' => ['nullable', 'date'],
+            'createdTo' => ['nullable', 'date', 'after_or_equal:createdFrom'],
             'page' => ['nullable', 'integer', 'min:1'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];

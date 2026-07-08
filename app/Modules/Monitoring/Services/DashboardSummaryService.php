@@ -54,16 +54,25 @@ class DashboardSummaryService
             ];
         }
 
+        $startDate = isset($filters['startDate']) && is_string($filters['startDate']) && $filters['startDate'] !== ''
+            ? Carbon::parse($filters['startDate'])->startOfDay()
+            : Carbon::now()->startOfDay();
+        $endDate = isset($filters['endDate']) && is_string($filters['endDate']) && $filters['endDate'] !== ''
+            ? Carbon::parse($filters['endDate'])->endOfDay()
+            : Carbon::now()->endOfDay();
+
         $cacheKey = sprintf(
-            'dashboard:summary:%d:%s:%s',
+            'dashboard:summary:%d:%s:%s:%s:%s',
             (int) $user->id,
             $requestedOutletId ?? 0,
             implode(',', $scopedOutletIds),
+            $startDate->toDateString(),
+            $endDate->toDateString(),
         );
         $ttlSeconds = max(5, (int) config('monitoring.dashboard_summary_cache_seconds', 20));
 
-        return Cache::remember($cacheKey, now()->addSeconds($ttlSeconds), function () use ($requestedOutletId, $scopedOutletIds, $allowedOutletIds): array {
-            return $this->buildSummary($requestedOutletId, $scopedOutletIds, $allowedOutletIds);
+        return Cache::remember($cacheKey, now()->addSeconds($ttlSeconds), function () use ($requestedOutletId, $scopedOutletIds, $allowedOutletIds, $startDate, $endDate): array {
+            return $this->buildSummary($requestedOutletId, $scopedOutletIds, $allowedOutletIds, $startDate, $endDate);
         });
     }
 
@@ -72,23 +81,20 @@ class DashboardSummaryService
      * @param  list<int>  $allowedOutletIds
      * @return array<string,mixed>
      */
-    private function buildSummary(?int $requestedOutletId, array $scopedOutletIds, array $allowedOutletIds): array
+    private function buildSummary(?int $requestedOutletId, array $scopedOutletIds, array $allowedOutletIds, Carbon $rangeStart, Carbon $rangeEnd): array
     {
-        $todayStart = Carbon::now()->startOfDay();
-        $todayEnd = Carbon::now()->endOfDay();
-
-        $ordersToday = DB::table('orders')
+        $ordersInRange = DB::table('orders')
             ->whereIn('outlet_id', $scopedOutletIds)
-            ->whereBetween('created_at', [$todayStart, $todayEnd]);
+            ->whereBetween('created_at', [$rangeStart, $rangeEnd]);
 
-        $orderCountToday = (int) (clone $ordersToday)->count();
-        $revenueToday = (float) (clone $ordersToday)->sum('paid_total');
+        $orderCountToday = (int) (clone $ordersInRange)->count();
+        $revenueToday = (float) (clone $ordersInRange)->sum('paid_total');
         $avgOrderValue = $orderCountToday > 0 ? round($revenueToday / $orderCountToday, 2) : 0.0;
         $customerCount = (int) DB::table('loyalty_accounts')->whereIn('outlet_id', $scopedOutletIds)->count();
 
         $hourlyRows = DB::table('orders')
             ->whereIn('outlet_id', $scopedOutletIds)
-            ->whereBetween('created_at', [$todayStart, $todayEnd])
+            ->whereBetween('created_at', [$rangeStart, $rangeEnd])
             ->selectRaw("DATE_FORMAT(created_at, '%l%p') as hour_label, HOUR(created_at) as hour_sort, COUNT(*) as orders")
             ->groupBy('hour_sort', 'hour_label')
             ->orderBy('hour_sort')
@@ -102,7 +108,7 @@ class DashboardSummaryService
         $topMenus = DB::table('order_items as oi')
             ->join('orders as o', 'o.id', '=', 'oi.order_id')
             ->whereIn('o.outlet_id', $scopedOutletIds)
-            ->whereBetween('o.created_at', [$todayStart, $todayEnd])
+            ->whereBetween('o.created_at', [$rangeStart, $rangeEnd])
             ->selectRaw('oi.name as name, SUM(oi.qty) as qty, SUM(oi.line_total) as revenue')
             ->groupBy('oi.name')
             ->orderByDesc('qty')
@@ -118,6 +124,7 @@ class DashboardSummaryService
 
         $recentTransactions = DB::table('orders')
             ->whereIn('outlet_id', $scopedOutletIds)
+            ->whereBetween('created_at', [$rangeStart, $rangeEnd])
             ->orderByDesc('created_at')
             ->limit(8)
             ->get()
@@ -140,8 +147,8 @@ class DashboardSummaryService
             ->all();
 
         $monitoring = $this->monitoringMetricsService->aggregateForOutletIds($scopedOutletIds, [
-            'dateFrom' => $todayStart->toDateString(),
-            'dateTo' => $todayEnd->toDateString(),
+            'dateFrom' => $rangeStart->toDateString(),
+            'dateTo' => $rangeEnd->toDateString(),
         ]);
 
         return [
@@ -169,7 +176,7 @@ class DashboardSummaryService
                 'hardwareBridge' => $monitoring['hardwareBridge'] ?? [],
             ],
             'crmMetrics' => $monitoring['crmMetrics'] ?? $this->customerAnalyticsService->metricsForOutlets($scopedOutletIds),
-            'bestSellerOtherOutlets' => $this->bestSellerOtherOutlets($requestedOutletId, $allowedOutletIds, $todayStart, $todayEnd),
+            'bestSellerOtherOutlets' => $this->bestSellerOtherOutlets($requestedOutletId, $allowedOutletIds, $rangeStart, $rangeEnd),
         ];
     }
 
@@ -195,7 +202,7 @@ class DashboardSummaryService
             ->join('orders as o', 'o.id', '=', 'oi.order_id')
             ->join('outlets as outlet', 'outlet.id', '=', 'o.outlet_id')
             ->whereIn('o.outlet_id', $otherOutletIds)
-            ->whereBetween('o.created_at', [$todayStart, $todayEnd])
+            ->whereBetween('o.created_at', [$rangeStart, $rangeEnd])
             ->selectRaw('oi.name as name, o.outlet_id as outlet_id, outlet.name as outlet_name, SUM(oi.qty) as qty')
             ->groupBy('oi.name', 'o.outlet_id', 'outlet.name')
             ->orderByDesc('qty')

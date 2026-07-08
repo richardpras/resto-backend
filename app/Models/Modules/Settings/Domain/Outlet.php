@@ -43,4 +43,9 @@ class Outlet extends Model
     {
         return $this->hasMany(OutletTaxAssignment::class, 'outlet_id');
     }
+
+    public function reservationSetting(): HasOne
+    {
+        return $this->hasOne(OutletReservationSetting::class, 'outlet_id');
+    }
 }

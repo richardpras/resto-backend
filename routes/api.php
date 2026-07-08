@@ -98,7 +98,9 @@ use App\Modules\Orders\Http\Controllers\QrGuestSessionPublicController;
 use App\Modules\Orders\Http\Controllers\QrOrderPublicController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Orders\Http\Controllers\TableQrController;
+use App\Modules\Reservations\Http\Controllers\PublicReservationController;
 use App\Modules\Reservations\Http\Controllers\ReservationController;
+use App\Modules\Reservations\Http\Controllers\ReservationDepositController;
 use App\Modules\Payments\Http\Controllers\PaymentHealthController;
 use App\Modules\Payments\Http\Controllers\PaymentTransactionController;
 use App\Modules\Payments\Http\Controllers\XenditSandboxSimulationController;
@@ -127,6 +129,7 @@ use App\Modules\Settings\Http\Controllers\MerchantSettingsController;
 use App\Modules\Settings\Http\Controllers\NumberingSettingsController;
 use App\Modules\Settings\Http\Controllers\OutletPaymentMethodConfigController;
 use App\Modules\Settings\Http\Controllers\OutletReceiptSettingsController;
+use App\Modules\Settings\Http\Controllers\OutletReservationSettingsController;
 use App\Modules\Settings\Http\Controllers\OutletSettingsCrudController;
 use App\Modules\Settings\Http\Controllers\OutletLogoController;
 use App\Modules\Settings\Http\Controllers\PaymentMethodSettingsCrudController;
@@ -180,6 +183,11 @@ Route::prefix('v1')->group(function (): void {
     Route::post('public/qr-orders/{orderCode}/approve-adjustments', [QrOrderPublicController::class, 'approveAdjustments']);
     Route::get('public/qr-guest-sessions/{guestSessionToken}/orders', [QrGuestSessionPublicController::class, 'orders']);
     Route::get('public/qr/tables/{qrPublicId}/menu', [PublicQrMenuController::class, 'show']);
+    Route::get('public/reserve/{outletSlug}', [PublicReservationController::class, 'showOutlet'])->middleware('throttle:60,1');
+    Route::get('public/reserve/{outletSlug}/menu', [PublicReservationController::class, 'menu'])->middleware('throttle:60,1');
+    Route::post('public/reserve/{outletSlug}', [PublicReservationController::class, 'store'])->middleware('throttle:20,1');
+    Route::get('public/reservations/{reservationCode}', [PublicReservationController::class, 'show'])->middleware('throttle:60,1');
+    Route::post('public/reservations/{reservationCode}/deposit-proof', [PublicReservationController::class, 'submitDepositProof'])->middleware('throttle:10,1');
     Route::get('public/menu-images/{menuItem}', [MenuItemImageController::class, 'serve'])->whereNumber('menuItem');
     Route::get('public/outlet-logos/{outlet}', [OutletLogoController::class, 'serve'])->whereNumber('outlet');
     Route::get('qr/tables/{qrPublicId}', [TableQrController::class, 'resolve']);
@@ -207,6 +215,7 @@ Route::prefix('v1')->group(function (): void {
     Route::patch('orders/{order}/splits/{split}', [OrderController::class, 'updateSplit'])->middleware(['auth:api', 'permission:pos.use']);
     Route::post('orders/{order}/payments', [OrderController::class, 'addPayments'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('pos/bootstrap', [\App\Modules\Orders\Http\Controllers\PosBootstrapController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
+    Route::get('pos/offline-bootstrap', [\App\Modules\Orders\Http\Controllers\PosOfflineBootstrapController::class, 'show'])->middleware(['auth:api', 'permission:pos.use']);
     Route::get('pos/checkout-integrity-health', [\App\Modules\Orders\Http\Controllers\PosCheckoutIntegrityController::class, 'health'])->middleware(['auth:api', 'permission.any:pos.use,settings.manage']);
     Route::get('orders/{order}/payments', [OrderController::class, 'listPayments'])->middleware('auth:api');
     Route::get('orders/{order}/events', [OrderController::class, 'listEvents'])->middleware('auth:api');
@@ -863,6 +872,8 @@ Route::prefix('v1')->group(function (): void {
         Route::delete('outlets/{outletId}', [OutletSettingsCrudController::class, 'destroy'])->middleware('permission:settings.manage');
         Route::post('outlets/{outletId}/logo', [OutletLogoController::class, 'upload'])->middleware('permission:settings.update');
         Route::delete('outlets/{outletId}/logo', [OutletLogoController::class, 'destroy'])->middleware('permission:settings.update');
+        Route::get('outlets/{outletId}/reservation-settings', [OutletReservationSettingsController::class, 'show'])->middleware('permission:settings.view');
+        Route::patch('outlets/{outletId}/reservation-settings', [OutletReservationSettingsController::class, 'update'])->middleware('permission:settings.update');
 
         Route::get('taxes', [TaxSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
         Route::post('taxes', [TaxSettingsCrudController::class, 'store'])->middleware('permission:settings.update');
@@ -1096,6 +1107,10 @@ Route::prefix('v1')->group(function (): void {
         Route::post('qr-orders/{qrOrderRequest}/confirm-and-pay', [QrOrderController::class, 'confirmAndPay'])->middleware('permission.any:qr_orders.view,pos.use');
         Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission.any:qr_orders.view,pos.use');
         Route::post('qr-orders/{qrOrderRequest}/mark-served', [QrOrderController::class, 'markServed'])->middleware('permission.any:cashier.manage,pos.use,qr_orders.view');
+        Route::get('reservations/pending-deposits', [ReservationDepositController::class, 'index'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/approve-deposit', [ReservationDepositController::class, 'approve'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/reject-deposit', [ReservationDepositController::class, 'reject'])->middleware('permission:pos.use');
+        Route::get('reservations/{id}/deposit-proofs/{proofId}/file', [ReservationDepositController::class, 'proofFile'])->middleware('permission:pos.use');
         Route::post('reservations', [ReservationController::class, 'store'])->middleware('permission:pos.use');
         Route::get('reservations', [ReservationController::class, 'index'])->middleware('permission:pos.use');
         Route::get('reservations/dashboard', [ReservationController::class, 'dashboard'])->middleware('permission:pos.use');

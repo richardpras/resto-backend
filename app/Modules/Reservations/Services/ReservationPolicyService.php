@@ -17,6 +17,8 @@ class ReservationPolicyService
     {
         $allowed = [
             'draft' => ['confirmed', 'cancelled'],
+            'pending_deposit' => ['deposit_submitted', 'cancelled'],
+            'deposit_submitted' => ['confirmed', 'cancelled'],
             'confirmed' => ['checked_in', 'cancelled', 'no_show'],
             'checked_in' => ['seated', 'cancelled'],
             'seated' => ['completed', 'cancelled'],
@@ -79,6 +81,10 @@ class ReservationPolicyService
             throw \Illuminate\Validation\ValidationException::withMessages([
                 'status' => ['Service can only be started for checked-in or seated reservations.'],
             ]);
+        }
+
+        if ($linkedOrderId !== null && $status === 'checked_in') {
+            return;
         }
 
         if ($linkedOrderId !== null) {

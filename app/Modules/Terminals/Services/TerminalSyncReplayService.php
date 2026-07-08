@@ -16,9 +16,11 @@ use App\Modules\Orders\Http\Requests\OpenPosSessionRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderStatusRequest;
+use App\Modules\Orders\Http\Requests\SyncOrderSplitsRequest;
 use App\Modules\Orders\Services\OrderService;
 use App\Modules\Orders\Services\PosSessionService;
 use App\Modules\Orders\Services\QrOrderApprovalService;
+use App\Modules\Orders\Services\SplitBillService;
 use App\Modules\Payments\Http\Requests\StorePaymentTransactionRequest;
 use App\Modules\Payments\Services\PaymentGatewayService;
 use App\Modules\Print\Services\PrinterManagementService;
@@ -39,6 +41,7 @@ class TerminalSyncReplayService
         private readonly PosSessionService $posSessionService,
         private readonly PrinterManagementService $printerManagementService,
         private readonly ReceiptDocumentService $receiptDocumentService,
+        private readonly SplitBillService $splitBillService,
     ) {}
 
     public function assertWithinReplayWindow(?string $clientOccurredAtIso): void
@@ -67,6 +70,7 @@ class TerminalSyncReplayService
             TerminalOperationType::ORDER_UPDATE => $this->replayOrderUpdate($user, $outletId, $payload),
             TerminalOperationType::ORDER_UPDATE_STATUS => $this->replayOrderUpdateStatus($user, $outletId, $payload),
             TerminalOperationType::ORDER_ADD_PAYMENTS => $this->replayOrderAddPayments($user, $outletId, $payload),
+            TerminalOperationType::ORDER_SPLITS_SYNC => $this->replayOrderSplitsSync($user, $outletId, $payload),
             TerminalOperationType::PAYMENT_TRANSACTION_INITIATE => $this->replayPaymentInitiate($user, $outletId, $payload),
             TerminalOperationType::KITCHEN_TICKET_STATUS => $this->replayKitchenTicketStatus($user, $outletId, $payload),
             TerminalOperationType::QR_ORDER_CONFIRM => $this->replayQrConfirm($user, $outletId, $payload),
@@ -93,11 +97,17 @@ class TerminalSyncReplayService
         $this->assertOutletMatches($outletId, (int) $payload['outletId']);
         $validated = $this->validate($payload, (new StoreOrderRequest)->rules());
         $order = $this->orderService->create(CreateOrderData::fromArray($validated), $user);
+        $order->load('items');
 
         return [
             'entity' => 'order',
             'orderId' => (int) $order->id,
             'updatedAt' => $order->updated_at?->toIso8601String(),
+            'clientLocalRef' => $validated['clientLocalRef'] ?? null,
+            'items' => $order->items->map(fn ($item): array => [
+                'clientItemId' => (string) $item->item_id,
+                'orderItemId' => (int) $item->id,
+            ])->values()->all(),
         ];
     }
 
@@ -151,10 +161,19 @@ class TerminalSyncReplayService
     private function replayOrderAddPayments(User $user, int $outletId, array $payload): array
     {
         $orderId = (int) ($payload['orderId'] ?? 0);
+        if ($orderId < 1 && ! empty($payload['localOrderCode'])) {
+            $order = Order::query()
+                ->where('outlet_id', $outletId)
+                ->where('code', (string) $payload['localOrderCode'])
+                ->first();
+            if ($order !== null) {
+                $orderId = (int) $order->id;
+            }
+        }
         if ($orderId < 1) {
             throw ValidationException::withMessages(['orderId' => ['orderId is required.']]);
         }
-        unset($payload['orderId']);
+        unset($payload['orderId'], $payload['localOrderCode']);
         $validated = $this->validate($payload, (new AddOrderPaymentsRequest)->rules());
         $fresh = $this->orderService->addPayments(
             $user,
@@ -173,6 +192,91 @@ class TerminalSyncReplayService
             'entity' => 'order',
             'orderId' => (int) $fresh->id,
             'updatedAt' => $fresh->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function replayOrderSplitsSync(User $user, int $outletId, array $payload): array
+    {
+        $orderId = (int) ($payload['orderId'] ?? 0);
+        if ($orderId < 1 && ! empty($payload['localOrderCode'])) {
+            $resolved = Order::query()
+                ->where('outlet_id', $outletId)
+                ->where('code', (string) $payload['localOrderCode'])
+                ->first();
+            if ($resolved !== null) {
+                $orderId = (int) $resolved->id;
+            }
+        }
+        if ($orderId < 1) {
+            throw ValidationException::withMessages(['orderId' => ['orderId is required.']]);
+        }
+        $persons = $payload['persons'] ?? null;
+        if (! is_array($persons) || $persons === []) {
+            throw ValidationException::withMessages(['persons' => ['persons array is required.']]);
+        }
+
+        $order = Order::query()->with('items')->whereKey($orderId)->first();
+        if ($order === null) {
+            throw (new ModelNotFoundException)->setModel(Order::class, [(string) $orderId]);
+        }
+
+        $resolvedPersons = [];
+        foreach ($persons as $person) {
+            $items = [];
+            foreach ($person['items'] ?? [] as $item) {
+                $orderItemId = (int) ($item['orderItemId'] ?? 0);
+                if ($orderItemId < 1 && ! empty($item['clientItemId'])) {
+                    $match = $order->items->firstWhere('item_id', (string) $item['clientItemId']);
+                    if ($match !== null) {
+                        $orderItemId = (int) $match->id;
+                    }
+                }
+                if ($orderItemId < 1) {
+                    throw ValidationException::withMessages(['persons' => ['Unable to resolve order item for split sync.']]);
+                }
+                $items[] = [
+                    'orderItemId' => $orderItemId,
+                    'qty' => (float) ($item['qty'] ?? 0),
+                    'amount' => (float) ($item['amount'] ?? 0),
+                ];
+            }
+            $resolvedPersons[] = [
+                'splitType' => (string) ($person['splitType'] ?? 'mixed'),
+                'label' => (string) ($person['label'] ?? 'Split'),
+                'items' => $items,
+            ];
+        }
+
+        $requestPayload = ['persons' => $resolvedPersons];
+        if (isset($payload['idempotencyKey']) && is_string($payload['idempotencyKey'])) {
+            $requestPayload['idempotencyKey'] = $payload['idempotencyKey'];
+        }
+        if (isset($payload['expectedUpdatedAt']) && is_string($payload['expectedUpdatedAt'])) {
+            $requestPayload['expectedUpdatedAt'] = $payload['expectedUpdatedAt'];
+        }
+        $validated = $this->validate(
+            $requestPayload,
+            (new SyncOrderSplitsRequest)->rules(),
+        );
+        $splits = $this->splitBillService->syncSplits(
+            $user,
+            $orderId,
+            $validated['persons'],
+            $validated['idempotencyKey'] ?? null,
+            $validated['expectedUpdatedAt'] ?? null,
+        );
+
+        return [
+            'entity' => 'order_splits',
+            'orderId' => $orderId,
+            'splits' => $splits->map(fn ($split): array => [
+                'id' => (int) $split->id,
+                'label' => (string) $split->label,
+                'splitType' => (string) $split->split_type,
+            ])->values()->all(),
         ];
     }
 
