@@ -42,6 +42,7 @@ use App\Modules\HR\Http\Controllers\PayrollRunV2Controller;
 use App\Modules\HR\Http\Controllers\ShiftController;
 use App\Modules\Hardware\Http\Controllers\HardwareBridgeController;
 use App\Modules\Hardware\Http\Controllers\HardwarePairingController;
+use App\Modules\Inventory\Http\Controllers\DailyStocktakeController;
 use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\InventoryValuationController;
 use App\Modules\Inventory\Http\Controllers\InventoryConsumptionController;
@@ -417,6 +418,14 @@ Route::prefix('v1')->group(function (): void {
     Route::get('inventory/posting-health', [InventoryConsumptionController::class, 'health'])->middleware(['auth:api', 'permission.any:inventory.manage,settings.manage']);
     Route::get('inventory/consumption/queue', [InventoryConsumptionController::class, 'index'])->middleware(['auth:api', 'permission.any:inventory.manage,settings.manage']);
     Route::post('inventory/consumption/post', [InventoryConsumptionController::class, 'post'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::get('inventory/daily-stocktake', [DailyStocktakeController::class, 'index'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::post('inventory/daily-stocktake', [DailyStocktakeController::class, 'store'])->middleware(['auth:api', 'permission:inventory.manage']);
+    Route::get('inventory/daily-stocktake/{sessionId}', [DailyStocktakeController::class, 'show'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
+    Route::patch('inventory/daily-stocktake/{sessionId}/opening', [DailyStocktakeController::class, 'saveOpening'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
+    Route::patch('inventory/daily-stocktake/{sessionId}/closing', [DailyStocktakeController::class, 'saveClosing'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
+    Route::post('inventory/daily-stocktake/{sessionId}/submit', [DailyStocktakeController::class, 'submit'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
+    Route::post('inventory/daily-stocktake/{sessionId}/approve', [DailyStocktakeController::class, 'approve'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
+    Route::post('inventory/daily-stocktake/{sessionId}/cancel', [DailyStocktakeController::class, 'cancel'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
 
     Route::middleware('auth:api')->group(function (): void {
         Route::get('notifications/unread-count', [UserNotificationController::class, 'unreadCount']);
