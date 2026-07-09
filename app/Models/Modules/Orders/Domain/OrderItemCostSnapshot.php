@@ -17,6 +17,7 @@ class OrderItemCostSnapshot extends Model
         'cost_per_unit',
         'total_cost',
         'average_cost_version',
+        'costing_method_snapshot',
         'created_at',
     ];
 

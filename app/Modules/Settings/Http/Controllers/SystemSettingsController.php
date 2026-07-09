@@ -31,12 +31,15 @@ class SystemSettingsController extends Controller
             'enforceStockOnSale' => ['sometimes', 'boolean'],
             'stockEnforcementMode' => ['sometimes', 'string', 'in:strict,warning,deferred'],
             'allowNegativeStock' => ['sometimes', 'boolean'],
+            'inventoryCostingMethod' => ['sometimes', 'string', 'in:moving_average,fifo'],
+            'deferredConsumptionTrigger' => ['sometimes', 'string', 'in:shift_close,daily_stocktake'],
+            'forceRecalculateOnMethodChange' => ['sometimes', 'boolean'],
             'employeeSelfServiceEnabled' => ['sometimes', 'boolean'],
         ]);
 
         return response()->json([
             'message' => 'System settings saved successfully.',
-            'data' => $this->domain->putSystem($v),
+            'data' => $this->domain->putSystem($v, $request->user()),
         ]);
     }
 }

@@ -3,126 +3,115 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Inventory\Http\Requests\SaveDailyStocktakeCountsRequest;
+use App\Modules\Inventory\Http\Requests\StoreDailyStocktakeSessionRequest;
 use App\Modules\Inventory\Http\Resources\DailyStocktakeSessionResource;
+use App\Modules\Inventory\Services\DailyStocktakePostingService;
 use App\Modules\Inventory\Services\DailyStocktakeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
 
 class DailyStocktakeController extends Controller
 {
     public function __construct(
         private readonly DailyStocktakeService $stocktakeService,
+        private readonly DailyStocktakePostingService $postingService,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'outletId' => ['required', 'integer', 'min:1'],
-            'from' => ['nullable', 'date'],
-            'to' => ['nullable', 'date'],
-        ]);
+        $outletId = (int) $request->query('outletId', 0);
+        abort_if($outletId < 1, 422, 'outletId is required.');
 
         $sessions = $this->stocktakeService->listSessions(
-            (int) $validated['outletId'],
-            $validated['from'] ?? null,
-            $validated['to'] ?? null,
+            $outletId,
+            $request->query('from'),
+            $request->query('to'),
         );
 
         return response()->json([
-            'data' => DailyStocktakeSessionResource::collection($sessions),
+            'data' => DailyStocktakeSessionResource::collection($sessions->load('lines.ingredient:id,name,unit')),
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreDailyStocktakeSessionRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'outletId' => ['required', 'integer', 'min:1'],
-            'businessDate' => ['required', 'date'],
-        ]);
-
-        $session = $this->stocktakeService->createSession(
+        $validated = $request->validated();
+        $session = $this->stocktakeService->getOrCreateSession(
             (int) $validated['outletId'],
-            $validated['businessDate'],
+            (string) $validated['businessDate'],
             $request->user('api'),
         );
 
         return response()->json([
             'data' => new DailyStocktakeSessionResource($session),
-        ], Response::HTTP_CREATED);
+        ], 201);
     }
 
     public function show(int $sessionId): JsonResponse
     {
-        $session = $this->stocktakeService->loadSession($sessionId);
+        $session = $this->stocktakeService->findSession($sessionId);
 
         return response()->json([
             'data' => new DailyStocktakeSessionResource($session),
         ]);
     }
 
-    public function saveOpening(Request $request, int $sessionId): JsonResponse
+    public function saveOpening(int $sessionId, SaveDailyStocktakeCountsRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'lines' => ['required', 'array'],
-            'lines.*.ingredientId' => ['required', 'integer', 'min:1'],
-            'lines.*.openingQty' => ['nullable', 'numeric', 'min:0'],
-        ]);
-
-        $session = $this->stocktakeService->loadSession($sessionId);
-        $updated = $this->stocktakeService->saveOpening($session, $validated['lines']);
+        $session = $this->stocktakeService->saveOpening(
+            $sessionId,
+            $request->validated('lines'),
+            $request->user('api'),
+        );
 
         return response()->json([
-            'data' => new DailyStocktakeSessionResource($updated),
+            'message' => 'Opening counts saved.',
+            'data' => new DailyStocktakeSessionResource($session),
         ]);
     }
 
-    public function saveClosing(Request $request, int $sessionId): JsonResponse
+    public function saveClosing(int $sessionId, SaveDailyStocktakeCountsRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'lines' => ['required', 'array'],
-            'lines.*.ingredientId' => ['required', 'integer', 'min:1'],
-            'lines.*.closingQty' => ['nullable', 'numeric', 'min:0'],
-        ]);
-
-        $session = $this->stocktakeService->loadSession($sessionId);
-        $updated = $this->stocktakeService->saveClosing($session, $validated['lines']);
+        $session = $this->stocktakeService->saveClosing(
+            $sessionId,
+            $request->validated('lines'),
+            $request->user('api'),
+        );
 
         return response()->json([
-            'data' => new DailyStocktakeSessionResource($updated),
+            'message' => 'Closing counts saved.',
+            'data' => new DailyStocktakeSessionResource($session),
         ]);
     }
 
-    public function submit(int $sessionId): JsonResponse
+    public function submit(int $sessionId, Request $request): JsonResponse
     {
-        $session = $this->stocktakeService->loadSession($sessionId);
-        $updated = $this->stocktakeService->submit($session);
+        $session = $this->stocktakeService->submitForApproval($sessionId, $request->user('api'));
 
         return response()->json([
-            'message' => 'Daily stocktake submitted for approval.',
-            'data' => new DailyStocktakeSessionResource($updated),
+            'message' => 'Stocktake submitted for approval.',
+            'data' => new DailyStocktakeSessionResource($session),
         ]);
     }
 
-    public function approve(Request $request, int $sessionId): JsonResponse
+    public function approve(int $sessionId, Request $request): JsonResponse
     {
-        $session = $this->stocktakeService->loadSession($sessionId);
-        $updated = $this->stocktakeService->approve($session, $request->user('api'));
+        $session = $this->postingService->approveAndPost($sessionId, $request->user('api'));
 
         return response()->json([
-            'message' => 'Daily stocktake approved and posted.',
-            'data' => new DailyStocktakeSessionResource($updated),
+            'message' => 'Stocktake approved and posted.',
+            'data' => new DailyStocktakeSessionResource($session),
         ]);
     }
 
-    public function cancel(int $sessionId): JsonResponse
+    public function cancel(int $sessionId, Request $request): JsonResponse
     {
-        $session = $this->stocktakeService->loadSession($sessionId);
-        $updated = $this->stocktakeService->cancel($session);
+        $session = $this->stocktakeService->cancel($sessionId, $request->user('api'));
 
         return response()->json([
-            'message' => 'Daily stocktake session cancelled.',
-            'data' => new DailyStocktakeSessionResource($updated),
+            'message' => 'Stocktake cancelled.',
+            'data' => new DailyStocktakeSessionResource($session),
         ]);
     }
 }

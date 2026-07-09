@@ -45,6 +45,7 @@ use App\Modules\Hardware\Http\Controllers\HardwarePairingController;
 use App\Modules\Inventory\Http\Controllers\DailyStocktakeController;
 use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\InventoryValuationController;
+use App\Modules\Inventory\Http\Controllers\DailyStocktakeController;
 use App\Modules\Inventory\Http\Controllers\InventoryConsumptionController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Kitchen\Http\Controllers\KitchenTicketController;
@@ -426,6 +427,17 @@ Route::prefix('v1')->group(function (): void {
     Route::post('inventory/daily-stocktake/{sessionId}/submit', [DailyStocktakeController::class, 'submit'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
     Route::post('inventory/daily-stocktake/{sessionId}/approve', [DailyStocktakeController::class, 'approve'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
     Route::post('inventory/daily-stocktake/{sessionId}/cancel', [DailyStocktakeController::class, 'cancel'])->middleware(['auth:api', 'permission:inventory.manage'])->whereNumber('sessionId');
+
+    Route::prefix('inventory/daily-stocktake')->middleware(['auth:api', 'permission:inventory.manage'])->group(function (): void {
+        Route::get('/', [DailyStocktakeController::class, 'index']);
+        Route::post('/', [DailyStocktakeController::class, 'store']);
+        Route::get('/{sessionId}', [DailyStocktakeController::class, 'show'])->whereNumber('sessionId');
+        Route::patch('/{sessionId}/opening', [DailyStocktakeController::class, 'saveOpening'])->whereNumber('sessionId');
+        Route::patch('/{sessionId}/closing', [DailyStocktakeController::class, 'saveClosing'])->whereNumber('sessionId');
+        Route::post('/{sessionId}/submit', [DailyStocktakeController::class, 'submit'])->whereNumber('sessionId');
+        Route::post('/{sessionId}/approve', [DailyStocktakeController::class, 'approve'])->whereNumber('sessionId');
+        Route::post('/{sessionId}/cancel', [DailyStocktakeController::class, 'cancel'])->whereNumber('sessionId');
+    });
 
     Route::middleware('auth:api')->group(function (): void {
         Route::get('notifications/unread-count', [UserNotificationController::class, 'unreadCount']);

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Http\Resources;
 
+use App\Modules\Inventory\Services\InventoryCostingPolicyService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -17,6 +18,7 @@ class InventoryValuationResource extends JsonResource
             'stockQuantity' => (float) $this->stock_quantity,
             'inventoryValue' => round((float) $this->inventory_value, 4),
             'averageCost' => (float) $this->average_cost,
+            'costingMethod' => app(InventoryCostingPolicyService::class)->getMethod(),
             'lastPurchaseCost' => (float) $this->last_purchase_cost,
             'lastGrnId' => $this->last_grn_id !== null ? (int) $this->last_grn_id : null,
             'lastUpdatedAt' => $this->last_updated_at?->toIso8601String(),

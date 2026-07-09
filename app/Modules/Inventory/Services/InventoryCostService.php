@@ -8,13 +8,14 @@ final class InventoryCostService
 {
     public function __construct(
         private readonly InventoryValuationService $valuationService,
+        private readonly InventoryCostingPolicyService $costingPolicyService,
     ) {}
 
     public function resolveUnitCost(int $ingredientId, int $outletId): float
     {
-        $average = $this->valuationService->getAverageCost($ingredientId, $outletId);
-        if ($average > 0) {
-            return $average;
+        $unitCost = $this->valuationService->getAverageCost($ingredientId, $outletId);
+        if ($unitCost > 0) {
+            return $unitCost;
         }
 
         $valuation = $this->valuationService->getInventoryValue($ingredientId, $outletId);
@@ -48,5 +49,10 @@ final class InventoryCostService
         }
 
         return round($total, 4);
+    }
+
+    public function getCostingMethod(): string
+    {
+        return $this->costingPolicyService->getMethod();
     }
 }

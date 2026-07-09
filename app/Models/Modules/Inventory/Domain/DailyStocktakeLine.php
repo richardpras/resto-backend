@@ -41,6 +41,6 @@ class DailyStocktakeLine extends Model
 
     public function ingredient(): BelongsTo
     {
-        return $this->belongsTo(Ingredient::class, 'ingredient_id');
+        return $this->belongsTo(Ingredient::class);
     }
 }

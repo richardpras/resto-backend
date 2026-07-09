@@ -5,259 +5,207 @@ namespace App\Modules\Inventory\Services;
 use App\Models\Modules\Inventory\Domain\DailyStocktakeLine;
 use App\Models\Modules\Inventory\Domain\DailyStocktakeSession;
 use App\Models\Modules\Inventory\Domain\Ingredient;
-use App\Models\Modules\Inventory\Domain\InventoryStock;
-use App\Models\Modules\Inventory\Domain\StockMovement;
 use App\Models\User;
-use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
-class DailyStocktakeService
+final class DailyStocktakeService
 {
     public function __construct(
+        private readonly DailyStocktakeTheoreticalUsageService $theoreticalUsageService,
+        private readonly DailyStocktakePurchasesService $purchasesService,
         private readonly InventoryCostService $inventoryCostService,
-        private readonly IngredientOutletStockLedger $stockLedger,
-        private readonly InventoryValuationService $valuationService,
-        private readonly InventoryConsumptionPostingService $consumptionPostingService,
     ) {}
+
+    public function getOrCreateSession(int $outletId, string $businessDate, ?User $actor = null): DailyStocktakeSession
+    {
+        abort_if($outletId < 1, Response::HTTP_UNPROCESSABLE_ENTITY, 'outletId is required.');
+
+        $date = Carbon::parse($businessDate)->toDateString();
+
+        $existing = DailyStocktakeSession::query()
+            ->where('outlet_id', $outletId)
+            ->whereDate('business_date', $date)
+            ->first();
+
+        if ($existing !== null) {
+            return $existing->load('lines.ingredient:id,name,unit');
+        }
+
+        return DB::transaction(function () use ($outletId, $date): DailyStocktakeSession {
+            $session = DailyStocktakeSession::query()->create([
+                'outlet_id' => $outletId,
+                'business_date' => $date,
+                'status' => DailyStocktakeSession::STATUS_DRAFT,
+            ]);
+
+            $this->seedLinesForSession($session);
+
+            return $session->fresh(['lines.ingredient:id,name,unit']);
+        });
+    }
+
+    /** @param array<int, array{ingredientId: int, openingQty: float}> $lines */
+    public function saveOpening(int $sessionId, array $lines, ?User $actor = null): DailyStocktakeSession
+    {
+        return DB::transaction(function () use ($sessionId, $lines): DailyStocktakeSession {
+            $session = $this->lockEditableSession($sessionId);
+            $this->applyLineInputs($session, $lines, 'opening_qty');
+            $session->update(['opening_submitted_at' => now()]);
+
+            return $this->buildPreview($session->id);
+        });
+    }
+
+    /** @param array<int, array{ingredientId: int, closingQty: float}> $lines */
+    public function saveClosing(int $sessionId, array $lines, ?User $actor = null): DailyStocktakeSession
+    {
+        return DB::transaction(function () use ($sessionId, $lines): DailyStocktakeSession {
+            $session = $this->lockEditableSession($sessionId);
+            abort_if(
+                $session->opening_submitted_at === null,
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'Opening count must be submitted before closing count.',
+            );
+            $this->applyLineInputs($session, $lines, 'closing_qty');
+            $session->update(['closing_submitted_at' => now()]);
+
+            return $this->buildPreview($session->id);
+        });
+    }
+
+    public function buildPreview(int $sessionId): DailyStocktakeSession
+    {
+        return DB::transaction(function () use ($sessionId): DailyStocktakeSession {
+            /** @var DailyStocktakeSession $session */
+            $session = DailyStocktakeSession::query()->whereKey($sessionId)->lockForUpdate()->firstOrFail();
+            $session->load('lines');
+
+            $outletId = (int) $session->outlet_id;
+            $businessDate = $session->business_date->toDateString();
+            $purchases = $this->purchasesService->purchasesForBusinessDate($outletId, $businessDate);
+            $theoretical = $this->theoreticalUsageService->usageForBusinessDate($outletId, $businessDate);
+
+            foreach ($session->lines as $line) {
+                $ingredientId = (int) $line->ingredient_id;
+                $opening = (float) ($line->opening_qty ?? 0);
+                $closing = $line->closing_qty !== null ? (float) $line->closing_qty : null;
+                $purchasesQty = (float) ($purchases[$ingredientId] ?? 0);
+                $theoreticalQty = (float) ($theoretical[$ingredientId] ?? 0);
+                $overnight = max(0, round((float) $line->previous_closing_qty - $opening, 4));
+
+                $operational = 0.0;
+                if ($closing !== null) {
+                    $actualUsage = $opening + $purchasesQty - $closing;
+                    $operational = round($actualUsage - $theoreticalQty - $overnight, 4);
+                }
+
+                $line->update([
+                    'purchases_qty' => $purchasesQty,
+                    'theoretical_usage_qty' => $theoreticalQty,
+                    'overnight_variance_qty' => $overnight,
+                    'operational_variance_qty' => $operational,
+                    'unit_cost' => $this->inventoryCostService->resolveUnitCost($ingredientId, $outletId),
+                ]);
+            }
+
+            return $session->fresh(['lines.ingredient:id,name,unit']);
+        });
+    }
+
+    public function submitForApproval(int $sessionId, ?User $actor = null): DailyStocktakeSession
+    {
+        return DB::transaction(function () use ($sessionId, $actor): DailyStocktakeSession {
+            $session = $this->lockEditableSession($sessionId);
+            abort_if(
+                $session->closing_submitted_at === null,
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'Closing count must be submitted before approval.',
+            );
+            $this->buildPreview($sessionId);
+            $session->update(['status' => DailyStocktakeSession::STATUS_PENDING_APPROVAL]);
+
+            return $session->fresh(['lines.ingredient:id,name,unit']);
+        });
+    }
+
+    public function approveAndPost(int $sessionId, ?User $actor = null): DailyStocktakeSession
+    {
+        return app(DailyStocktakePostingService::class)->approveAndPost($sessionId, $actor);
+    }
+
+    public function cancel(int $sessionId, ?User $actor = null): DailyStocktakeSession
+    {
+        $session = DailyStocktakeSession::query()->findOrFail($sessionId);
+        abort_if(
+            $session->status === DailyStocktakeSession::STATUS_POSTED,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+            'Posted stocktake cannot be cancelled.',
+        );
+        $session->update(['status' => DailyStocktakeSession::STATUS_CANCELLED]);
+
+        return $session->fresh(['lines.ingredient:id,name,unit']);
+    }
 
     /** @return Collection<int, DailyStocktakeSession> */
     public function listSessions(int $outletId, ?string $from = null, ?string $to = null): Collection
     {
         return DailyStocktakeSession::query()
-            ->with(['lines.ingredient'])
             ->where('outlet_id', $outletId)
-            ->when($from !== null && $from !== '', fn ($q) => $q->whereDate('business_date', '>=', $from))
-            ->when($to !== null && $to !== '', fn ($q) => $q->whereDate('business_date', '<=', $to))
+            ->when($from !== null, fn ($q) => $q->whereDate('business_date', '>=', $from))
+            ->when($to !== null, fn ($q) => $q->whereDate('business_date', '<=', $to))
             ->orderByDesc('business_date')
-            ->orderByDesc('id')
+            ->limit(60)
             ->get();
     }
 
-    public function createSession(int $outletId, string $businessDate, ?User $actor = null): DailyStocktakeSession
+    public function findSession(int $sessionId): DailyStocktakeSession
     {
-        $existing = DailyStocktakeSession::query()
+        return DailyStocktakeSession::query()
+            ->with('lines.ingredient:id,name,unit')
+            ->findOrFail($sessionId);
+    }
+
+    public function hasPostedSessionForDate(int $outletId, string $businessDate): bool
+    {
+        return DailyStocktakeSession::query()
             ->where('outlet_id', $outletId)
             ->whereDate('business_date', $businessDate)
-            ->where('status', '!=', DailyStocktakeSession::STATUS_CANCELLED)
-            ->first();
-
-        if ($existing !== null) {
-            throw ValidationException::withMessages([
-                'businessDate' => ['A stocktake session already exists for this outlet and date.'],
-            ]);
-        }
-
-        return DB::transaction(function () use ($outletId, $businessDate, $actor): DailyStocktakeSession {
-            $session = DailyStocktakeSession::query()->create([
-                'outlet_id' => $outletId,
-                'business_date' => $businessDate,
-                'status' => DailyStocktakeSession::STATUS_DRAFT,
-                'created_by_user_id' => $actor?->id,
-            ]);
-
-            $ingredients = Ingredient::query()
-                ->where('outlet_id', $outletId)
-                ->where('type', 'ingredient')
-                ->orderBy('name')
-                ->get();
-
-            foreach ($ingredients as $ingredient) {
-                $previousClosing = $this->resolvePreviousClosingQty($outletId, (int) $ingredient->id, $businessDate);
-                $purchasesQty = $this->sumMovementQty($outletId, (int) $ingredient->id, $businessDate, 'purchase');
-                $unitCost = $this->inventoryCostService->resolveUnitCost((int) $ingredient->id, $outletId);
-
-                DailyStocktakeLine::query()->create([
-                    'session_id' => $session->id,
-                    'ingredient_id' => $ingredient->id,
-                    'previous_closing_qty' => $previousClosing,
-                    'opening_qty' => $previousClosing,
-                    'overnight_variance_qty' => 0,
-                    'purchases_qty' => $purchasesQty,
-                    'unit_cost' => $unitCost,
-                    'theoretical_usage_qty' => $this->sumMovementQty($outletId, (int) $ingredient->id, $businessDate, 'sale'),
-                ]);
-            }
-
-            return $this->loadSession((int) $session->id);
-        });
-    }
-
-    public function loadSession(int $sessionId): DailyStocktakeSession
-    {
-        $session = DailyStocktakeSession::query()
-            ->with(['lines.ingredient'])
-            ->find($sessionId);
-
-        abort_if($session === null, Response::HTTP_NOT_FOUND, 'Daily stocktake session not found.');
-
-        return $session;
-    }
-
-    /**
-     * @param  list<array{ingredientId:int, openingQty?:float}>  $lines
-     */
-    public function saveOpening(DailyStocktakeSession $session, array $lines): DailyStocktakeSession
-    {
-        $this->assertEditable($session);
-
-        return DB::transaction(function () use ($session, $lines): DailyStocktakeSession {
-            foreach ($lines as $row) {
-                $line = $this->findLine($session, (int) $row['ingredientId']);
-                if ($line === null || ! isset($row['openingQty'])) {
-                    continue;
-                }
-
-                $openingQty = max(0, (float) $row['openingQty']);
-                $line->opening_qty = $openingQty;
-                $line->overnight_variance_qty = round($openingQty - (float) $line->previous_closing_qty, 4);
-                $line->purchases_qty = $this->sumMovementQty(
-                    (int) $session->outlet_id,
-                    (int) $line->ingredient_id,
-                    $session->business_date->toDateString(),
-                    'purchase',
-                );
-                $line->theoretical_usage_qty = $this->sumMovementQty(
-                    (int) $session->outlet_id,
-                    (int) $line->ingredient_id,
-                    $session->business_date->toDateString(),
-                    'sale',
-                );
-                $this->recalculateOperationalVariance($line);
-                $line->save();
-            }
-
-            $session->opening_submitted_at = now();
-            $session->save();
-
-            return $this->loadSession((int) $session->id);
-        });
-    }
-
-    /**
-     * @param  list<array{ingredientId:int, closingQty?:float}>  $lines
-     */
-    public function saveClosing(DailyStocktakeSession $session, array $lines): DailyStocktakeSession
-    {
-        $this->assertEditable($session);
-        abort_if($session->opening_submitted_at === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Opening counts must be saved first.');
-
-        return DB::transaction(function () use ($session, $lines): DailyStocktakeSession {
-            foreach ($lines as $row) {
-                $line = $this->findLine($session, (int) $row['ingredientId']);
-                if ($line === null || ! isset($row['closingQty'])) {
-                    continue;
-                }
-
-                $line->closing_qty = max(0, (float) $row['closingQty']);
-                $line->theoretical_usage_qty = $this->sumMovementQty(
-                    (int) $session->outlet_id,
-                    (int) $line->ingredient_id,
-                    $session->business_date->toDateString(),
-                    'sale',
-                );
-                $this->recalculateOperationalVariance($line);
-                $line->save();
-            }
-
-            $session->closing_submitted_at = now();
-            $session->save();
-
-            return $this->loadSession((int) $session->id);
-        });
-    }
-
-    public function submit(DailyStocktakeSession $session): DailyStocktakeSession
-    {
-        $this->assertEditable($session);
-        abort_if($session->closing_submitted_at === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Closing counts must be saved first.');
-
-        $session->update(['status' => DailyStocktakeSession::STATUS_PENDING_APPROVAL]);
-
-        return $this->loadSession((int) $session->id);
-    }
-
-    public function approve(DailyStocktakeSession $session, ?User $actor = null): DailyStocktakeSession
-    {
-        abort_unless(
-            $session->status === DailyStocktakeSession::STATUS_PENDING_APPROVAL,
-            Response::HTTP_UNPROCESSABLE_ENTITY,
-            'Only pending stocktake sessions can be approved.',
-        );
-
-        return DB::transaction(function () use ($session, $actor): DailyStocktakeSession {
-            $session->load('lines');
-            $outletId = (int) $session->outlet_id;
-            $sessionKey = (string) $session->id;
-
-            $this->consumptionPostingService->processOutlet($outletId, 'daily_stocktake');
-
-            foreach ($session->lines as $line) {
-                $this->postVarianceMovements($outletId, $line, $sessionKey);
-            }
-
-            $session->update([
-                'status' => DailyStocktakeSession::STATUS_POSTED,
-                'posted_at' => now(),
-                'approved_by_user_id' => $actor?->id,
-            ]);
-
-            return $this->loadSession((int) $session->id);
-        });
-    }
-
-    public function cancel(DailyStocktakeSession $session): DailyStocktakeSession
-    {
-        abort_if(
-            $session->status === DailyStocktakeSession::STATUS_POSTED,
-            Response::HTTP_UNPROCESSABLE_ENTITY,
-            'Posted stocktake sessions cannot be cancelled.',
-        );
-
-        $session->update(['status' => DailyStocktakeSession::STATUS_CANCELLED]);
-
-        return $this->loadSession((int) $session->id);
-    }
-
-    private function assertEditable(DailyStocktakeSession $session): void
-    {
-        abort_unless(
-            $session->status === DailyStocktakeSession::STATUS_DRAFT,
-            Response::HTTP_UNPROCESSABLE_ENTITY,
-            'Only draft stocktake sessions can be edited.',
-        );
-    }
-
-    private function findLine(DailyStocktakeSession $session, int $ingredientId): ?DailyStocktakeLine
-    {
-        return DailyStocktakeLine::query()
-            ->where('session_id', $session->id)
-            ->where('ingredient_id', $ingredientId)
-            ->first();
-    }
-
-    private function resolvePreviousClosingQty(int $outletId, int $ingredientId, string $businessDate): float
-    {
-        $previousSessionId = DailyStocktakeSession::query()
-            ->where('outlet_id', $outletId)
             ->where('status', DailyStocktakeSession::STATUS_POSTED)
-            ->whereDate('business_date', '<', $businessDate)
-            ->orderByDesc('business_date')
-            ->value('id');
+            ->exists();
+    }
 
-        if ($previousSessionId !== null) {
-            $closing = DailyStocktakeLine::query()
-                ->where('session_id', $previousSessionId)
-                ->where('ingredient_id', $ingredientId)
-                ->value('closing_qty');
+    private function seedLinesForSession(DailyStocktakeSession $session): void
+    {
+        $outletId = (int) $session->outlet_id;
+        $businessDate = $session->business_date->toDateString();
+        $previousClosing = $this->previousClosingQuantities($outletId, $businessDate);
 
-            if ($closing !== null) {
-                return (float) $closing;
-            }
+        $ingredients = Ingredient::query()
+            ->where('type', 'ingredient')
+            ->where(function ($q) use ($outletId): void {
+                $q->where('outlet_id', $outletId)->orWhereNull('outlet_id');
+            })
+            ->orderBy('name')
+            ->get(['id']);
+
+        foreach ($ingredients as $ingredient) {
+            $ingredientId = (int) $ingredient->id;
+            $previousQty = (float) ($previousClosing[$ingredientId] ?? $this->resolveInventoryStockQty($outletId, $ingredientId));
+            DailyStocktakeLine::query()->create([
+                'session_id' => $session->id,
+                'ingredient_id' => $ingredientId,
+                'previous_closing_qty' => $previousQty,
+                'opening_qty' => $previousQty,
+            ]);
         }
+    }
 
-        $stock = InventoryStock::query()
+    private function resolveInventoryStockQty(int $outletId, int $ingredientId): float
+    {
+        $stock = DB::table('inventory_stocks')
             ->where('outlet_id', $outletId)
             ->where('ingredient_id', $ingredientId)
             ->value('stock');
@@ -265,84 +213,63 @@ class DailyStocktakeService
         return (float) ($stock ?? 0);
     }
 
-    private function sumMovementQty(int $outletId, int $ingredientId, string $businessDate, string $type): float
+    /** @return array<int, float> */
+    private function previousClosingQuantities(int $outletId, string $businessDate): array
     {
-        return (float) StockMovement::query()
+        $previousSession = DailyStocktakeSession::query()
             ->where('outlet_id', $outletId)
-            ->where('inventory_item_id', $ingredientId)
-            ->where('type', $type)
-            ->whereDate('created_at', $businessDate)
-            ->sum('quantity');
-    }
+            ->whereDate('business_date', '<', $businessDate)
+            ->where('status', DailyStocktakeSession::STATUS_POSTED)
+            ->orderByDesc('business_date')
+            ->first();
 
-    private function recalculateOperationalVariance(DailyStocktakeLine $line): void
-    {
-        $opening = $line->opening_qty !== null ? (float) $line->opening_qty : 0.0;
-        $purchases = (float) $line->purchases_qty;
-        $theoretical = (float) $line->theoretical_usage_qty;
-        $closing = $line->closing_qty !== null ? (float) $line->closing_qty : null;
-
-        if ($closing === null) {
-            $line->operational_variance_qty = 0;
-
-            return;
+        if ($previousSession === null) {
+            return [];
         }
 
-        $expectedClosing = $opening + $purchases - $theoretical;
-        $line->operational_variance_qty = round($expectedClosing - $closing, 4);
-    }
+        $previousSession->load('lines');
 
-    private function postVarianceMovements(int $outletId, DailyStocktakeLine $line, string $sessionId): void
-    {
-        $unitCost = (float) $line->unit_cost;
-        $ingredientId = (int) $line->ingredient_id;
-        $payload = [
-            'cost_method' => 'moving_average',
-            'unit_cost' => $unitCost,
-            'event' => 'daily_stocktake_variance',
-        ];
-
-        $overnight = (float) $line->overnight_variance_qty;
-        if ($overnight > 0) {
-            $this->stockLedger->apply(
-                $outletId,
-                $ingredientId,
-                'waste',
-                $overnight,
-                'daily_stocktake',
-                $sessionId,
-                $payload,
-                false,
-            );
-            $this->valuationService->recordConsumption($ingredientId, $outletId, $overnight);
+        $result = [];
+        foreach ($previousSession->lines as $line) {
+            if ($line->closing_qty !== null) {
+                $result[(int) $line->ingredient_id] = (float) $line->closing_qty;
+            }
         }
 
-        $operational = (float) $line->operational_variance_qty;
-        if ($operational > 0) {
-            $this->stockLedger->apply(
-                $outletId,
-                $ingredientId,
-                'waste',
-                $operational,
-                'daily_stocktake',
-                $sessionId,
-                $payload,
-                false,
-            );
-            $this->valuationService->recordConsumption($ingredientId, $outletId, $operational);
-        } elseif ($operational < 0) {
-            $qty = abs($operational);
-            $this->stockLedger->apply(
-                $outletId,
-                $ingredientId,
-                'adjustment',
-                $qty,
-                'daily_stocktake',
-                $sessionId,
-                $payload,
-                false,
-            );
-            $this->valuationService->recordPurchase($ingredientId, $outletId, $qty, $unitCost);
+        return $result;
+    }
+
+    private function lockEditableSession(int $sessionId): DailyStocktakeSession
+    {
+        /** @var DailyStocktakeSession $session */
+        $session = DailyStocktakeSession::query()->whereKey($sessionId)->lockForUpdate()->firstOrFail();
+        abort_if(
+            $session->status === DailyStocktakeSession::STATUS_POSTED,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+            'Posted stocktake is read-only.',
+        );
+        abort_if(
+            $session->status === DailyStocktakeSession::STATUS_CANCELLED,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+            'Cancelled stocktake cannot be edited.',
+        );
+
+        return $session;
+    }
+
+    /** @param array<int, array{ingredientId: int, openingQty?: float, closingQty?: float}> $lines */
+    private function applyLineInputs(DailyStocktakeSession $session, array $lines, string $field): void
+    {
+        foreach ($lines as $input) {
+            $ingredientId = (int) ($input['ingredientId'] ?? 0);
+            $qty = (float) ($input[$field === 'opening_qty' ? 'openingQty' : 'closingQty'] ?? 0);
+            abort_if($ingredientId < 1, Response::HTTP_UNPROCESSABLE_ENTITY, 'ingredientId is required.');
+            abort_if($qty < 0, Response::HTTP_UNPROCESSABLE_ENTITY, 'Quantity cannot be negative.');
+
+            DailyStocktakeLine::query()
+                ->where('session_id', $session->id)
+                ->where('ingredient_id', $ingredientId)
+                ->update([$field => $qty]);
         }
     }
 }

@@ -8,6 +8,7 @@ use App\Models\Modules\Purchase\Domain\PurchaseOrder;
 use App\Models\Modules\Purchase\Domain\PurchaseOrderItem;
 use App\Models\User;
 use App\Modules\Inventory\Services\IngredientOutletStockLedger;
+use App\Modules\Inventory\Services\InventoryCostingPolicyService;
 use App\Modules\Inventory\Services\InventoryValuationService;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
@@ -23,6 +24,7 @@ final class GoodsReceivingLifecycleService
         private readonly IngredientOutletStockLedger $ingredientOutletStockLedger,
         private readonly ProcurementPostingService $procurementPostingService,
         private readonly InventoryValuationService $inventoryValuationService,
+        private readonly InventoryCostingPolicyService $inventoryCostingPolicyService,
     ) {}
 
     /** @param array<string,mixed> $data */
@@ -165,7 +167,9 @@ final class GoodsReceivingLifecycleService
                     'received_qty' => (float) $poItem->received_qty + $receivedQty,
                 ]);
 
-                $this->ingredientOutletStockLedger->apply(
+                $costMethod = $this->inventoryCostingPolicyService->getMethod();
+
+                $movement = $this->ingredientOutletStockLedger->apply(
                     $numericOutlet,
                     $ingredientId,
                     'purchase',
@@ -173,7 +177,7 @@ final class GoodsReceivingLifecycleService
                     'GR',
                     $grn->number,
                     [
-                        'cost_method' => 'moving_average',
+                        'cost_method' => $costMethod,
                         'unit_cost' => $actualReceivedCost,
                         'original_po_cost' => $originalPoCost,
                         'event' => 'purchase_grn',
@@ -187,6 +191,7 @@ final class GoodsReceivingLifecycleService
                     $actualReceivedCost,
                     (int) $grn->id,
                     $actor,
+                    (int) $movement->id,
                 );
             }
 

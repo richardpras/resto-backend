@@ -27,6 +27,7 @@ class InventoryService
         private readonly OutletAccessResolver $outletAccessResolver,
         private readonly PosAuditLogService $auditLogService,
         private readonly JournalPostingService $journalPostingService,
+        private readonly InventoryCostingPolicyService $inventoryCostingPolicyService,
     ) {}
 
     public function listIngredients(int $tenantId, int $perPage = 20, ?int $outletId = null, ?User $actor = null)
@@ -59,7 +60,8 @@ class InventoryService
             if ($outletId !== null && $outletId >= 1) {
                 if ($data->stock > 0) {
                     $openingCost = (float) ($data->price ?? 0);
-                    $this->ingredientOutletStockLedger->apply(
+                    $costMethod = $this->inventoryCostingPolicyService->getMethod();
+                    $movement = $this->ingredientOutletStockLedger->apply(
                         (int) $outletId,
                         (int) $ingredient->id,
                         'purchase',
@@ -67,7 +69,7 @@ class InventoryService
                         'ingredient_create',
                         (string) $ingredient->id,
                         [
-                            'cost_method' => 'moving_average',
+                            'cost_method' => $costMethod,
                             'unit_cost' => $openingCost,
                             'event' => 'ingredient_opening_balance',
                         ]
@@ -77,6 +79,9 @@ class InventoryService
                         (int) $outletId,
                         (float) $data->stock,
                         $openingCost,
+                        null,
+                        $actor,
+                        (int) $movement->id,
                     );
                 } else {
                     InventoryStock::query()->firstOrCreate(
@@ -157,7 +162,22 @@ class InventoryService
         abort_if((string) $ingredient->type !== 'ingredient', Response::HTTP_UNPROCESSABLE_ENTITY, 'Only ingredient can move stock');
         $this->assertOutletAllowed($data->outletId, $this->resolveAllowedOutletIds($actor));
 
-        $unitCost = $this->inventoryCostService->resolveUnitCost($data->inventoryItemId, $data->outletId);
+        $costMethod = $this->inventoryCostingPolicyService->getMethod();
+
+        if ($data->type === 'waste') {
+            $unitCost = $this->inventoryValuationService->recordConsumption(
+                $data->inventoryItemId,
+                $data->outletId,
+                $data->quantity,
+                $actor,
+            );
+            if ($unitCost <= 0) {
+                $unitCost = $this->inventoryCostService->resolveUnitCost($data->inventoryItemId, $data->outletId);
+            }
+        } else {
+            $unitCost = $this->inventoryCostService->resolveUnitCost($data->inventoryItemId, $data->outletId);
+        }
+
         $movement = $this->ingredientOutletStockLedger->apply(
             $data->outletId,
             $data->inventoryItemId,
@@ -166,7 +186,7 @@ class InventoryService
             $data->sourceType,
             $data->sourceId,
             [
-                'cost_method' => 'moving_average',
+                'cost_method' => $costMethod,
                 'unit_cost' => $unitCost,
                 'event' => $data->type === 'waste' ? 'inventory_waste' : 'inventory_adjustment',
             ],
@@ -178,13 +198,9 @@ class InventoryService
                 $data->outletId,
                 $data->quantity,
                 $unitCost,
-            );
-        } elseif ($data->type === 'waste') {
-            $this->inventoryValuationService->recordConsumption(
-                $data->inventoryItemId,
-                $data->outletId,
-                $data->quantity,
+                null,
                 $actor,
+                (int) $movement->id,
             );
         }
 

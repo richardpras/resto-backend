@@ -22,6 +22,43 @@ class InventoryConsumptionPostingService
     /**
      * @return array{processed: int, reviewRequired: int, failed: int, totalCogs: float}
      */
+    public function processOutletForBusinessDate(int $outletId, string $businessDate, string $trigger = 'daily_stocktake'): array
+    {
+        if ($outletId < 1) {
+            return ['processed' => 0, 'reviewRequired' => 0, 'failed' => 0, 'totalCogs' => 0.0];
+        }
+
+        $pending = $this->queueService->pendingForOutletOnBusinessDate($outletId, $businessDate);
+        $processed = 0;
+        $reviewRequired = 0;
+        $failed = 0;
+        $totalCogs = 0.0;
+
+        foreach ($pending as $row) {
+            $result = $this->processQueueRow($row, $trigger);
+            $totalCogs += $result['cogs'];
+            match ($result['status']) {
+                InventoryConsumptionQueue::STATUS_PROCESSED => $processed++,
+                InventoryConsumptionQueue::STATUS_REVIEW_REQUIRED => $reviewRequired++,
+                default => $failed++,
+            };
+        }
+
+        if ($totalCogs > 0) {
+            $this->postDeferredCogsJournal($outletId, $totalCogs, $trigger, $this->resolveTenantIdForOutlet($outletId));
+        }
+
+        return [
+            'processed' => $processed,
+            'reviewRequired' => $reviewRequired,
+            'failed' => $failed,
+            'totalCogs' => round($totalCogs, 2),
+        ];
+    }
+
+    /**
+     * @return array{processed: int, reviewRequired: int, failed: int, totalCogs: float}
+     */
     public function processOutlet(?int $outletId, string $trigger = 'shift_close'): array
     {
         if ($outletId === null || $outletId < 1) {

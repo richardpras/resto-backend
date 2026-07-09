@@ -22,9 +22,9 @@ class DailyStocktakeSession extends Model
         'opening_submitted_at',
         'closing_submitted_at',
         'posted_at',
+        'posted_by',
+        'approved_by',
         'notes',
-        'created_by_user_id',
-        'approved_by_user_id',
     ];
 
     protected function casts(): array
