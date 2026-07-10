@@ -47,6 +47,7 @@ use App\Modules\Inventory\Http\Controllers\IngredientController;
 use App\Modules\Inventory\Http\Controllers\InventoryValuationController;
 use App\Modules\Inventory\Http\Controllers\InventoryConsumptionController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
+use App\Modules\Imports\Http\Controllers\MasterImportController;
 use App\Modules\Kitchen\Http\Controllers\KitchenTicketController;
 use App\Modules\GiftCards\Http\Controllers\GiftCardController;
 use App\Modules\Loyalty\Http\Controllers\CrmMetricsController;
@@ -427,6 +428,35 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/{sessionId}/submit', [DailyStocktakeController::class, 'submit'])->whereNumber('sessionId');
         Route::post('/{sessionId}/approve', [DailyStocktakeController::class, 'approve'])->whereNumber('sessionId');
         Route::post('/{sessionId}/cancel', [DailyStocktakeController::class, 'cancel'])->whereNumber('sessionId');
+    });
+
+    Route::prefix('imports/phase1')->middleware(['auth:api', 'permission.any:settings.manage,inventory.manage,menu.manage'])->group(function (): void {
+        Route::get('template', [MasterImportController::class, 'phase1Template']);
+        Route::post('bundle', [MasterImportController::class, 'phase1Bundle']);
+        Route::post('{type}', [MasterImportController::class, 'phase1Type'])
+            ->where('type', 'ingredients|opening_stock|menu_categories|menu_items|recipes|suppliers|tables');
+    });
+
+    Route::prefix('imports/phase2')->middleware(['auth:api', 'permission.any:settings.manage,members.manage,accounting.manage'])->group(function (): void {
+        Route::get('template', [MasterImportController::class, 'phase2Template']);
+        Route::post('bundle', [MasterImportController::class, 'phase2Bundle']);
+        Route::post('{type}', [MasterImportController::class, 'phase2Type'])
+            ->where('type', 'chart_of_accounts|opening_balances|customers|members|outlet_payment_methods');
+    });
+
+    Route::prefix('imports/phase3')->middleware(['auth:api', 'permission.any:settings.manage,employees.manage,payroll.manage,members.manage'])->group(function (): void {
+        Route::get('template', [MasterImportController::class, 'phase3Template']);
+        Route::post('bundle', [MasterImportController::class, 'phase3Bundle']);
+        Route::post('{type}', [MasterImportController::class, 'phase3Type'])
+            ->where('type', 'departments|positions|employees|opening_loyalty_points');
+    });
+
+    Route::prefix('imports/phase4')->middleware(['auth:api', 'permission.any:settings.manage,employees.manage,payroll.manage'])->group(function (): void {
+        Route::get('template', [MasterImportController::class, 'phase4Template']);
+        Route::get('template-xlsx', [MasterImportController::class, 'phase4TemplateXlsx']);
+        Route::post('bundle', [MasterImportController::class, 'phase4Bundle']);
+        Route::post('{type}', [MasterImportController::class, 'phase4Type'])
+            ->where('type', 'employee_salary_profiles');
     });
 
     Route::middleware('auth:api')->group(function (): void {

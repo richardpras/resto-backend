@@ -13,6 +13,7 @@ class MenuItem extends Model
     protected $fillable = [
         'tenant_id',
         'outlet_id',
+        'import_code',
         'name',
         'category',
         'menu_category_id',

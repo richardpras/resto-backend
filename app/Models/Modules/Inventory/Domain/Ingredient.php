@@ -10,6 +10,7 @@ class Ingredient extends Model
     protected $fillable = [
         'tenant_id',
         'outlet_id',
+        'import_code',
         'name',
         'type',
         'unit',

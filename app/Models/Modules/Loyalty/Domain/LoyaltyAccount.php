@@ -11,6 +11,7 @@ class LoyaltyAccount extends Model
 {
     protected $fillable = [
         'outlet_id',
+        'import_code',
         'customer_uuid',
         'global_customer_uuid',
         'name',

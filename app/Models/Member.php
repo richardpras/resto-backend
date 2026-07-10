@@ -13,6 +13,7 @@ class Member extends Model
 {
     protected $fillable = [
         'outlet_id',
+        'import_code',
         'loyalty_account_id',
         'member_no',
         'full_name',
