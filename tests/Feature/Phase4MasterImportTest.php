@@ -7,18 +7,20 @@ use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\UserManagement\Domain\Employee;
 use App\Modules\Imports\Services\Phase4MasterImportService;
 use App\Modules\Imports\Services\Phase4MasterImportTemplateService;
-use App\Modules\Imports\Support\CsvTableParser;
+use App\Modules\Imports\Support\ImportTemplateSchema;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
 use Tests\Concerns\BugReportTestFixture;
+use Tests\Concerns\BuildsMasterImportTestZip;
 use Tests\TestCase;
 use ZipArchive;
 
 class Phase4MasterImportTest extends TestCase
 {
     use BugReportTestFixture;
+    use BuildsMasterImportTestZip;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -38,7 +40,7 @@ class Phase4MasterImportTest extends TestCase
             ->assertOk()
             ->assertHeader('content-disposition');
 
-        $this->get('/api/v1/imports/phase4/template-xlsx')
+        $this->get('/api/v1/imports/phase4/template-xlsx?outletId='.$outlet->id)
             ->assertOk()
             ->assertHeader('content-disposition');
     }
@@ -78,7 +80,7 @@ class Phase4MasterImportTest extends TestCase
         $user = $this->createUserWithPermission('payroll.manage', $outlet);
         $employee = $this->seedEmployee($outlet);
 
-        $xlsxPath = app(Phase4MasterImportTemplateService::class)->buildWorkbookXlsx();
+        $xlsxPath = app(Phase4MasterImportTemplateService::class)->buildWorkbookXlsx($outlet->id);
         $service = app(Phase4MasterImportService::class);
 
         $commit = $service->importBundle($user, [
@@ -102,10 +104,8 @@ class Phase4MasterImportTest extends TestCase
         $employee = $this->seedEmployee($outlet);
         Passport::actingAs($user);
 
-        $definitions = Phase4MasterImportTemplateService::sheetDefinitions();
-        $csv = CsvTableParser::toCsv(
-            $definitions['17_employee_salary_profiles.csv']['headers'],
-            [[
+        $csv = ImportTemplateSchema::findSheet('phase4', '17_employee_salary_profiles.csv')
+            ?->toCsvFromFieldExamples([[
                 'employee_no' => $employee->employee_no,
                 'basic_salary' => '4200000',
                 'default_allowance' => '300000',
@@ -115,8 +115,7 @@ class Phase4MasterImportTest extends TestCase
                 'unpaid_leave_deduction_enabled' => '1',
                 'attendance_deduction_enabled' => '0',
                 'attendance_deduction_per_day' => '',
-            ]],
-        );
+            ]]) ?? '';
 
         $this->postJson('/api/v1/imports/phase4/employee_salary_profiles', [
             'outletId' => $outlet->id,
@@ -156,16 +155,8 @@ class Phase4MasterImportTest extends TestCase
 
     private function buildSampleZipOnDisk(string $employeeNo): string
     {
-        $definitions = Phase4MasterImportTemplateService::sheetDefinitions();
-        $tmp = tempnam(sys_get_temp_dir(), 'phase4_import_test_');
-        $zipPath = $tmp.'.zip';
-        @unlink($tmp);
-
-        $zip = new ZipArchive;
-        $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-        $zip->addFromString('17_employee_salary_profiles.csv', CsvTableParser::toCsv(
-            $definitions['17_employee_salary_profiles.csv']['headers'],
-            [[
+        return $this->buildPhaseZip('phase4', [
+            '17_employee_salary_profiles.csv' => [[
                 'employee_no' => $employeeNo,
                 'basic_salary' => '5000000',
                 'default_allowance' => '500000',
@@ -176,9 +167,6 @@ class Phase4MasterImportTest extends TestCase
                 'attendance_deduction_enabled' => '0',
                 'attendance_deduction_per_day' => '',
             ]],
-        ));
-        $zip->close();
-
-        return $zipPath;
+        ]);
     }
 }

@@ -11,6 +11,7 @@ use App\Models\Modules\Purchase\Domain\PurchaseOrder;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Modules\Procurement\Models\PurchaseRequest;
+use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 
 final class ProcurementSummaryService
 {
@@ -71,7 +72,7 @@ final class ProcurementSummaryService
         $averageInventoryCost = $valuationRows->count() > 0
             ? round((float) $valuationRows->avg('average_cost'), 4)
             : 0.0;
-        $valuationRecon = $this->inventoryValuationReconciliationService->report($actor, $scopedOutletId);
+        $valuationRecon = $this->safeValuationReconciliation($actor, $scopedOutletId);
         $lastValuationUpdate = $valuationRows->max('last_updated_at');
 
         return [
@@ -132,5 +133,20 @@ final class ProcurementSummaryService
             'valuationVariance' => (float) ($valuationRecon['difference'] ?? 0),
             'lastValuationUpdate' => $lastValuationUpdate?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Inventory GL reconciliation is a secondary metric; on a fresh outlet without
+     * accounting posting mappings it should not break the whole procurement summary.
+     *
+     * @return array<string,mixed>
+     */
+    private function safeValuationReconciliation(?User $actor, ?int $scopedOutletId): array
+    {
+        try {
+            return $this->inventoryValuationReconciliationService->report($actor, $scopedOutletId);
+        } catch (UnprocessableEntityHttpException) {
+            return ['difference' => 0];
+        }
     }
 }

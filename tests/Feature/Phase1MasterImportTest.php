@@ -10,18 +10,19 @@ use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Supplier;
 use App\Modules\Imports\Services\MasterImportTemplateService;
 use App\Modules\Imports\Services\Phase1MasterImportService;
-use App\Modules\Imports\Support\CsvTableParser;
+use App\Modules\Imports\Support\ImportTemplateSchema;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
 use Tests\Concerns\BugReportTestFixture;
+use Tests\Concerns\BuildsMasterImportTestZip;
 use Tests\TestCase;
-use ZipArchive;
 
 class Phase1MasterImportTest extends TestCase
 {
     use BugReportTestFixture;
+    use BuildsMasterImportTestZip;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -105,9 +106,8 @@ class Phase1MasterImportTest extends TestCase
         $user = $this->createUserWithPermission('inventory.manage', $outlet);
         Passport::actingAs($user);
 
-        $csv = CsvTableParser::toCsv(
-            ['code', 'name', 'type', 'unit', 'min_qty', 'unit_price', 'notes'],
-            [[
+        $csv = ImportTemplateSchema::findSheet('phase1', '01_ingredients.csv')
+            ?->toCsvFromFieldExamples([[
                 'code' => 'ING_SUGAR',
                 'name' => 'Gula',
                 'type' => 'ingredient',
@@ -115,8 +115,7 @@ class Phase1MasterImportTest extends TestCase
                 'min_qty' => '2',
                 'unit_price' => '15000',
                 'notes' => '',
-            ]],
-        );
+            ]]) ?? '';
 
         $this->postJson('/api/v1/imports/phase1/ingredients', [
             'outletId' => $outlet->id,
@@ -145,73 +144,24 @@ class Phase1MasterImportTest extends TestCase
 
     private function buildSampleZipOnDisk(): string
     {
-        $definitions = MasterImportTemplateService::sheetDefinitions();
-        $tmp = tempnam(sys_get_temp_dir(), 'phase1_import_test_');
-        $zipPath = $tmp.'.zip';
-        @unlink($tmp);
-
-        $zip = new ZipArchive;
-        $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-
-        $zip->addFromString('01_ingredients.csv', CsvTableParser::toCsv(
-            $definitions['01_ingredients.csv']['headers'],
-            [[
-                'code' => 'ING_FLOUR',
-                'name' => 'Tepung',
-                'type' => 'ingredient',
-                'unit' => 'kg',
-                'min_qty' => '1',
-                'unit_price' => '10000',
-                'notes' => '',
+        return $this->buildPhaseZip('phase1', [
+            '01_ingredients.csv' => [[
+                'code' => 'ING_FLOUR', 'name' => 'Tepung', 'type' => 'ingredient',
+                'unit' => 'kg', 'min_qty' => '1', 'unit_price' => '10000', 'notes' => '',
             ]],
-        ));
-        $zip->addFromString('02_opening_stock.csv', CsvTableParser::toCsv(
-            $definitions['02_opening_stock.csv']['headers'],
-            [['ingredient_code' => 'ING_FLOUR', 'qty' => '12']],
-        ));
-        $zip->addFromString('03_menu_categories.csv', CsvTableParser::toCsv(
-            $definitions['03_menu_categories.csv']['headers'],
-            [['code' => 'makanan', 'name' => 'Makanan', 'sort_order' => '10', 'description' => '']],
-        ));
-        $zip->addFromString('04_menu_items.csv', CsvTableParser::toCsv(
-            $definitions['04_menu_items.csv']['headers'],
-            [[
-                'code' => 'MENU_NG',
-                'category_code' => 'makanan',
-                'name' => 'Nasi Goreng',
-                'price' => '30000',
-                'emoji' => '',
-                'available' => '1',
+            '02_opening_stock.csv' => [['ingredient_code' => 'ING_FLOUR', 'qty' => '12']],
+            '03_menu_categories.csv' => [['code' => 'makanan', 'name' => 'Makanan', 'sort_order' => '10', 'description' => '']],
+            '04_menu_items.csv' => [[
+                'code' => 'MENU_NG', 'category_code' => 'makanan', 'name' => 'Nasi Goreng',
+                'price' => '30000', 'emoji' => '', 'available' => '1',
             ]],
-        ));
-        $zip->addFromString('05_recipes.csv', CsvTableParser::toCsv(
-            $definitions['05_recipes.csv']['headers'],
-            [['menu_code' => 'MENU_NG', 'ingredient_code' => 'ING_FLOUR', 'qty' => '0.15']],
-        ));
-        $zip->addFromString('06_suppliers.csv', CsvTableParser::toCsv(
-            $definitions['06_suppliers.csv']['headers'],
-            [[
-                'code' => 'SUP_ABC',
-                'name' => 'Supplier ABC',
-                'contact' => '',
-                'email' => '',
-                'address' => '',
-                'status' => 'active',
+            '05_recipes.csv' => [['menu_code' => 'MENU_NG', 'ingredient_code' => 'ING_FLOUR', 'qty' => '0.15']],
+            '06_suppliers.csv' => [[
+                'code' => 'SUP_ABC', 'name' => 'Supplier ABC', 'contact' => '', 'email' => '', 'address' => '', 'status' => 'active',
             ]],
-        ));
-        $zip->addFromString('07_tables.csv', CsvTableParser::toCsv(
-            $definitions['07_tables.csv']['headers'],
-            [[
-                'code' => 'T01',
-                'name' => 'Meja 1',
-                'capacity' => '4',
-                'zone' => 'Indoor',
-                'status' => 'active',
-                'active' => '1',
+            '07_tables.csv' => [[
+                'code' => 'T01', 'name' => 'Meja 1', 'capacity' => '4', 'zone' => 'Indoor', 'status' => 'active', 'active' => '1',
             ]],
-        ));
-        $zip->close();
-
-        return $zipPath;
+        ]);
     }
 }

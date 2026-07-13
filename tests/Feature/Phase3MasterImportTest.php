@@ -9,18 +9,20 @@ use App\Models\Modules\UserManagement\Domain\Employee;
 use App\Models\Modules\UserManagement\Domain\Position;
 use App\Modules\Imports\Services\Phase3MasterImportService;
 use App\Modules\Imports\Services\Phase3MasterImportTemplateService;
-use App\Modules\Imports\Support\CsvTableParser;
+use App\Modules\Imports\Support\ImportTemplateSchema;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
 use Tests\Concerns\BugReportTestFixture;
+use Tests\Concerns\BuildsMasterImportTestZip;
 use Tests\TestCase;
 use ZipArchive;
 
 class Phase3MasterImportTest extends TestCase
 {
     use BugReportTestFixture;
+    use BuildsMasterImportTestZip;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -100,10 +102,10 @@ class Phase3MasterImportTest extends TestCase
         $user = $this->createUserWithPermission('payroll.manage', $outlet);
         Passport::actingAs($user);
 
-        $csv = CsvTableParser::toCsv(
-            ['code', 'name', 'description', 'active'],
-            [['code' => 'HR', 'name' => 'Human Resources', 'description' => '', 'active' => '1']],
-        );
+        $csv = ImportTemplateSchema::findSheet('phase3', '13_departments.csv')
+            ?->toCsvFromFieldExamples([[
+                'code' => 'HR', 'name' => 'Human Resources', 'description' => '', 'active' => '1',
+            ]]) ?? '';
 
         $this->postJson('/api/v1/imports/phase3/departments', [
             'outletId' => $outlet->id,
@@ -131,54 +133,19 @@ class Phase3MasterImportTest extends TestCase
 
     private function buildSampleZipOnDisk(): string
     {
-        $definitions = Phase3MasterImportTemplateService::sheetDefinitions();
-        $tmp = tempnam(sys_get_temp_dir(), 'phase3_import_test_');
-        $zipPath = $tmp.'.zip';
-        @unlink($tmp);
-
-        $zip = new ZipArchive;
-        $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-
-        $zip->addFromString('13_departments.csv', CsvTableParser::toCsv(
-            $definitions['13_departments.csv']['headers'],
-            [['code' => 'OPS', 'name' => 'Operations', 'description' => '', 'active' => '1']],
-        ));
-        $zip->addFromString('14_positions.csv', CsvTableParser::toCsv(
-            $definitions['14_positions.csv']['headers'],
-            [[
-                'code' => 'WAITER',
-                'name' => 'Waiter',
-                'department_code' => 'OPS',
-                'description' => '',
-                'sort_order' => '10',
-                'active' => '1',
+        return $this->buildPhaseZip('phase3', [
+            '13_departments.csv' => [['code' => 'OPS', 'name' => 'Operations', 'description' => '', 'active' => '1']],
+            '14_positions.csv' => [[
+                'code' => 'WAITER', 'name' => 'Waiter', 'department_code' => 'OPS',
+                'description' => '', 'sort_order' => '10', 'active' => '1',
             ]],
-        ));
-        $zip->addFromString('15_employees.csv', CsvTableParser::toCsv(
-            $definitions['15_employees.csv']['headers'],
-            [[
-                'employee_no' => 'EMP-001',
-                'full_name' => 'Andi',
-                'email' => '',
-                'phone' => '08111',
-                'gender' => '',
-                'birth_date' => '',
-                'hire_date' => '2024-01-01',
-                'status' => 'active',
-                'department_code' => 'OPS',
-                'position_code' => 'WAITER',
-                'salary_type' => 'monthly',
-                'base_salary' => '4000000',
-                'overtime_rate' => '0',
-                'notes' => '',
+            '15_employees.csv' => [[
+                'employee_no' => 'EMP-001', 'full_name' => 'Andi', 'email' => '', 'phone' => '08111',
+                'gender' => '', 'birth_date' => '', 'hire_date' => '2024-01-01', 'status' => 'active',
+                'department_code' => 'OPS', 'position_code' => 'WAITER', 'salary_type' => 'monthly',
+                'base_salary' => '4000000', 'overtime_rate' => '0', 'notes' => '',
             ]],
-        ));
-        $zip->addFromString('16_opening_loyalty_points.csv', CsvTableParser::toCsv(
-            $definitions['16_opening_loyalty_points.csv']['headers'],
-            [['customer_code' => 'CUST_001', 'points' => '500', 'memo' => 'Opening']],
-        ));
-        $zip->close();
-
-        return $zipPath;
+            '16_opening_loyalty_points.csv' => [['customer_code' => 'CUST_001', 'points' => '500', 'memo' => 'Opening']],
+        ]);
     }
 }

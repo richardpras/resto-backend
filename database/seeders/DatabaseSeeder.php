@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(UserManagementPermissionsSeeder::class);
+        $this->call(DefaultRolesPermissionsSeeder::class);
 
         $this->call(AppSettingsFromTemplateSeeder::class);
         $this->call(SettingsDomainFromTemplateSeeder::class);

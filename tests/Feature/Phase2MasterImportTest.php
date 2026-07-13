@@ -10,18 +10,20 @@ use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\OutletPaymentMethodConfig;
 use App\Modules\Imports\Services\Phase2MasterImportService;
 use App\Modules\Imports\Services\Phase2MasterImportTemplateService;
-use App\Modules\Imports\Support\CsvTableParser;
+use App\Modules\Imports\Support\ImportTemplateSchema;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
 use Tests\Concerns\BugReportTestFixture;
+use Tests\Concerns\BuildsMasterImportTestZip;
 use Tests\TestCase;
 use ZipArchive;
 
 class Phase2MasterImportTest extends TestCase
 {
     use BugReportTestFixture;
+    use BuildsMasterImportTestZip;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -96,10 +98,10 @@ class Phase2MasterImportTest extends TestCase
         $user = $this->createUserWithPermission('members.manage', $outlet);
         Passport::actingAs($user);
 
-        $csv = CsvTableParser::toCsv(
-            ['code', 'name', 'phone', 'email'],
-            [['code' => 'CUST_X', 'name' => 'Ani', 'phone' => '08111', 'email' => 'ani@example.com']],
-        );
+        $csv = ImportTemplateSchema::findSheet('phase2', '10_customers.csv')
+            ?->toCsvFromFieldExamples([[
+                'code' => 'CUST_X', 'name' => 'Ani', 'phone' => '08111', 'email' => 'ani@example.com',
+            ]]) ?? '';
 
         $this->postJson('/api/v1/imports/phase2/customers', [
             'outletId' => $outlet->id,
@@ -128,78 +130,30 @@ class Phase2MasterImportTest extends TestCase
 
     private function buildSampleZipOnDisk(): string
     {
-        $definitions = Phase2MasterImportTemplateService::sheetDefinitions();
-        $tmp = tempnam(sys_get_temp_dir(), 'phase2_import_test_');
-        $zipPath = $tmp.'.zip';
-        @unlink($tmp);
-
-        $zip = new ZipArchive;
-        $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-
-        $zip->addFromString('08_chart_of_accounts.csv', CsvTableParser::toCsv(
-            $definitions['08_chart_of_accounts.csv']['headers'],
-            [
+        return $this->buildPhaseZip('phase2', [
+            '08_chart_of_accounts.csv' => [
                 [
-                    'code' => '1100',
-                    'name' => 'Cash',
-                    'type' => 'asset',
-                    'subtype' => 'current_asset',
-                    'category' => 'cash_bank',
-                    'parent_code' => '',
-                    'description' => '',
-                    'active' => '1',
+                    'code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'subtype' => 'current_asset',
+                    'category' => 'cash_bank', 'parent_code' => '', 'description' => '', 'active' => '1',
                 ],
                 [
-                    'code' => '3100',
-                    'name' => "Owner's Equity",
-                    'type' => 'equity',
-                    'subtype' => 'equity',
-                    'category' => 'equity',
-                    'parent_code' => '',
-                    'description' => '',
-                    'active' => '1',
+                    'code' => '3100', 'name' => "Owner's Equity", 'type' => 'equity', 'subtype' => 'equity',
+                    'category' => 'equity', 'parent_code' => '', 'description' => '', 'active' => '1',
                 ],
             ],
-        ));
-        $zip->addFromString('09_opening_balances.csv', CsvTableParser::toCsv(
-            $definitions['09_opening_balances.csv']['headers'],
-            [
+            '09_opening_balances.csv' => [
                 ['account_code' => '1100', 'debit' => '1000000', 'credit' => '0', 'memo' => 'Cash', 'journal_date' => ''],
                 ['account_code' => '3100', 'debit' => '0', 'credit' => '1000000', 'memo' => 'Equity', 'journal_date' => ''],
             ],
-        ));
-        $zip->addFromString('10_customers.csv', CsvTableParser::toCsv(
-            $definitions['10_customers.csv']['headers'],
-            [['code' => 'CUST_001', 'name' => 'Budi', 'phone' => '081234567890', 'email' => '']],
-        ));
-        $zip->addFromString('11_members.csv', CsvTableParser::toCsv(
-            $definitions['11_members.csv']['headers'],
-            [[
-                'code' => 'MEM_001',
-                'full_name' => 'Budi',
-                'phone' => '081234567890',
-                'email' => '',
-                'birth_date' => '',
-                'gender' => '',
-                'status' => 'active',
-                'customer_code' => 'CUST_001',
-                'notes' => '',
+            '10_customers.csv' => [['code' => 'CUST_001', 'name' => 'Budi', 'phone' => '081234567890', 'email' => '']],
+            '11_members.csv' => [[
+                'code' => 'MEM_001', 'full_name' => 'Budi', 'phone' => '081234567890', 'email' => '',
+                'birth_date' => '', 'gender' => '', 'status' => 'active', 'customer_code' => 'CUST_001', 'notes' => '',
             ]],
-        ));
-        $zip->addFromString('12_outlet_payment_methods.csv', CsvTableParser::toCsv(
-            $definitions['12_outlet_payment_methods.csv']['headers'],
-            [[
-                'payment_method_code' => 'cash',
-                'enabled' => '1',
-                'is_default' => '1',
-                'display_order' => '10',
-                'provider' => '',
-                'chart_account_code' => '1100',
-                'instructions' => '',
+            '12_outlet_payment_methods.csv' => [[
+                'payment_method_code' => 'cash', 'enabled' => '1', 'is_default' => '1', 'display_order' => '10',
+                'provider' => '', 'chart_account_code' => '1100', 'instructions' => '',
             ]],
-        ));
-        $zip->close();
-
-        return $zipPath;
+        ]);
     }
 }

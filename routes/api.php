@@ -432,6 +432,7 @@ Route::prefix('v1')->group(function (): void {
 
     Route::prefix('imports/phase1')->middleware(['auth:api', 'permission.any:settings.manage,inventory.manage,menu.manage'])->group(function (): void {
         Route::get('template', [MasterImportController::class, 'phase1Template']);
+        Route::get('template-xlsx', [MasterImportController::class, 'phase1TemplateXlsx']);
         Route::post('bundle', [MasterImportController::class, 'phase1Bundle']);
         Route::post('{type}', [MasterImportController::class, 'phase1Type'])
             ->where('type', 'ingredients|opening_stock|menu_categories|menu_items|recipes|suppliers|tables');
@@ -439,6 +440,7 @@ Route::prefix('v1')->group(function (): void {
 
     Route::prefix('imports/phase2')->middleware(['auth:api', 'permission.any:settings.manage,members.manage,accounting.manage'])->group(function (): void {
         Route::get('template', [MasterImportController::class, 'phase2Template']);
+        Route::get('template-xlsx', [MasterImportController::class, 'phase2TemplateXlsx']);
         Route::post('bundle', [MasterImportController::class, 'phase2Bundle']);
         Route::post('{type}', [MasterImportController::class, 'phase2Type'])
             ->where('type', 'chart_of_accounts|opening_balances|customers|members|outlet_payment_methods');
@@ -446,6 +448,7 @@ Route::prefix('v1')->group(function (): void {
 
     Route::prefix('imports/phase3')->middleware(['auth:api', 'permission.any:settings.manage,employees.manage,payroll.manage,members.manage'])->group(function (): void {
         Route::get('template', [MasterImportController::class, 'phase3Template']);
+        Route::get('template-xlsx', [MasterImportController::class, 'phase3TemplateXlsx']);
         Route::post('bundle', [MasterImportController::class, 'phase3Bundle']);
         Route::post('{type}', [MasterImportController::class, 'phase3Type'])
             ->where('type', 'departments|positions|employees|opening_loyalty_points');

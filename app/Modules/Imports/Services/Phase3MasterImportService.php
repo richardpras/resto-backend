@@ -11,6 +11,7 @@ use App\Models\Modules\UserManagement\Domain\Position;
 use App\Models\User;
 use App\Modules\Imports\Support\CsvTableParser;
 use App\Modules\Imports\Support\ImportSheetExtractor;
+use App\Modules\Imports\Support\ImportTemplateSchema;
 use App\Modules\Loyalty\Services\LoyaltyPointService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use App\Modules\UserManagement\Services\DepartmentService;
@@ -150,7 +151,10 @@ class Phase3MasterImportService
      */
     private function processSection(string $type, string $csv, array &$context, User $user, bool $preview): array
     {
-        $rows = CsvTableParser::parse($csv);
+        $rows = CsvTableParser::parse(
+            $csv,
+            ImportTemplateSchema::columnSpecsForFilename('phase3', self::FILE_MAP[$type] ?? ''),
+        );
         $result = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => [], 'previewRows' => []];
 
         $execute = function () use ($type, $rows, &$context, $user, $preview, &$result): void {

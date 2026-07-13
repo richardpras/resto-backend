@@ -2,66 +2,21 @@
 
 namespace Database\Seeders;
 
-use App\Models\Modules\UserManagement\Domain\Permission;
 use App\Models\Modules\UserManagement\Domain\Role;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 
 /**
- * Seeds the four template demo users (web/src + template) with distinct roles
- * and permission sets matching web PERMISSIONS / template authStore ROLE_PERMS.
+ * Seeds the four template demo users (web/src + template) and assigns them to
+ * roles created by {@see DefaultRolesPermissionsSeeder}.
  */
 class TemplateDemoUsersSeeder extends Seeder
 {
     public function run(): void
     {
-        $allPermissionIds = Permission::query()->pluck('id')->all();
-
-        /** @see web/src/stores/authStore.ts ROLE_PERMS.Manager */
-        $managerCodes = [
-            'dashboard.view_own_outlet',
-            'pos.use',
-            'kitchen.use',
-            'menu.manage',
-            'inventory.manage',
-            'purchase.manage',
-            'purchase.approve',
-            'promotions.manage',
-            'suppliers.manage',
-            'members.manage',
-            'tables.view',
-            'tables.manage',
-            'qr_orders.view',
-            'reports.view',
-            'orders.recovery.read',
-            'orders.recovery.request',
-            'orders.recovery.approve',
-            'orders.refund.execute',
-        ];
-
-        /** @see web/src/stores/authStore.ts ROLE_PERMS.Cashier */
-        $cashierCodes = ['pos.use', 'members.manage', 'tables.view', 'orders.recovery.read', 'orders.recovery.request'];
-
-        /** @see web/src/stores/authStore.ts ROLE_PERMS.Kitchen */
-        $kitchenCodes = ['kitchen.use', 'orders.recovery.read', 'orders.recovery.request'];
-
-        $rolePermissionSets = [
-            'Owner' => $allPermissionIds,
-            'Manager' => Permission::query()->whereIn('code', $managerCodes)->pluck('id')->all(),
-            'Cashier' => Permission::query()->whereIn('code', $cashierCodes)->pluck('id')->all(),
-            'Kitchen' => Permission::query()->whereIn('code', $kitchenCodes)->pluck('id')->all(),
-        ];
-
-        $roleIds = [];
-
-        foreach ($rolePermissionSets as $roleName => $permissionIds) {
-            $role = Role::query()->firstOrCreate(
-                ['name' => $roleName],
-                ['description' => "Template role (parity with /template authStore): {$roleName}"],
-            );
-            $role->permissions()->sync($permissionIds);
-            $roleIds[$roleName] = $role->id;
-        }
+        $roleIds = Role::query()
+            ->whereIn('name', ['Owner', 'Manager', 'Cashier', 'Kitchen'])
+            ->pluck('id', 'name');
 
         /** Same emails/passwords/names as template demo tile helpers; 4-digit screen PINs per role. */
         $users = [
@@ -72,6 +27,13 @@ class TemplateDemoUsersSeeder extends Seeder
         ];
 
         foreach ($users as $row) {
+            $roleId = $roleIds[$row['role']] ?? null;
+            if ($roleId === null) {
+                $this->command?->warn("Role [{$row['role']}] not found — run DefaultRolesPermissionsSeeder first.");
+
+                continue;
+            }
+
             // Password and PIN are hashed via User model casts (`password`, `pin_hash` => `hashed`).
             $user = User::query()->updateOrCreate(
                 ['email' => $row['email']],
@@ -81,7 +43,7 @@ class TemplateDemoUsersSeeder extends Seeder
                     'pin_hash' => $row['pin'],
                 ],
             );
-            $user->roles()->sync([$roleIds[$row['role']]]);
+            $user->roles()->sync([(int) $roleId]);
         }
     }
 }

@@ -11,8 +11,10 @@ use App\Modules\Imports\Services\Phase3MasterImportService;
 use App\Modules\Imports\Services\Phase3MasterImportTemplateService;
 use App\Modules\Imports\Services\Phase4MasterImportService;
 use App\Modules\Imports\Services\Phase4MasterImportTemplateService;
+use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class MasterImportController extends Controller
@@ -26,6 +28,7 @@ class MasterImportController extends Controller
         private readonly Phase3MasterImportService $phase3ImportService,
         private readonly Phase4MasterImportTemplateService $phase4TemplateService,
         private readonly Phase4MasterImportService $phase4ImportService,
+        private readonly OutletAccessResolver $outletAccessResolver,
     ) {}
 
     public function phase1Template(): BinaryFileResponse
@@ -36,6 +39,19 @@ class MasterImportController extends Controller
             $zipPath,
             'master-import-phase1-template.zip',
             ['Content-Type' => 'application/zip'],
+        )->deleteFileAfterSend(true);
+    }
+
+    public function phase1TemplateXlsx(Request $request): BinaryFileResponse
+    {
+        $outletId = $this->validatedOutletId($request);
+
+        $xlsxPath = $this->templateService->buildWorkbookXlsx($outletId);
+
+        return response()->download(
+            $xlsxPath,
+            'master-import-phase1-template.xlsx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
         )->deleteFileAfterSend(true);
     }
 
@@ -100,6 +116,19 @@ class MasterImportController extends Controller
         )->deleteFileAfterSend(true);
     }
 
+    public function phase2TemplateXlsx(Request $request): BinaryFileResponse
+    {
+        $outletId = $this->validatedOutletId($request);
+
+        $xlsxPath = $this->phase2TemplateService->buildWorkbookXlsx($outletId);
+
+        return response()->download(
+            $xlsxPath,
+            'master-import-phase2-template.xlsx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        )->deleteFileAfterSend(true);
+    }
+
     public function phase2Bundle(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -158,6 +187,19 @@ class MasterImportController extends Controller
             $zipPath,
             'master-import-phase3-template.zip',
             ['Content-Type' => 'application/zip'],
+        )->deleteFileAfterSend(true);
+    }
+
+    public function phase3TemplateXlsx(Request $request): BinaryFileResponse
+    {
+        $outletId = $this->validatedOutletId($request);
+
+        $xlsxPath = $this->phase3TemplateService->buildWorkbookXlsx($outletId);
+
+        return response()->download(
+            $xlsxPath,
+            'master-import-phase3-template.xlsx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
         )->deleteFileAfterSend(true);
     }
 
@@ -222,9 +264,11 @@ class MasterImportController extends Controller
         )->deleteFileAfterSend(true);
     }
 
-    public function phase4TemplateXlsx(): BinaryFileResponse
+    public function phase4TemplateXlsx(Request $request): BinaryFileResponse
     {
-        $xlsxPath = $this->phase4TemplateService->buildWorkbookXlsx();
+        $outletId = $this->validatedOutletId($request);
+
+        $xlsxPath = $this->phase4TemplateService->buildWorkbookXlsx($outletId);
 
         return response()->download(
             $xlsxPath,
@@ -281,5 +325,25 @@ class MasterImportController extends Controller
                 : 'Import committed successfully.',
             'data' => $result,
         ]);
+    }
+
+    private function validatedOutletId(Request $request): int
+    {
+        $validated = $request->validate([
+            'outletId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $outletId = (int) $validated['outletId'];
+        $user = $request->user('api');
+        abort_if($user === null, 401);
+
+        $allowed = $this->outletAccessResolver->allowedOutletIds($user);
+        if (! in_array($outletId, $allowed, true)) {
+            throw ValidationException::withMessages([
+                'outletId' => ['The selected outletId is invalid.'],
+            ]);
+        }
+
+        return $outletId;
     }
 }

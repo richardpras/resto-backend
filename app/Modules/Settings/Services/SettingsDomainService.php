@@ -19,6 +19,7 @@ use App\Modules\Inventory\Services\InventoryCostingPolicyService;
 use App\Modules\Inventory\Services\InventoryValuationService;
 use App\Modules\Inventory\Support\DeferredConsumptionTrigger;
 use App\Modules\Inventory\Support\InventoryCostingMethod;
+use App\Modules\Orders\Services\OrderTaxResolverService;
 use App\Modules\Orders\Services\PosAuditLogService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use App\Modules\Settings\Support\TemplateSettingsPayload;

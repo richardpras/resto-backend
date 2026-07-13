@@ -5,9 +5,10 @@ namespace App\Modules\Imports\Support;
 final class CsvTableParser
 {
     /**
+     * @param  list<ImportColumnSpec>|null  $columnSpecs
      * @return list<array{row:int,data:array<string,string>}>
      */
-    public static function parse(string $content): array
+    public static function parse(string $content, ?array $columnSpecs = null): array
     {
         $content = trim($content);
         if ($content === '') {
@@ -31,7 +32,7 @@ final class CsvTableParser
         }
 
         $normalizedHeader = array_map(
-            static fn ($value): string => self::normalizeHeader((string) $value),
+            static fn ($value): string => ImportHeaderAliasResolver::resolve((string) $value, $columnSpecs),
             $header,
         );
 
