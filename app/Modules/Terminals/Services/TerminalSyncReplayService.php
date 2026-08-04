@@ -9,6 +9,13 @@ use App\Models\Modules\Terminals\Domain\TerminalDevice;
 use App\Models\User;
 use App\Modules\Kitchen\Http\Requests\UpdateKitchenTicketStatusRequest;
 use App\Modules\Kitchen\Services\KitchenTicketService;
+use App\Modules\Inventory\DTOs\CreateIngredientData;
+use App\Modules\Inventory\DTOs\CreateStockMovementData;
+use App\Modules\Inventory\Services\DailyStocktakeService;
+use App\Modules\Inventory\Services\InventoryService;
+use App\Modules\Members\Services\MemberService;
+use App\Modules\Menu\DTOs\UpdateMenuItemData;
+use App\Modules\Menu\Services\MenuService;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Http\Requests\AddOrderPaymentsRequest;
 use App\Modules\Orders\Http\Requests\ClosePosSessionRequest;
@@ -42,6 +49,10 @@ class TerminalSyncReplayService
         private readonly PrinterManagementService $printerManagementService,
         private readonly ReceiptDocumentService $receiptDocumentService,
         private readonly SplitBillService $splitBillService,
+        private readonly MemberService $memberService,
+        private readonly MenuService $menuService,
+        private readonly InventoryService $inventoryService,
+        private readonly DailyStocktakeService $dailyStocktakeService,
     ) {}
 
     public function assertWithinReplayWindow(?string $clientOccurredAtIso): void
@@ -79,6 +90,14 @@ class TerminalSyncReplayService
             TerminalOperationType::POS_SESSION_OPEN => $this->replayPosSessionOpen($user, $outletId, $payload),
             TerminalOperationType::POS_SESSION_CLOSE => $this->replayPosSessionClose($user, $outletId, $payload),
             TerminalOperationType::PRINT_DOCUMENT_ENQUEUE => $this->replayPrintDocumentEnqueue($user, $outletId, $payload),
+            TerminalOperationType::MEMBER_QUICK_CREATE => $this->replayMemberCreate($user, $outletId, $payload),
+            TerminalOperationType::MEMBER_CREATE => $this->replayMemberCreate($user, $outletId, $payload),
+            TerminalOperationType::MENU_ITEM_AVAILABILITY => $this->replayMenuItemAvailability($user, $outletId, $payload),
+            TerminalOperationType::INVENTORY_STOCK_MOVEMENT_CREATE => $this->replayInventoryStockMovement($user, $outletId, $payload),
+            TerminalOperationType::INVENTORY_ITEM_UPSERT => $this->replayInventoryItemUpsert($user, $outletId, $payload),
+            TerminalOperationType::INVENTORY_STOCKTAKE_SAVE_OPENING => $this->replayStocktakeSaveOpening($user, $outletId, $payload),
+            TerminalOperationType::INVENTORY_STOCKTAKE_SAVE_CLOSING => $this->replayStocktakeSaveClosing($user, $outletId, $payload),
+            TerminalOperationType::INVENTORY_STOCKTAKE_SUBMIT => $this->replayStocktakeSubmit($user, $outletId, $payload),
             default => throw ValidationException::withMessages([
                 'operationType' => ['Unsupported sync operation type.'],
             ]),
@@ -406,6 +425,7 @@ class TerminalSyncReplayService
             'entity' => 'pos_session',
             'sessionId' => (int) $session->id,
             'updatedAt' => $session->updated_at?->toIso8601String(),
+            'clientLocalRef' => $payload['clientLocalRef'] ?? $validated['clientLocalRef'] ?? null,
         ];
     }
 
@@ -416,9 +436,13 @@ class TerminalSyncReplayService
     {
         $sessionId = (int) ($payload['sessionId'] ?? $payload['posSessionId'] ?? 0);
         if ($sessionId < 1) {
-            throw ValidationException::withMessages(['sessionId' => ['sessionId is required.']]);
+            $current = $this->posSessionService->current($user, $outletId);
+            if ($current === null) {
+                throw ValidationException::withMessages(['sessionId' => ['sessionId is required.']]);
+            }
+            $sessionId = (int) $current->id;
         }
-        unset($payload['sessionId'], $payload['posSessionId']);
+        unset($payload['sessionId'], $payload['posSessionId'], $payload['clientLocalRef']);
         $validated = $this->validate($payload, (new ClosePosSessionRequest)->rules());
         $session = $this->posSessionService->close($user, $sessionId, $validated);
 
@@ -457,6 +481,183 @@ class TerminalSyncReplayService
             'renderHistoryId' => (int) $history->id,
             'updatedAt' => $job->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayMemberCreate(User $user, int $outletId, array $payload): array
+    {
+        if (! isset($payload['outletId'])) {
+            $payload['outletId'] = $outletId;
+        }
+        $this->assertOutletMatches($outletId, (int) $payload['outletId']);
+        $clientLocalRef = isset($payload['clientLocalRef']) ? (string) $payload['clientLocalRef'] : null;
+        unset($payload['clientLocalRef']);
+        $member = $this->memberService->create($user, $payload);
+
+        return [
+            'entity' => 'member',
+            'memberId' => (int) $member->id,
+            'clientLocalRef' => $clientLocalRef,
+            'updatedAt' => $member->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayMenuItemAvailability(User $user, int $outletId, array $payload): array
+    {
+        $menuItemId = (int) ($payload['menuItemId'] ?? $payload['id'] ?? 0);
+        if ($menuItemId < 1) {
+            throw ValidationException::withMessages(['menuItemId' => ['menuItemId is required.']]);
+        }
+        if (! array_key_exists('available', $payload)) {
+            throw ValidationException::withMessages(['available' => ['available is required.']]);
+        }
+        $updated = $this->menuService->update($menuItemId, UpdateMenuItemData::fromArray([
+            'available' => (bool) $payload['available'],
+        ]));
+        if ($updated === null) {
+            throw (new ModelNotFoundException)->setModel(\App\Models\Modules\Menu\Domain\MenuItem::class, [(string) $menuItemId]);
+        }
+
+        return [
+            'entity' => 'menu_item',
+            'menuItemId' => $menuItemId,
+            'available' => (bool) $payload['available'],
+            'outletId' => $outletId,
+            'updatedAt' => $updated->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayInventoryStockMovement(User $user, int $outletId, array $payload): array
+    {
+        if (! isset($payload['outlet_id'])) {
+            $payload['outlet_id'] = $outletId;
+        }
+        $this->assertOutletMatches($outletId, (int) $payload['outlet_id']);
+        $movement = $this->inventoryService->addStockMovement(CreateStockMovementData::fromArray($payload), $user);
+
+        return [
+            'entity' => 'stock_movement',
+            'stockMovementId' => (int) $movement->id,
+            'updatedAt' => $movement->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayInventoryItemUpsert(User $user, int $outletId, array $payload): array
+    {
+        $itemId = (int) ($payload['id'] ?? $payload['inventoryItemId'] ?? 0);
+        if ($itemId > 0) {
+            $attributes = $payload['attributes'] ?? $payload;
+            unset($attributes['id'], $attributes['inventoryItemId'], $attributes['clientLocalRef']);
+            /** @var array<string, mixed> $attributes */
+            $item = $this->inventoryService->updateIngredient($itemId, $attributes, $user);
+            if ($item === null) {
+                throw ValidationException::withMessages(['id' => ['Inventory item not found.']]);
+            }
+
+            return [
+                'entity' => 'inventory_item',
+                'inventoryItemId' => (int) $item->id,
+                'updatedAt' => $item->updated_at?->toIso8601String(),
+            ];
+        }
+
+        if (! isset($payload['outletId'])) {
+            $payload['outletId'] = $outletId;
+        }
+        $this->assertOutletMatches($outletId, (int) $payload['outletId']);
+        $clientLocalRef = isset($payload['clientLocalRef']) ? (string) $payload['clientLocalRef'] : null;
+        unset($payload['clientLocalRef']);
+        $item = $this->inventoryService->createIngredient(CreateIngredientData::fromArray($payload), $user);
+
+        return [
+            'entity' => 'inventory_item',
+            'inventoryItemId' => (int) $item->id,
+            'clientLocalRef' => $clientLocalRef,
+            'updatedAt' => $item->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayStocktakeSaveOpening(User $user, int $outletId, array $payload): array
+    {
+        $sessionId = $this->resolveStocktakeSessionId($user, $outletId, $payload);
+        /** @var list<array{ingredientId: int, openingQty: float}> $lines */
+        $lines = is_array($payload['lines'] ?? null) ? $payload['lines'] : [];
+        $session = $this->dailyStocktakeService->saveOpening($sessionId, $lines, $user);
+
+        return [
+            'entity' => 'stocktake_session',
+            'sessionId' => (int) $session->id,
+            'updatedAt' => $session->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayStocktakeSaveClosing(User $user, int $outletId, array $payload): array
+    {
+        $sessionId = $this->resolveStocktakeSessionId($user, $outletId, $payload);
+        /** @var list<array{ingredientId: int, closingQty: float}> $lines */
+        $lines = is_array($payload['lines'] ?? null) ? $payload['lines'] : [];
+        $session = $this->dailyStocktakeService->saveClosing($sessionId, $lines, $user);
+
+        return [
+            'entity' => 'stocktake_session',
+            'sessionId' => (int) $session->id,
+            'updatedAt' => $session->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayStocktakeSubmit(User $user, int $outletId, array $payload): array
+    {
+        $sessionId = $this->resolveStocktakeSessionId($user, $outletId, $payload);
+        $session = $this->dailyStocktakeService->submitForApproval($sessionId, $user);
+
+        return [
+            'entity' => 'stocktake_session',
+            'sessionId' => (int) $session->id,
+            'status' => (string) $session->status,
+            'updatedAt' => $session->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function resolveStocktakeSessionId(User $user, int $outletId, array $payload): int
+    {
+        $sessionId = (int) ($payload['sessionId'] ?? 0);
+        if ($sessionId > 0) {
+            return $sessionId;
+        }
+        $businessDate = isset($payload['businessDate']) ? (string) $payload['businessDate'] : now()->toDateString();
+        $session = $this->dailyStocktakeService->getOrCreateSession($outletId, $businessDate, $user);
+
+        return (int) $session->id;
     }
 
     private function assertOutletMatches(int $batchOutletId, int $payloadOutletId): void

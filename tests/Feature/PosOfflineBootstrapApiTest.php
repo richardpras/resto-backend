@@ -37,6 +37,7 @@ class PosOfflineBootstrapApiTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.outletId', (int) $outlet->id)
+            ->assertJsonPath('data.schemaVersion', 2)
             ->assertJsonStructure([
                 'data' => [
                     'generatedAt',
@@ -48,6 +49,9 @@ class PosOfflineBootstrapApiTest extends TestCase
                     'checkoutMethods',
                     'receiptSettings',
                     'thermalPaperWidth',
+                    'openOrders',
+                    'posSession',
+                    'defaultCashFloat',
                 ],
             ]);
     }

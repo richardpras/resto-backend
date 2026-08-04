@@ -34,6 +34,22 @@ final class TerminalOperationType
     /** Phase 14 — enqueue print from persisted render snapshot (offline/deferred replay). */
     public const PRINT_DOCUMENT_ENQUEUE = 'print.document.enqueue';
 
+    public const MEMBER_QUICK_CREATE = 'member.quick_create';
+
+    public const MEMBER_CREATE = 'member.create';
+
+    public const MENU_ITEM_AVAILABILITY = 'menu.item.availability';
+
+    public const INVENTORY_STOCK_MOVEMENT_CREATE = 'inventory.stock_movement.create';
+
+    public const INVENTORY_ITEM_UPSERT = 'inventory.item.upsert';
+
+    public const INVENTORY_STOCKTAKE_SAVE_OPENING = 'inventory.stocktake.save_opening';
+
+    public const INVENTORY_STOCKTAKE_SAVE_CLOSING = 'inventory.stocktake.save_closing';
+
+    public const INVENTORY_STOCKTAKE_SUBMIT = 'inventory.stocktake.submit';
+
     /**
      * @return list<string>
      */
@@ -53,6 +69,14 @@ final class TerminalOperationType
             self::POS_SESSION_OPEN,
             self::POS_SESSION_CLOSE,
             self::PRINT_DOCUMENT_ENQUEUE,
+            self::MEMBER_QUICK_CREATE,
+            self::MEMBER_CREATE,
+            self::MENU_ITEM_AVAILABILITY,
+            self::INVENTORY_STOCK_MOVEMENT_CREATE,
+            self::INVENTORY_ITEM_UPSERT,
+            self::INVENTORY_STOCKTAKE_SAVE_OPENING,
+            self::INVENTORY_STOCKTAKE_SAVE_CLOSING,
+            self::INVENTORY_STOCKTAKE_SUBMIT,
         ];
     }
 }

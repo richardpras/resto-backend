@@ -19,6 +19,7 @@ class OpenPosSessionRequest extends FormRequest
             'openedAt' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],
+            'clientLocalRef' => ['sometimes', 'nullable', 'string', 'max:120'],
         ];
     }
 }
