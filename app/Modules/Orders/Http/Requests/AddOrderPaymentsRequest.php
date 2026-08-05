@@ -17,6 +17,8 @@ class AddOrderPaymentsRequest extends FormRequest
             'payments' => ['required', 'array', 'min:1'],
             'payments.*.method' => ['required', 'string', 'max:50'],
             'payments.*.amount' => ['required', 'numeric', 'gt:0'],
+            'payments.*.tenderedAmount' => ['nullable', 'numeric', 'gte:0'],
+            'payments.*.changeAmount' => ['nullable', 'numeric', 'gte:0'],
             'payments.*.paidAt' => ['nullable', 'date'],
             'payments.*.splitBillLabel' => ['nullable', 'string', 'max:100'],
             'payments.*.splitBillGroup' => ['nullable', 'string', 'max:100'],

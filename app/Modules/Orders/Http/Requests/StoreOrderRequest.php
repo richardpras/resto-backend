@@ -48,6 +48,8 @@ class StoreOrderRequest extends FormRequest
             'payments' => ['present', 'array'],
             'payments.*.method' => ['required', 'string', 'max:50'],
             'payments.*.amount' => ['required', 'numeric', 'gt:0'],
+            'payments.*.tenderedAmount' => ['nullable', 'numeric', 'gte:0'],
+            'payments.*.changeAmount' => ['nullable', 'numeric', 'gte:0'],
             'payments.*.paidAt' => ['nullable', 'date'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],
             'clientLocalRef' => ['nullable', 'string', 'max:120'],

@@ -277,7 +277,7 @@ final class ReceiptOrderSnapshotBuilder
     }
 
     /**
-     * @return list<array{method:string,amount:float,label:string}>
+     * @return list<array{method:string,amount:float,label:string,tenderedAmount:?float,changeAmount:?float}>
      */
     private function buildPaymentLines(Order $order, ?int $orderSplitId): array
     {
@@ -296,6 +296,8 @@ final class ReceiptOrderSnapshotBuilder
                 'method' => (string) $payment->method,
                 'amount' => (float) $payment->amount,
                 'label' => $this->formatPaymentMethodLabel((string) $payment->method),
+                'tenderedAmount' => $payment->tendered_amount !== null ? (float) $payment->tendered_amount : null,
+                'changeAmount' => $payment->change_amount !== null ? (float) $payment->change_amount : null,
             ])
             ->values()
             ->all();

@@ -68,6 +68,8 @@ class OrderResource extends JsonResource
                 'orderSplitId' => $payment->order_split_id !== null ? (int) $payment->order_split_id : null,
                 'method' => $payment->method,
                 'amount' => (float) $payment->amount,
+                'tenderedAmount' => $payment->tendered_amount !== null ? (float) $payment->tendered_amount : null,
+                'changeAmount' => $payment->change_amount !== null ? (float) $payment->change_amount : null,
                 'status' => (string) ($payment->status ?? 'paid'),
                 'paidAt' => $payment->paid_at?->toISOString(),
                 'allocations' => $payment->relationLoaded('allocations')

@@ -32,5 +32,8 @@ class DatabaseSeeder extends Seeder
         $this->call(TemplateMembersSuppliersSeeder::class);
         $this->call(PurchaseFlowSeeder::class);
         $this->call(DemoOperationalSeeder::class);
+
+        // Optional single-outlet master-only (no transactions):
+        // $this->call(WrWbMasterOnlySeeder::class);
     }
 }

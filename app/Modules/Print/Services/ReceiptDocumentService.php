@@ -163,6 +163,57 @@ class ReceiptDocumentService
         return $this->queueRenderable($user, $history->fresh() ?? $history, true, $reason ?? 'manual-reprint');
     }
 
+    /**
+     * Present a stored render with current Settings → Receipt branding for UI preview.
+     * Order/fiscal snapshot stays frozen; header/footer/logo/tax follow live outlet settings.
+     */
+    public function presentForPreview(ReceiptRenderHistory $history): ReceiptRenderHistory
+    {
+        $kind = ReceiptDocumentKind::from((string) $history->kind);
+        $context = $this->withLiveReceiptBranding(
+            (array) $history->context_snapshot,
+            (int) $history->outlet_id,
+            $kind,
+        );
+        $thermal = $this->rebuildThermalText($kind, $context, (int) $history->outlet_id);
+        if ($thermal !== null) {
+            $history->setAttribute('thermal_text', $thermal);
+            $history->setAttribute('context_snapshot', $context);
+        }
+
+        return $history;
+    }
+
+    /**
+     * Re-apply current outlet receipt settings onto a frozen context snapshot.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    public function withLiveReceiptBranding(array $context, int $outletId, ?ReceiptDocumentKind $kind = null): array
+    {
+        $brandedKinds = [
+            ReceiptDocumentKind::CustomerReceipt,
+            ReceiptDocumentKind::FiscalInvoice,
+            ReceiptDocumentKind::CustomerBill,
+        ];
+
+        if ($kind !== null && ! in_array($kind, $brandedKinds, true)) {
+            return $context;
+        }
+
+        if ($kind === null
+            && ! is_array($context['receipt_branding'] ?? null)
+            && ! isset($context['order_code'])
+        ) {
+            return $context;
+        }
+
+        $context['receipt_branding'] = $this->resolveReceiptBranding($outletId);
+
+        return $context;
+    }
+
     public function enqueueFromDeferredReplay(User $user, ReceiptRenderHistory $history, string $idempotencySuffix): PrintJob
     {
         $this->assertOutlet($user, (int) $history->outlet_id);
@@ -202,13 +253,25 @@ class ReceiptDocumentService
             ? 'requeue-rh'.(string) $history->id.'-r'.((string) ((int) $history->reprint_count)).'-'.substr(sha1((string) $idempotencyTail), 0, 16)
             : 'queue-rh'.(string) $history->id;
 
+        // Reprints (and deferred replay) follow current Settings → Receipt branding.
+        // Initial queue keeps the branding frozen at render time.
+        $context = (array) $history->context_snapshot;
+        $thermalText = (string) $history->thermal_text;
+        if ($isReprint) {
+            $context = $this->withLiveReceiptBranding($context, $outletId, $kind);
+            $rebuilt = $this->rebuildThermalText($kind, $context, $outletId, $profile);
+            if ($rebuilt !== null) {
+                $thermalText = $rebuilt;
+            }
+        }
+
         $snapshot = [
             'phase14' => true,
             'renderHistoryId' => (int) $history->id,
-            'thermalText' => $history->thermal_text,
+            'thermalText' => $thermalText,
             'htmlAvailable' => $history->html_snapshot !== null,
             'pdfAvailable' => $history->pdf_storage_path !== null,
-            'invoiceNumber' => $history->fiscalInvoice?->invoice_number ?? data_get($history->context_snapshot, 'fiscal_invoice_number'),
+            'invoiceNumber' => $history->fiscalInvoice?->invoice_number ?? data_get($context, 'fiscal_invoice_number'),
             'deferredReplay' => (bool) $history->deferred_replay_pending,
             'recovery' => ['marker' => 'phase14-queue-v1'],
         ];
@@ -216,7 +279,7 @@ class ReceiptDocumentService
         if ($printType === 'receipt') {
             $thermalDocument = $this->buildQueuedThermalDocument(
                 $outletId,
-                (array) $history->context_snapshot,
+                $context,
                 $profile,
             );
             if ($thermalDocument !== null) {
@@ -230,7 +293,7 @@ class ReceiptDocumentService
             (int) $history->id,
             $printType,
             $route,
-            array_merge((array) $history->context_snapshot, $snapshot),
+            array_merge($context, $snapshot),
             $suffix,
             (int) $history->id,
             resolvedProfileId: $resolvedProfileId,
@@ -239,6 +302,27 @@ class ReceiptDocumentService
         $this->audit->log((int) $history->outlet_id, (int) $history->id, 'queue', $user, $idempotencyTail, (int) $job->id, ['phase14' => true]);
 
         return $job;
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function rebuildThermalText(
+        ReceiptDocumentKind $kind,
+        array $context,
+        int $outletId,
+        ?PrinterProfile $profile = null,
+    ): ?string {
+        if (! $this->usesBrandedReceiptLayout($kind, $context)) {
+            return null;
+        }
+
+        $profile ??= $this->cashierPrinterResolver->resolveForOutlet($outletId);
+        $width = $profile !== null
+            ? $this->thermalPaperWidthResolver->resolveWidthChars($profile)
+            : 32;
+
+        return implode("\n", $this->buildThermalLines($kind, $context, $width));
     }
 
     private function assertOutlet(User $user, int $outletId): void

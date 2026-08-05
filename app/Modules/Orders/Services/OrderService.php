@@ -823,9 +823,18 @@ class OrderService
     private function normalizePayments(array $payments): array
     {
         return array_map(function (array $payment): array {
+            $tendered = array_key_exists('tenderedAmount', $payment) && $payment['tenderedAmount'] !== null
+                ? (float) $payment['tenderedAmount']
+                : null;
+            $change = array_key_exists('changeAmount', $payment) && $payment['changeAmount'] !== null
+                ? (float) $payment['changeAmount']
+                : null;
+
             return [
                 'method' => $this->normalizePaymentMethod((string) ($payment['method'] ?? '')),
                 'amount' => (float) ($payment['amount'] ?? 0),
+                'tenderedAmount' => $tendered,
+                'changeAmount' => $change,
                 'paidAt' => $payment['paidAt'] ?? null,
                 'orderSplitId' => isset($payment['orderSplitId']) ? (int) $payment['orderSplitId'] : null,
                 'splitBillLabel' => $payment['splitBillLabel'] ?? null,
@@ -874,6 +883,8 @@ class OrderService
                 'order_id' => $orderId,
                 'method' => $payment['method'],
                 'amount' => $payment['amount'],
+                'tendered_amount' => $payment['tenderedAmount'] ?? null,
+                'change_amount' => $payment['changeAmount'] ?? null,
                 'split_bill_label' => $payment['splitBillLabel'],
                 'split_bill_group' => $payment['splitBillGroup'],
                 'paid_at' => $payment['paidAt'] ?? now(),

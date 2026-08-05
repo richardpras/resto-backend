@@ -15,6 +15,8 @@ class OrderPaymentResource extends JsonResource
             'orderSplitId' => $this->order_split_id !== null ? (int) $this->order_split_id : null,
             'method' => (string) $this->method,
             'amount' => (float) $this->amount,
+            'tenderedAmount' => $this->tendered_amount !== null ? (float) $this->tendered_amount : null,
+            'changeAmount' => $this->change_amount !== null ? (float) $this->change_amount : null,
             'status' => (string) $this->status,
             'paidAt' => $this->paid_at?->toISOString(),
             'createdAt' => $this->created_at?->toISOString(),

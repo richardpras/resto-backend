@@ -13,6 +13,8 @@ class Payment extends Model
         'order_split_id',
         'method',
         'amount',
+        'tendered_amount',
+        'change_amount',
         'status',
         'split_bill_label',
         'split_bill_group',

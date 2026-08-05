@@ -145,9 +145,23 @@ class ThermalReceiptLayoutBuilder
         $payments = is_array($snapshot['payments'] ?? null) ? $snapshot['payments'] : [];
         if (! $isProforma && $payments !== []) {
             $lines[] = ['text' => $divider, 'align' => 'center'];
+            $tenderedTotal = 0.0;
+            $changeTotal = 0.0;
             foreach ($payments as $payment) {
                 $label = trim((string) ($payment['label'] ?? $payment['method'] ?? 'Payment'));
                 $lines[] = ['text' => $this->formatColumns($label, $this->money((float) ($payment['amount'] ?? 0.0)), $width)];
+                if (isset($payment['tenderedAmount']) && is_numeric($payment['tenderedAmount'])) {
+                    $tenderedTotal += (float) $payment['tenderedAmount'];
+                }
+                if (isset($payment['changeAmount']) && is_numeric($payment['changeAmount'])) {
+                    $changeTotal += (float) $payment['changeAmount'];
+                }
+            }
+            if ($tenderedTotal > 0) {
+                $lines[] = ['text' => $this->formatColumns('Dibayar', $this->money($tenderedTotal), $width)];
+            }
+            if ($changeTotal > 0) {
+                $lines[] = ['text' => $this->formatColumns('Kembali', $this->money($changeTotal), $width)];
             }
         }
 

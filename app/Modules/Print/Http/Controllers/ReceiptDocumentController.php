@@ -122,10 +122,12 @@ class ReceiptDocumentController extends Controller
 
         $this->allowOutlet((int) $record->outlet_id, $user);
 
+        $presented = $this->documents->presentForPreview($record);
+
         return response()->json([
             'success' => true,
             'message' => 'Receipt render retrieved.',
-            'data' => new ReceiptRenderHistoryResource($record),
+            'data' => new ReceiptRenderHistoryResource($presented),
             'meta' => null,
         ]);
     }
@@ -167,12 +169,15 @@ class ReceiptDocumentController extends Controller
 
         $job = $this->documents->enqueueReprint($user, $record, $request->validated()['reason'] ?? null);
 
+        $fresh = $record->fresh() ?? $record;
+        $presented = $this->documents->presentForPreview($fresh);
+
         return response()->json([
             'success' => true,
             'message' => 'Reprint queued successfully.',
             'data' => [
                 'printJobId' => (int) $job->id,
-                'render' => new ReceiptRenderHistoryResource($record->fresh()),
+                'render' => new ReceiptRenderHistoryResource($presented),
             ],
             'meta' => null,
         ]);

@@ -32,6 +32,67 @@ class OutletReceiptThermalLayoutTest extends TestCase
         Storage::fake('public');
     }
 
+    public function test_preview_and_reprint_follow_updated_receipt_settings(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        $outlet = $this->createOutlet('Live Branding Outlet');
+        $this->assignUserToOutlets($user, [(int) $outlet->id]);
+        $this->seedReceiptSettings($outlet, showTaxBreakdown: true, header: 'Header Lama');
+        $this->seedCashierPrinter($outlet, '58mm');
+
+        $order = $this->createPaidOrder($outlet);
+
+        $render = $this->postJson('/api/v1/print/documents/render', [
+            'outletId' => (int) $outlet->id,
+            'kind' => 'customer_receipt',
+            'sourceType' => 'order',
+            'sourceId' => (int) $order->id,
+            'issueFiscal' => false,
+            'queuePrint' => false,
+            'generatePdf' => false,
+            'forceRegenerate' => true,
+        ]);
+        $render->assertOk();
+        $historyId = (int) $render->json('data.id');
+        $this->assertStringContainsString('Header Lama', (string) $render->json('data.thermalText'));
+
+        OutletReceiptSetting::query()->where('outlet_id', $outlet->id)->update([
+            'receipt_header' => 'Header Baru Settings',
+            'receipt_footer' => 'Footer Baru Settings',
+            'show_tax_breakdown' => false,
+        ]);
+
+        $preview = $this->getJson('/api/v1/print/documents/'.$historyId);
+        $preview->assertOk();
+        $previewThermal = (string) $preview->json('data.thermalText');
+        $this->assertStringContainsString('Header Baru Settings', $previewThermal);
+        $this->assertStringContainsString('Footer Baru Settings', $previewThermal);
+        $this->assertStringNotContainsString('Header Lama', $previewThermal);
+        $this->assertStringNotContainsString('PB1', $previewThermal);
+
+        Queue::fake();
+
+        $reprint = $this->postJson('/api/v1/print/documents/'.$historyId.'/reprint', [
+            'reason' => 'settings-ui',
+        ]);
+        $reprint->assertOk();
+
+        $job = PrintJob::query()->latest('id')->first();
+        $this->assertNotNull($job);
+        $snapshot = is_array($job?->printable_snapshot) ? $job->printable_snapshot : [];
+        $queuedText = (string) ($snapshot['thermalText'] ?? '');
+        $this->assertStringContainsString('Header Baru Settings', $queuedText);
+        $this->assertStringContainsString('Footer Baru Settings', $queuedText);
+
+        $branding = is_array($snapshot['receipt_branding'] ?? null) ? $snapshot['receipt_branding'] : [];
+        $this->assertSame('Header Baru Settings', (string) ($branding['header'] ?? ''));
+        $this->assertSame('Footer Baru Settings', (string) ($branding['footer'] ?? ''));
+        $this->assertFalse((bool) ($branding['showTaxBreakdown'] ?? true));
+
+        $reprintThermal = (string) $reprint->json('data.render.thermalText');
+        $this->assertStringContainsString('Header Baru Settings', $reprintThermal);
+    }
+
     public function test_customer_receipt_thermal_uses_outlet_receipt_settings(): void
     {
         $user = $this->actingAsUserManagementApiAdministrator();
