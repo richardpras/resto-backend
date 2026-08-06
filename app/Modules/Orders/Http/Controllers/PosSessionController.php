@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Modules\Orders\Http\Requests\ClosePosSessionRequest;
 use App\Modules\Orders\Http\Requests\CurrentPosSessionRequest;
 use App\Modules\Orders\Http\Requests\OpenPosSessionRequest;
+use App\Modules\Orders\Http\Requests\StorePosSessionCashMovementRequest;
+use App\Modules\Orders\Http\Resources\PosSessionCashMovementResource;
 use App\Modules\Orders\Http\Resources\PosSessionResource;
+use App\Modules\Orders\Services\PosSessionCashMovementService;
 use App\Modules\Orders\Services\PosSessionService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,6 +18,7 @@ class PosSessionController extends Controller
 {
     public function __construct(
         private readonly PosSessionService $service,
+        private readonly PosSessionCashMovementService $cashMovementService,
     ) {}
 
     public function open(OpenPosSessionRequest $request): JsonResponse
@@ -58,5 +62,27 @@ class PosSessionController extends Controller
                 'defaultCashFloat' => $this->service->defaultCashFloatForOutlet($outletId),
             ],
         ]);
+    }
+
+    public function listCashMovements(int $id): JsonResponse
+    {
+        $user = request()->user();
+        abort_if($user === null, Response::HTTP_UNAUTHORIZED);
+
+        $rows = $this->cashMovementService->listForSession($user, $id);
+
+        return response()->json([
+            'data' => PosSessionCashMovementResource::collection($rows),
+        ]);
+    }
+
+    public function storeCashMovement(StorePosSessionCashMovementRequest $request, int $id): JsonResponse
+    {
+        $movement = $this->cashMovementService->create($request->user(), $id, $request->validated());
+
+        return response()->json([
+            'message' => 'Cash movement recorded.',
+            'data' => new PosSessionCashMovementResource($movement),
+        ], Response::HTTP_CREATED);
     }
 }

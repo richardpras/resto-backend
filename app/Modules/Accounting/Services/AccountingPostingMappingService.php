@@ -182,6 +182,16 @@ final class AccountingPostingMappingService
             'required' => true,
             'accountTypes' => ['revenue'],
         ],
+        'pos.cash.out.expense' => [
+            'label' => 'POS cash out / petty cash expense (debit)',
+            'required' => true,
+            'accountTypes' => ['expense'],
+        ],
+        'pos.cash.in.contra' => [
+            'label' => 'POS cash in float top-up contra (credit)',
+            'required' => true,
+            'accountTypes' => ['liability', 'equity', 'revenue'],
+        ],
     ];
 
     /** @var array<string, array{label: string, required: bool, accountTypes: list<string>}> */

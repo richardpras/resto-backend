@@ -40,7 +40,7 @@ class WrWbFoundationSeeder extends Seeder
     private const MANAGER_PERMISSIONS = [
         'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
         'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view',
-        'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage',
+        'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage', 'finance.shift_close',
         'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
         'users.view', 'users.create', 'users.assign_roles', 'users.update',
     ];
@@ -91,7 +91,7 @@ class WrWbFoundationSeeder extends Seeder
                 ...RoleHierarchy::defaultsForRoleName('WR WB Manager'),
             ],
             'WR WB Cashier' => [
-                'permissions' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'finance.shift_close'],
+                'permissions' => ['pos.use', 'members.manage', 'tables.view', 'qr_orders.view'],
                 ...RoleHierarchy::defaultsForRoleName('WR WB Cashier'),
             ],
             'WR WB Kitchen' => [

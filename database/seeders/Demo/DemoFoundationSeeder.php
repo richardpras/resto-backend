@@ -60,7 +60,7 @@ class DemoFoundationSeeder extends Seeder
     private const MANAGER_PERMISSION_CODES = [
         'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
         'purchase.manage', 'purchase.approve', 'tables.view', 'tables.manage', 'qr_orders.view', 'reports.view',
-        'members.manage', 'suppliers.manage', 'promotions.manage', 'accounting.manage',
+        'members.manage', 'suppliers.manage', 'promotions.manage', 'accounting.manage', 'finance.shift_close',
         'payroll.manage', 'employees.view', 'attendance.view', 'settings.manage',
         'users.view', 'users.create', 'users.assign_roles', 'users.update',
     ];
@@ -105,7 +105,7 @@ class DemoFoundationSeeder extends Seeder
                 ],
                 'Demo Accountant' => [
                     'permissionIds' => $this->permissionIds($permissionMap, [
-                        'accounting.manage', 'reports.view', 'finance.reconcile',
+                        'accounting.manage', 'reports.view', 'finance.reconcile', 'finance.shift_close',
                     ]),
                     ...RoleHierarchy::defaultsForRoleName('Demo Accountant'),
                 ],

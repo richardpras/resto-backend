@@ -2,6 +2,14 @@
 
 namespace Database\Seeders;
 
+use App\Models\Modules\Accounting\Domain\Account;
+use App\Models\Modules\Accounting\Domain\AccountingSetting;
+use App\Models\Modules\HR\Domain\EmployeeRoster;
+use App\Models\Modules\HR\Domain\EmployeeSalaryProfile;
+use App\Models\Modules\HR\Domain\EmployeeShiftAssignment;
+use App\Models\Modules\HR\Domain\LeaveType;
+use App\Models\Modules\HR\Domain\OvertimeType;
+use App\Models\Modules\HR\Domain\Shift;
 use App\Models\Modules\Inventory\Domain\Ingredient;
 use App\Models\Modules\Inventory\Domain\InventoryStock;
 use App\Models\Modules\Menu\Domain\MenuCategory;
@@ -10,14 +18,21 @@ use App\Models\Modules\Menu\Domain\MenuItemOutlet;
 use App\Models\Modules\Menu\Domain\MenuRecipe;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Production\Domain\ProductionStation;
+use App\Models\Modules\Settings\Domain\BankAccount;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\OutletReceiptSetting;
+use App\Models\Modules\Settings\Domain\OutletTaxAssignment;
 use App\Models\Modules\Settings\Domain\PaymentMethod;
+use App\Models\Modules\Settings\Domain\Tax;
+use App\Models\Modules\UserManagement\Domain\Department;
 use App\Models\Modules\UserManagement\Domain\Employee;
 use App\Models\Modules\UserManagement\Domain\Permission;
+use App\Models\Modules\UserManagement\Domain\Position;
 use App\Models\Modules\UserManagement\Domain\Role;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Modules\Production\Services\ProductionStationProvisioner;
+use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -25,9 +40,12 @@ use Illuminate\Support\Str;
 /**
  * Master-only dataset for a single outlet: WR WB.
  *
- * Includes: outlet, payment methods, stations, tables, menu+recipes, ingredient stock,
- * login users (with screen PIN), and HR employees linked to those users.
- * Does NOT seed orders, payments, POS sessions, purchase docs, or other transactions.
+ * Includes: outlet, payment methods, tax (PB1) + outlet assignment, stations, tables,
+ * menu+recipes, ingredient stock, COA + posting maps + accounting settings + bank accounts,
+ * purchasing masters (warehouse + suppliers), login users linked to HR employees,
+ * departments/positions/shifts/salary profiles/leave types, and published rosters
+ * (random pattern) from today through ~6 months ahead.
+ * Does NOT seed orders, payments, POS sessions, purchase docs, journals, or payroll runs.
  *
  * Prerequisites: permissions + default roles (run DatabaseSeeder prefix, or):
  *   php artisan db:seed --class=UserManagementPermissionsSeeder
@@ -35,6 +53,8 @@ use Illuminate\Support\Str;
  *
  * Usage:
  *   php artisan db:seed --class=WrWbMasterOnlySeeder
+ *
+ * Docs: docs/demo/WR-WB-MASTER-ONLY-SEEDER.md
  */
 class WrWbMasterOnlySeeder extends Seeder
 {
@@ -46,20 +66,35 @@ class WrWbMasterOnlySeeder extends Seeder
 
     public const TENANT_ID = 1;
 
+    /** Stable tax id for Settings → Tax + POS apply-tax. */
+    public const TAX_ID = 'wrwb-pb1';
+
+    public const WAREHOUSE_CODE = 'WRWB-WH-MAIN';
+
     public function run(): void
     {
         $this->ensureRolesExist();
+        $this->call(EssentialCoaAccountsSeeder::class);
+        $this->call(AccountingPostingMappingsSeeder::class);
+        $this->call(PaymentBankCoaLinkSeeder::class);
 
         DB::transaction(function (): void {
             $outlet = $this->seedOutlet();
             $this->seedPaymentMethods();
+            $this->seedTax($outlet);
             $this->seedStations($outlet);
             $this->seedTables($outlet);
             $this->seedMenuAndInventory($outlet);
-            $this->seedUsersAndEmployees($outlet);
+            $this->seedAccountingMasters($outlet);
+            $this->seedPurchasingMasters($outlet);
+            $this->seedPayrollAndHrMasters($outlet);
         });
 
-        $this->command?->info('WR WB master seeded (no transactions).');
+        $this->command?->info('WR WB master seeded (no transactional docs).');
+        $this->command?->info('Tax: PB1 Service Tax 10% (id='.self::TAX_ID.') assigned to outlet.');
+        $this->command?->info('Accounting: COA + posting maps + realtime setting + bank accounts.');
+        $this->command?->info('Purchasing: warehouse '.self::WAREHOUSE_CODE.' + suppliers.');
+        $this->command?->info('HR: employees↔users, shifts, random rosters ~6 months ahead.');
         $this->command?->info('Login examples: superadmin@wrwb.local / wrwb123  PIN 0000  (super_admin)');
         $this->command?->info('               owner@wrwb.local / wrwb123  PIN 1234');
         $this->command?->info('               manager@wrwb.local / wrwb123  PIN 2345');
@@ -147,6 +182,32 @@ class WrWbMasterOnlySeeder extends Seeder
                 ],
             );
         }
+    }
+
+    private function seedTax(Outlet $outlet): void
+    {
+        Tax::query()->updateOrCreate(
+            ['id' => self::TAX_ID],
+            [
+                'name' => 'PB1 Service Tax',
+                'type' => 'percentage',
+                'value' => 10,
+                'apply_dine_in' => true,
+                'apply_takeaway' => true,
+                'inclusive' => false,
+                'status' => 'active',
+                'effective_from' => null,
+                'effective_to' => null,
+            ],
+        );
+
+        OutletTaxAssignment::query()->updateOrCreate(
+            [
+                'outlet_id' => $outlet->id,
+                'tax_id' => self::TAX_ID,
+            ],
+            [],
+        );
     }
 
     private function seedStations(Outlet $outlet): void
@@ -322,7 +383,197 @@ class WrWbMasterOnlySeeder extends Seeder
         return $map;
     }
 
-    private function seedUsersAndEmployees(Outlet $outlet): void
+    private function seedAccountingMasters(Outlet $outlet): void
+    {
+        AccountingSetting::query()->updateOrCreate(
+            ['tenant_id' => null, 'outlet_id' => $outlet->id],
+            ['revenue_posting_mode' => AccountingSetting::MODE_REALTIME],
+        );
+
+        $byCode = Account::query()->pluck('id', 'code');
+
+        BankAccount::query()->updateOrCreate(
+            ['id' => 'wrwb-kas'],
+            [
+                'account_name' => 'Kas WR WB',
+                'bank_name' => 'Kas',
+                'account_number' => 'KAS-WRWB',
+                'chart_account_id' => $byCode->get('1100'),
+                'is_default' => false,
+            ],
+        );
+        BankAccount::query()->updateOrCreate(
+            ['id' => 'wrwb-bca'],
+            [
+                'account_name' => 'Bank BCA WR WB',
+                'bank_name' => 'BCA',
+                'account_number' => '1234567890',
+                'chart_account_id' => $byCode->get('1111'),
+                'is_default' => true,
+            ],
+        );
+        BankAccount::query()->updateOrCreate(
+            ['id' => 'wrwb-qris-clearing'],
+            [
+                'account_name' => 'QRIS Clearing WR WB',
+                'bank_name' => 'QRIS',
+                'account_number' => 'QRIS-WRWB',
+                'chart_account_id' => $byCode->get('1120'),
+                'is_default' => false,
+            ],
+        );
+    }
+
+    private function seedPurchasingMasters(Outlet $outlet): void
+    {
+        DB::table('warehouses')->updateOrInsert(
+            ['code' => self::WAREHOUSE_CODE],
+            [
+                'outlet_id' => $outlet->id,
+                'name' => 'Gudang Utama WR WB',
+                'type' => 'outlet',
+                'is_active' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
+
+        Supplier::query()->updateOrCreate(
+            ['name' => 'PT Supplier WR WB'],
+            [
+                'status' => 'active',
+                'contact' => '021-5550200',
+                'email' => 'supplier@'.self::DOMAIN,
+                'address' => 'Jl. Supplier No. 10, Jakarta',
+                'payment_term_days' => 14,
+                'lead_time_days' => 3,
+                'is_active' => true,
+            ],
+        );
+
+        Supplier::query()->updateOrCreate(
+            ['name' => 'CV Bahan Segar WR WB'],
+            [
+                'status' => 'active',
+                'contact' => '081234567890',
+                'email' => 'segar@'.self::DOMAIN,
+                'address' => 'Pasar Induk, Jakarta',
+                'payment_term_days' => 7,
+                'lead_time_days' => 1,
+                'is_active' => true,
+            ],
+        );
+    }
+
+    private function seedPayrollAndHrMasters(Outlet $outlet): void
+    {
+        $outletId = (int) $outlet->id;
+        [$deptOps, $deptKitchen] = $this->seedDepartments($outletId);
+        $positions = $this->seedPositions($outletId, $deptOps, $deptKitchen);
+        [$morning, $evening] = $this->seedShifts();
+        $this->seedLeaveAndOvertimeTypes($outletId);
+        $employees = $this->seedUsersAndEmployees($outlet, $positions);
+        $this->seedSchedulesSixMonths($outletId, $employees, $morning, $evening);
+    }
+
+    /** @return array{0: Department, 1: Department} */
+    private function seedDepartments(int $outletId): array
+    {
+        $ops = Department::query()->updateOrCreate(
+            ['outlet_id' => $outletId, 'code' => 'OPS'],
+            ['name' => 'Operasional', 'is_active' => true],
+        );
+        $kitchen = Department::query()->updateOrCreate(
+            ['outlet_id' => $outletId, 'code' => 'DAPUR'],
+            ['name' => 'Dapur', 'is_active' => true],
+        );
+
+        return [$ops, $kitchen];
+    }
+
+    /**
+     * @return array<string, Position>
+     */
+    private function seedPositions(int $outletId, Department $ops, Department $kitchen): array
+    {
+        $specs = [
+            'super_admin' => ['name' => 'Super Admin', 'dept' => $ops, 'code' => 'SUPER_ADMIN'],
+            'owner' => ['name' => 'Owner', 'dept' => $ops, 'code' => 'OWNER'],
+            'manager' => ['name' => 'Manager', 'dept' => $ops, 'code' => 'MANAGER'],
+            'cashier' => ['name' => 'Cashier', 'dept' => $ops, 'code' => 'CASHIER'],
+            'chef' => ['name' => 'Chef', 'dept' => $kitchen, 'code' => 'CHEF'],
+        ];
+
+        $positions = [];
+        $sort = 0;
+        foreach ($specs as $key => $row) {
+            $sort++;
+            $positions[$key] = Position::query()->updateOrCreate(
+                ['outlet_id' => $outletId, 'code' => $row['code']],
+                [
+                    'name' => $row['name'],
+                    'department_id' => $row['dept']->id,
+                    'is_active' => true,
+                    'sort_order' => $sort,
+                ],
+            );
+        }
+
+        return $positions;
+    }
+
+    /** @return array{0: Shift, 1: Shift} */
+    private function seedShifts(): array
+    {
+        $morning = Shift::query()->updateOrCreate(
+            ['code' => 'WRWB-PAGI'],
+            [
+                'tenant_id' => self::TENANT_ID,
+                'name' => 'Shift Pagi',
+                'start_time' => '07:00:00',
+                'end_time' => '15:00:00',
+                'active' => true,
+                'late_tolerance_minutes' => 15,
+                'overtime_after_minutes' => 30,
+            ],
+        );
+        $evening = Shift::query()->updateOrCreate(
+            ['code' => 'WRWB-SORE'],
+            [
+                'tenant_id' => self::TENANT_ID,
+                'name' => 'Shift Sore',
+                'start_time' => '15:00:00',
+                'end_time' => '23:00:00',
+                'active' => true,
+                'late_tolerance_minutes' => 15,
+                'overtime_after_minutes' => 30,
+            ],
+        );
+
+        return [$morning, $evening];
+    }
+
+    private function seedLeaveAndOvertimeTypes(int $outletId): void
+    {
+        LeaveType::query()->updateOrCreate(
+            ['outlet_id' => $outletId, 'code' => 'CUTI-THN'],
+            ['name' => 'Cuti Tahunan', 'paid_leave' => true, 'is_active' => true],
+        );
+        LeaveType::query()->updateOrCreate(
+            ['outlet_id' => $outletId, 'code' => 'SAKIT'],
+            ['name' => 'Sakit', 'paid_leave' => false, 'is_active' => true],
+        );
+        OvertimeType::query()->updateOrCreate(
+            ['outlet_id' => $outletId, 'code' => 'OT-REG'],
+            ['name' => 'Lembur Reguler', 'multiplier' => 1.5, 'is_active' => true],
+        );
+    }
+
+    /**
+     * @param  array<string, Position>  $positions
+     * @return list<array{employee: Employee, shift_key: string}>
+     */
+    private function seedUsersAndEmployees(Outlet $outlet, array $positions): array
     {
         $roleIds = Role::query()
             ->whereIn('name', ['super_admin', 'Admin', 'Owner', 'Manager', 'Cashier', 'Kitchen'])
@@ -336,9 +587,11 @@ class WrWbMasterOnlySeeder extends Seeder
                 'pin' => '0000',
                 'role' => 'super_admin',
                 'employee_no' => 'EMP-WRWB-000',
-                'position' => 'Super Admin',
+                'position_key' => 'super_admin',
                 'base_salary' => 15000000,
                 'attach_outlet' => true,
+                'shift_key' => 'morning',
+                'schedule' => false,
             ],
             [
                 'name' => 'Owner WR WB',
@@ -347,9 +600,11 @@ class WrWbMasterOnlySeeder extends Seeder
                 'pin' => '1234',
                 'role' => 'Owner',
                 'employee_no' => 'EMP-WRWB-001',
-                'position' => 'Owner',
+                'position_key' => 'owner',
                 'base_salary' => 12000000,
                 'attach_outlet' => true,
+                'shift_key' => 'morning',
+                'schedule' => false,
             ],
             [
                 'name' => 'Manager WR WB',
@@ -358,9 +613,11 @@ class WrWbMasterOnlySeeder extends Seeder
                 'pin' => '2345',
                 'role' => 'Manager',
                 'employee_no' => 'EMP-WRWB-002',
-                'position' => 'Manager',
+                'position_key' => 'manager',
                 'base_salary' => 9800000,
                 'attach_outlet' => true,
+                'shift_key' => 'morning',
+                'schedule' => true,
             ],
             [
                 'name' => 'Cashier WR WB',
@@ -369,9 +626,11 @@ class WrWbMasterOnlySeeder extends Seeder
                 'pin' => '3456',
                 'role' => 'Cashier',
                 'employee_no' => 'EMP-WRWB-003',
-                'position' => 'Cashier',
+                'position_key' => 'cashier',
                 'base_salary' => 4200000,
                 'attach_outlet' => true,
+                'shift_key' => 'evening',
+                'schedule' => true,
             ],
             [
                 'name' => 'Kitchen WR WB',
@@ -380,16 +639,27 @@ class WrWbMasterOnlySeeder extends Seeder
                 'pin' => '4567',
                 'role' => 'Kitchen',
                 'employee_no' => 'EMP-WRWB-004',
-                'position' => 'Chef',
+                'position_key' => 'chef',
                 'base_salary' => 8500000,
                 'attach_outlet' => true,
+                'shift_key' => 'morning',
+                'schedule' => true,
             ],
         ];
+
+        $scheduled = [];
 
         foreach ($users as $row) {
             $roleId = $roleIds[$row['role']] ?? null;
             if ($roleId === null) {
                 $this->command?->warn("Role [{$row['role']}] missing — skip {$row['email']}");
+
+                continue;
+            }
+
+            $position = $positions[$row['position_key']] ?? null;
+            if ($position === null) {
+                $this->command?->warn("Position [{$row['position_key']}] missing — skip {$row['email']}");
 
                 continue;
             }
@@ -407,7 +677,7 @@ class WrWbMasterOnlySeeder extends Seeder
                 $user->outlets()->syncWithoutDetaching([(int) $outlet->id]);
             }
 
-            Employee::query()->updateOrCreate(
+            $employee = Employee::query()->updateOrCreate(
                 ['employee_no' => $row['employee_no']],
                 [
                     'tenant_id' => self::TENANT_ID,
@@ -415,7 +685,9 @@ class WrWbMasterOnlySeeder extends Seeder
                     'outlet_id' => $outlet->id,
                     'full_name' => $row['name'],
                     'email' => $row['email'],
-                    'position' => $row['position'],
+                    'position' => $position->name,
+                    'position_id' => $position->id,
+                    'department_id' => $position->department_id,
                     'outlet' => self::OUTLET_NAME,
                     'salary_type' => 'monthly',
                     'base_salary' => $row['base_salary'],
@@ -424,6 +696,91 @@ class WrWbMasterOnlySeeder extends Seeder
                     'status' => Employee::STATUS_ACTIVE,
                 ],
             );
+
+            EmployeeSalaryProfile::query()->updateOrCreate(
+                ['employee_id' => $employee->id],
+                [
+                    'basic_salary' => $row['base_salary'],
+                    'default_allowance' => 300000,
+                    'default_deduction' => 100000,
+                    'overtime_rate_type' => EmployeeSalaryProfile::OVERTIME_RATE_FIXED_HOURLY,
+                    'overtime_rate_value' => 35000,
+                ],
+            );
+
+            if ($row['schedule']) {
+                $scheduled[] = [
+                    'employee' => $employee,
+                    'shift_key' => $row['shift_key'],
+                ];
+            }
         }
+
+        return $scheduled;
+    }
+
+    /**
+     * @param  list<array{employee: Employee, shift_key: string}>  $scheduled
+     */
+    private function seedSchedulesSixMonths(int $outletId, array $scheduled, Shift $morning, Shift $evening): void
+    {
+        if ($scheduled === []) {
+            return;
+        }
+
+        $from = Carbon::now()->startOfDay();
+        $to = Carbon::now()->addMonths(6)->startOfDay();
+
+        foreach ($scheduled as $row) {
+            /** @var Employee $employee */
+            $employee = $row['employee'];
+            $preferred = $row['shift_key'] === 'evening' ? $evening : $morning;
+            $alt = $preferred->id === $morning->id ? $evening : $morning;
+
+            EmployeeShiftAssignment::query()->updateOrCreate(
+                ['employee_id' => $employee->id, 'shift_id' => $preferred->id],
+                [
+                    'outlet_id' => $outletId,
+                    'effective_from' => $from->toDateString(),
+                    'effective_until' => $to->toDateString(),
+                    'is_active' => true,
+                    'notes' => 'WR WB master seed assignment',
+                ],
+            );
+
+            // Deterministic “random” per employee so re-seed is stable.
+            $seed = crc32((string) $employee->employee_no);
+            mt_srand($seed);
+
+            for ($d = $from->copy(); $d->lte($to); $d->addDay()) {
+                $isOff = $d->isSunday() || (mt_rand(1, 100) <= 8);
+                if ($isOff) {
+                    EmployeeRoster::query()
+                        ->where('employee_id', $employee->id)
+                        ->whereDate('roster_date', $d->toDateString())
+                        ->delete();
+
+                    continue;
+                }
+
+                $shiftId = mt_rand(1, 100) <= 75 ? $preferred->id : $alt->id;
+
+                EmployeeRoster::query()->updateOrCreate(
+                    [
+                        'employee_id' => $employee->id,
+                        'roster_date' => $d->toDateString(),
+                    ],
+                    [
+                        'outlet_id' => $outletId,
+                        'shift_id' => $shiftId,
+                        'status' => EmployeeRoster::STATUS_PUBLISHED,
+                        'published_at' => now(),
+                        'notes' => null,
+                    ],
+                );
+            }
+        }
+
+        mt_srand();
     }
 }

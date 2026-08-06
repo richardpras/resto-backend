@@ -31,6 +31,8 @@ final class TerminalOperationType
 
     public const POS_SESSION_CLOSE = 'pos_session.close';
 
+    public const POS_SESSION_CASH_MOVEMENT = 'pos_session.cash_movement';
+
     /** Phase 14 — enqueue print from persisted render snapshot (offline/deferred replay). */
     public const PRINT_DOCUMENT_ENQUEUE = 'print.document.enqueue';
 
@@ -68,6 +70,7 @@ final class TerminalOperationType
             self::PRINT_JOB_RETRY,
             self::POS_SESSION_OPEN,
             self::POS_SESSION_CLOSE,
+            self::POS_SESSION_CASH_MOVEMENT,
             self::PRINT_DOCUMENT_ENQUEUE,
             self::MEMBER_QUICK_CREATE,
             self::MEMBER_CREATE,

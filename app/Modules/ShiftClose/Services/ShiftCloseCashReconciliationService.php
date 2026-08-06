@@ -29,10 +29,12 @@ class ShiftCloseCashReconciliationService
         $cashOut = $this->sumCashOut($outletId, $session);
 
         $limitations = [];
-        if ($cashExpenses === 0.0 && ! $this->hasCashMovementTable('pos_session_cash_expenses')) {
+        $hasMovements = $this->hasCashMovementTable('pos_session_cash_movements');
+        // Expenses table is optional when movements cover drawer in/out (MVP).
+        if (! $hasMovements && $cashExpenses === 0.0 && ! $this->hasCashMovementTable('pos_session_cash_expenses')) {
             $limitations[] = 'cash_expenses_unavailable';
         }
-        if ($cashIn === 0.0 && ! $this->hasCashMovementTable('pos_session_cash_movements')) {
+        if (! $hasMovements) {
             $limitations[] = 'cash_in_out_unavailable';
         }
 

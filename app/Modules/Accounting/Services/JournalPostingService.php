@@ -335,6 +335,75 @@ class JournalPostingService
         }
     }
 
+    public function postForPosCashMovement(
+        int $movementId,
+        int $tenantId,
+        ?int $outletId,
+        string $direction,
+        float $amount,
+        string $category,
+        ?string $clientLocalRef = null,
+    ): ?Journal {
+        if ($amount <= 0) {
+            return null;
+        }
+
+        try {
+            $resolvedOutletId = (int) ($outletId ?? 0);
+            $cashId = $this->postingMappingService->resolvePosPaymentAccountId($tenantId, $resolvedOutletId, 'cash');
+            $abs = abs($amount);
+            $memo = 'POS cash '.$direction.' ('.$category.')';
+
+            if ($direction === 'out') {
+                $expenseId = $this->postingMappingService->resolveAccountIdOrFail(
+                    $tenantId,
+                    $resolvedOutletId,
+                    AccountingPostingMappingService::MODULE_POS,
+                    'pos.cash.out.expense',
+                );
+                $lines = [
+                    ['account_id' => $expenseId, 'debit' => $abs, 'credit' => 0, 'memo' => $memo],
+                    ['account_id' => $cashId, 'debit' => 0, 'credit' => $abs, 'memo' => $memo],
+                ];
+            } else {
+                $contraId = $this->postingMappingService->resolveAccountIdOrFail(
+                    $tenantId,
+                    $resolvedOutletId,
+                    AccountingPostingMappingService::MODULE_POS,
+                    'pos.cash.in.contra',
+                );
+                $lines = [
+                    ['account_id' => $cashId, 'debit' => $abs, 'credit' => 0, 'memo' => $memo],
+                    ['account_id' => $contraId, 'debit' => 0, 'credit' => $abs, 'memo' => $memo],
+                ];
+            }
+
+            $postingKey = 'pos-cash-movement-'.($clientLocalRef ?: (string) $movementId);
+
+            return $this->post([
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+                'source_type' => 'pos_cash_movement',
+                'source_id' => $movementId,
+                'journal_date' => now()->toDateString(),
+                'description' => 'Auto posting from POS cash '.$direction,
+                'posting_key' => $postingKey,
+                'scope' => 'pos_cash_movement.'.$movementId,
+                'lines' => $lines,
+            ]);
+        } catch (\Throwable $e) {
+            $this->recordAutoPostFailure('pos_cash_movement', $movementId, $outletId, $e, [
+                'direction' => $direction,
+                'amount' => $amount,
+                'category' => $category,
+                'tenant_id' => $tenantId,
+                'outlet_id' => $outletId,
+            ]);
+
+            return null;
+        }
+    }
+
     public function postForShiftClose(
         int $tenantId,
         ?int $outletId,

@@ -51,6 +51,8 @@ final class PostingMappingDefaults
             'pos.gift_card.issue.gift_card' => '2130',
             'pos.gift_card.issue.store_credit' => '2135',
             'pos.gift_card.breakage.revenue' => '4190',
+            'pos.cash.out.expense' => '5400',
+            'pos.cash.in.contra' => '2180',
         ];
     }
 

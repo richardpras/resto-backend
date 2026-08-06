@@ -18,13 +18,13 @@ class DefaultRolesPermissionsSeeder extends Seeder
         'dashboard.view_own_outlet', 'pos.use', 'kitchen.use', 'menu.manage', 'inventory.manage',
         'purchase.manage', 'purchase.approve', 'promotions.manage', 'tables.view', 'tables.manage',
         'qr_orders.view', 'reports.view', 'members.manage', 'suppliers.manage', 'accounting.manage',
-        'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
+        'finance.shift_close', 'payroll.manage', 'employees.view', 'attendance.view', 'settings.view', 'settings.update',
         'users.view', 'users.create', 'users.assign_roles', 'users.update',
         'orders.recovery.read', 'orders.recovery.request', 'orders.recovery.approve', 'orders.refund.execute',
     ];
 
     private const CASHIER_PERMISSIONS = [
-        'pos.use', 'members.manage', 'tables.view', 'qr_orders.view', 'finance.shift_close',
+        'pos.use', 'members.manage', 'tables.view', 'qr_orders.view',
         'orders.recovery.read', 'orders.recovery.request',
     ];
 

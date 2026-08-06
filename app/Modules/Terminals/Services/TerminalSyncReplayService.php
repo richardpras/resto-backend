@@ -20,11 +20,13 @@ use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Http\Requests\AddOrderPaymentsRequest;
 use App\Modules\Orders\Http\Requests\ClosePosSessionRequest;
 use App\Modules\Orders\Http\Requests\OpenPosSessionRequest;
+use App\Modules\Orders\Http\Requests\StorePosSessionCashMovementRequest;
 use App\Modules\Orders\Http\Requests\StoreOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderRequest;
 use App\Modules\Orders\Http\Requests\UpdateOrderStatusRequest;
 use App\Modules\Orders\Http\Requests\SyncOrderSplitsRequest;
 use App\Modules\Orders\Services\OrderService;
+use App\Modules\Orders\Services\PosSessionCashMovementService;
 use App\Modules\Orders\Services\PosSessionService;
 use App\Modules\Orders\Services\QrOrderApprovalService;
 use App\Modules\Orders\Services\SplitBillService;
@@ -46,6 +48,7 @@ class TerminalSyncReplayService
         private readonly KitchenTicketService $kitchenTicketService,
         private readonly QrOrderApprovalService $qrOrderApprovalService,
         private readonly PosSessionService $posSessionService,
+        private readonly PosSessionCashMovementService $posSessionCashMovementService,
         private readonly PrinterManagementService $printerManagementService,
         private readonly ReceiptDocumentService $receiptDocumentService,
         private readonly SplitBillService $splitBillService,
@@ -89,6 +92,7 @@ class TerminalSyncReplayService
             TerminalOperationType::PRINT_JOB_RETRY => $this->replayPrintJobRetry($user, $outletId, $payload),
             TerminalOperationType::POS_SESSION_OPEN => $this->replayPosSessionOpen($user, $outletId, $payload),
             TerminalOperationType::POS_SESSION_CLOSE => $this->replayPosSessionClose($user, $outletId, $payload),
+            TerminalOperationType::POS_SESSION_CASH_MOVEMENT => $this->replayPosSessionCashMovement($user, $outletId, $payload),
             TerminalOperationType::PRINT_DOCUMENT_ENQUEUE => $this->replayPrintDocumentEnqueue($user, $outletId, $payload),
             TerminalOperationType::MEMBER_QUICK_CREATE => $this->replayMemberCreate($user, $outletId, $payload),
             TerminalOperationType::MEMBER_CREATE => $this->replayMemberCreate($user, $outletId, $payload),
@@ -450,6 +454,34 @@ class TerminalSyncReplayService
             'entity' => 'pos_session',
             'sessionId' => (int) $session->id,
             'updatedAt' => $session->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function replayPosSessionCashMovement(User $user, int $outletId, array $payload): array
+    {
+        $sessionId = (int) ($payload['sessionId'] ?? $payload['posSessionId'] ?? 0);
+        if ($sessionId < 1) {
+            $current = $this->posSessionService->current($user, $outletId);
+            if ($current === null) {
+                throw ValidationException::withMessages(['sessionId' => ['sessionId is required.']]);
+            }
+            $sessionId = (int) $current->id;
+        }
+
+        $movementPayload = $payload;
+        unset($movementPayload['sessionId'], $movementPayload['posSessionId'], $movementPayload['outletId']);
+        $validated = $this->validate($movementPayload, (new StorePosSessionCashMovementRequest)->rules());
+        $movement = $this->posSessionCashMovementService->create($user, $sessionId, $validated);
+
+        return [
+            'entity' => 'pos_session_cash_movement',
+            'sessionId' => (int) $movement->pos_session_id,
+            'cashMovementId' => (int) $movement->id,
+            'updatedAt' => $movement->updated_at?->toIso8601String(),
+            'clientLocalRef' => $movement->client_local_ref ?? ($payload['clientLocalRef'] ?? null),
         ];
     }
 

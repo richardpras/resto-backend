@@ -1057,6 +1057,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('pos-sessions/{id}/close-preview', [PosSessionController::class, 'closePreview'])->middleware('permission:pos.use');
         Route::post('pos-sessions/{id}/close', [PosSessionController::class, 'close'])->middleware('permission:pos.use');
         Route::get('pos-sessions/current', [PosSessionController::class, 'current'])->middleware('permission:pos.use');
+        Route::get('pos-sessions/{id}/cash-movements', [PosSessionController::class, 'listCashMovements'])->middleware('permission:pos.use');
+        Route::post('pos-sessions/{id}/cash-movements', [PosSessionController::class, 'storeCashMovement'])->middleware('permission:pos.use');
         Route::get('payments/health', [PaymentHealthController::class, 'show'])->middleware('permission:settings.manage');
         Route::get('payments/health/trends', [PaymentHealthController::class, 'trends'])->middleware('permission:settings.manage');
         Route::get('payments/health/reliability', [PaymentHealthController::class, 'reliability'])->middleware('permission:settings.manage');
