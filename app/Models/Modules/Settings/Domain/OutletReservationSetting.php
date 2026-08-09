@@ -17,6 +17,7 @@ class OutletReservationSetting extends Model
         'preorder_required',
         'deposit_instructions',
         'deposit_review_timeout_hours',
+        'invite_link_expiry_hours',
     ];
 
     protected $casts = [
@@ -25,6 +26,7 @@ class OutletReservationSetting extends Model
         'deposit_flat_amount' => 'decimal:2',
         'preorder_required' => 'boolean',
         'deposit_review_timeout_hours' => 'integer',
+        'invite_link_expiry_hours' => 'integer',
     ];
 
     public function outlet(): BelongsTo

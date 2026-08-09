@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Menu\Domain\MenuItemOutlet;
 use App\Models\Modules\Reservations\Domain\Reservation;
+use App\Models\Modules\Reservations\Domain\ReservationDepositProof;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\OutletReservationSetting;
 use App\Models\Modules\Orders\Domain\PosSession;
@@ -90,6 +91,68 @@ class PublicReservationDepositTest extends TestCase
             'proof' => UploadedFile::fake()->image('proof.jpg'),
         ])->assertOk()
             ->assertJsonPath('data.status', 'deposit_submitted');
+    }
+
+    public function test_guest_can_download_reservation_pdf(): void
+    {
+        $this->seedPublicOutlet('percent', 50, null, true);
+        $code = $this->createPublicReservation();
+
+        $this->get('/api/v1/public/reservations/'.$code.'/pdf')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+    }
+
+    public function test_staff_proof_download_is_scoped_and_forced_attachment(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        [$outlet] = $this->seedPublicOutlet('flat', null, 100000, false);
+        $code = $this->createPublicReservation();
+        $this->post('/api/v1/public/reservations/'.$code.'/deposit-proof', [
+            'proof' => UploadedFile::fake()->image('bukti transfer.jpg'),
+        ])->assertOk();
+
+        $reservation = Reservation::query()->where('reservation_code', $code)->firstOrFail();
+        $proof = ReservationDepositProof::query()->where('reservation_id', $reservation->id)->firstOrFail();
+        $this->assignUserToOutlets($user, [$outlet->id]);
+
+        $response = $this->get('/api/v1/reservations/'.$reservation->id.'/deposit-proofs/'.$proof->id.'/file')
+            ->assertOk()
+            ->assertHeader('x-content-type-options', 'nosniff');
+
+        $disposition = (string) $response->headers->get('content-disposition');
+        $this->assertStringStartsWith('attachment;', $disposition);
+        $otherOutlet = Outlet::query()->create([
+            'name' => 'Other Outlet',
+            'address' => '',
+            'phone' => '',
+            'manager' => '',
+            'status' => 'active',
+            'code' => 'other-outlet',
+        ]);
+        $this->assignUserToOutlets($user, [$otherOutlet->id]);
+
+        $this->getJson('/api/v1/reservations/'.$reservation->id.'/deposit-proofs/'.$proof->id.'/file')
+            ->assertNotFound();
+    }
+
+    public function test_proof_path_traversal_is_rejected(): void
+    {
+        $user = $this->actingAsUserManagementApiAdministrator();
+        [$outlet] = $this->seedPublicOutlet('flat', null, 100000, false);
+        $code = $this->createPublicReservation();
+        $this->post('/api/v1/public/reservations/'.$code.'/deposit-proof', [
+            'proof' => UploadedFile::fake()->image('proof.jpg'),
+        ])->assertOk();
+
+        $reservation = Reservation::query()->where('reservation_code', $code)->firstOrFail();
+        $proof = ReservationDepositProof::query()->where('reservation_id', $reservation->id)->firstOrFail();
+        $proof->file_path = 'reservation-deposits/'.$outlet->id.'/../secrets.txt';
+        $proof->save();
+        $this->assignUserToOutlets($user, [$outlet->id]);
+
+        $this->getJson('/api/v1/reservations/'.$reservation->id.'/deposit-proofs/'.$proof->id.'/file')
+            ->assertNotFound();
     }
 
     public function test_staff_approve_deposit_confirms_reservation(): void

@@ -309,6 +309,7 @@ class OrderService
             ]);
 
             foreach ($data->items as $item) {
+                $note = isset($item['notes']) ? trim((string) $item['notes']) : '';
                 OrderItem::query()->create([
                     'order_id' => $order->id,
                     'item_id' => $item['id'],
@@ -317,14 +318,17 @@ class OrderService
                     'qty' => $item['qty'],
                     'price' => $item['price'],
                     'line_total' => (float) $item['qty'] * (float) $item['price'],
-                    'notes' => $item['notes'] ?? null,
+                    'notes' => $note !== '' ? $note : null,
                 ]);
             }
 
             $this->storePayments($order->id, $normalizedPayments);
 
             if ($status === 'confirmed' || $status === 'completed') {
-                $this->printerRoutingService->queueKitchenTicketsForOrder($order->fresh(['items']));
+                // Pay Now defers printer kitchen tickets until after the customer receipt.
+                if (! $data->skipKitchenPrint) {
+                    $this->printerRoutingService->queueKitchenTicketsForOrder($order->fresh(['items']));
+                }
                 $this->kitchenTicketService->createFromOrder($order->fresh(['items']));
             }
 
@@ -389,6 +393,7 @@ class OrderService
                 $orderItemsUpdated = true;
                 OrderItem::query()->where('order_id', $order->id)->delete();
                 foreach ($payload['items'] as $item) {
+                    $note = isset($item['notes']) ? trim((string) $item['notes']) : '';
                     OrderItem::query()->create([
                         'order_id' => $order->id,
                         'item_id' => $item['id'],
@@ -397,7 +402,7 @@ class OrderService
                         'qty' => $item['qty'],
                         'price' => $item['price'],
                         'line_total' => (float) $item['qty'] * (float) $item['price'],
-                        'notes' => $item['notes'] ?? null,
+                        'notes' => $note !== '' ? $note : null,
                     ]);
                 }
             }

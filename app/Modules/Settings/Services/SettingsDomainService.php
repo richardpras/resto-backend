@@ -326,6 +326,7 @@ class SettingsDomainService
             'printer_type' => $data['printerType'],
             'connection' => $data['connection'],
             'thermal_paper_width' => $this->normalizeThermalPaperWidth($data['thermalPaperWidth'] ?? null),
+            'auto_cut' => array_key_exists('autoCut', $data) ? (bool) $data['autoCut'] : true,
             'ip' => $data['ip'] ?? null,
             'bluetooth_device' => $data['bluetoothDevice'] ?? null,
             'outlet_id' => (int) $data['outletId'],
@@ -348,6 +349,7 @@ class SettingsDomainService
             'printer_type' => $data['printerType'],
             'connection' => $data['connection'],
             'thermal_paper_width' => $this->normalizeThermalPaperWidth($data['thermalPaperWidth'] ?? null),
+            'auto_cut' => array_key_exists('autoCut', $data) ? (bool) $data['autoCut'] : (bool) ($p->auto_cut ?? true),
             'ip' => $data['ip'] ?? null,
             'bluetooth_device' => $data['bluetoothDevice'] ?? null,
             'outlet_id' => (int) $data['outletId'],
@@ -816,6 +818,7 @@ class SettingsDomainService
             'printerType' => $p->printer_type,
             'connection' => $p->connection,
             'thermalPaperWidth' => $this->normalizeThermalPaperWidth($p->thermal_paper_width ?? null),
+            'autoCut' => (bool) ($p->auto_cut ?? true),
             'outletId' => (int) $p->outlet_id,
             'printerProfileId' => $p->printer_profile_id !== null ? (int) $p->printer_profile_id : null,
         ];

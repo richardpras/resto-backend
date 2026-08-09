@@ -6,9 +6,11 @@ use App\Models\Modules\Menu\Domain\MenuCategory;
 use App\Models\Modules\Menu\Domain\MenuCategoryPrinterMapping;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
+use App\Models\Modules\Print\Domain\PrinterProfile;
 use App\Models\Modules\Print\Domain\PrinterRoute;
 use App\Models\Modules\Print\Domain\PrintJob;
 use App\Models\Modules\Settings\Domain\Outlet;
+use App\Models\Modules\Settings\Domain\SettingPrinter;
 use App\Modules\Settings\Services\OutletLogoService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
@@ -104,21 +106,34 @@ class PrinterRoutingService
                 'printer_profile_id' => $groupProfileId,
             ]);
 
+            $width = $this->thermalPaperWidthResolver->resolveWidthCharsForProfileId($groupProfileId);
+            $printableSnapshot = [
+                'order_id' => (int) $order->id,
+                'order_code' => (string) ($order->code ?? ''),
+                'table_name' => (string) ($order->table_name ?? ''),
+                'order_type' => (string) ($order->order_type ?? ''),
+                'category' => $routeResolutionMeta['menu_category_name'] ?? null,
+                'station' => $routeResolutionMeta['menu_category_name'] ?? 'kitchen',
+                'menu_category_id' => $menuCategoryId,
+                'resolved_printer_profile_id' => $groupProfileId,
+                'thermal_width_chars' => $width,
+                'route_resolution' => $routeResolutionMeta,
+                'items' => array_values($groupItems),
+            ];
+            // Bake lines (incl. item notes) at enqueue so bridge + reprint share one layout.
+            $printableSnapshot['thermalDocument'] = $this->thermalReceiptLayout->buildKitchenTicketDocument(
+                $printableSnapshot,
+                $width,
+                (string) ($routeResolutionMeta['menu_category_name'] ?? 'kitchen'),
+            );
+
             $this->enqueuePrintJob(
                 outletId: $outletId,
                 sourceType: 'order',
                 sourceId: (int) $order->id,
                 type: 'kitchen',
                 route: null,
-                printableSnapshot: [
-                    'order_id' => (int) $order->id,
-                    'category' => $routeResolutionMeta['menu_category_name'] ?? null,
-                    'menu_category_id' => $menuCategoryId,
-                    'resolved_printer_profile_id' => $groupProfileId,
-                    'thermal_width_chars' => $this->thermalPaperWidthResolver->resolveWidthCharsForProfileId($groupProfileId),
-                    'route_resolution' => $routeResolutionMeta,
-                    'items' => array_values($groupItems),
-                ],
+                printableSnapshot: $printableSnapshot,
                 idempotencyKey: 'order-confirmed-'.(int) $order->id.'-cat-'.$menuCategoryId,
                 routeResolutionMeta: $routeResolutionMeta,
                 resolvedProfileId: $groupProfileId,
@@ -277,22 +292,34 @@ class PrinterRoutingService
             $menuCategoryId = (int) ($routeResolutionMeta['menu_category_id'] ?? 0);
             $groupProfileId = (int) ($routeResolutionMeta['resolved_printer_profile_id'] ?? 0);
 
+            $width = $this->thermalPaperWidthResolver->resolveWidthCharsForProfileId($groupProfileId);
+            $printableSnapshot = [
+                'order_id' => (int) $order->id,
+                'order_code' => (string) ($order->code ?? ''),
+                'table_name' => (string) ($order->table_name ?? ''),
+                'order_type' => (string) ($order->order_type ?? ''),
+                'category' => $routeResolutionMeta['menu_category_name'] ?? null,
+                'station' => $routeResolutionMeta['menu_category_name'] ?? 'kitchen',
+                'menu_category_id' => $menuCategoryId,
+                'resolved_printer_profile_id' => $groupProfileId,
+                'thermal_width_chars' => $width,
+                'route_resolution' => $routeResolutionMeta,
+                'items' => array_values($groupItems),
+                'reprint' => true,
+            ];
+            $printableSnapshot['thermalDocument'] = $this->thermalReceiptLayout->buildKitchenTicketDocument(
+                $printableSnapshot,
+                $width,
+                (string) ($routeResolutionMeta['menu_category_name'] ?? 'kitchen'),
+            );
+
             $job = $this->enqueuePrintJob(
                 outletId: $outletId,
                 sourceType: 'order',
                 sourceId: (int) $order->id,
                 type: 'kitchen',
                 route: null,
-                printableSnapshot: [
-                    'order_id' => (int) $order->id,
-                    'category' => $routeResolutionMeta['menu_category_name'] ?? null,
-                    'menu_category_id' => $menuCategoryId,
-                    'resolved_printer_profile_id' => $groupProfileId,
-                    'thermal_width_chars' => $this->thermalPaperWidthResolver->resolveWidthCharsForProfileId($groupProfileId),
-                    'route_resolution' => $routeResolutionMeta,
-                    'items' => array_values($groupItems),
-                    'reprint' => true,
-                ],
+                printableSnapshot: $printableSnapshot,
                 idempotencyKey: 'kitchen-reprint-'.(int) $order->id.'-'.$sortedItemKey.'-cat-'.$menuCategoryId.'-'.uniqid('', true),
                 routeResolutionMeta: $routeResolutionMeta,
                 resolvedProfileId: $groupProfileId,
@@ -300,7 +327,7 @@ class PrinterRoutingService
 
             $printJobIds[] = (int) $job->id;
             $groupedByStation[] = [
-                'station' => (string) ($routeResolutionMeta['resolution_layer'] ?? 'kitchen'),
+                'station' => (string) ($routeResolutionMeta['menu_category_name'] ?? 'kitchen'),
                 'menuCategoryName' => (string) ($routeResolutionMeta['menu_category_name'] ?? ''),
                 'itemCount' => count($groupItems),
             ];
@@ -421,7 +448,9 @@ class PrinterRoutingService
                 'item_id' => (int) $item->item_id,
                 'name' => (string) $item->name,
                 'qty' => (float) $item->qty,
-                'notes' => $item->notes,
+                'notes' => $item->notes !== null && trim((string) $item->notes) !== ''
+                    ? trim((string) $item->notes)
+                    : null,
                 'category' => (string) ($menuItem?->category ?? 'uncategorized'),
                 'menu_category_id' => $menuItem?->menu_category_id !== null
                     ? (int) $menuItem->menu_category_id
@@ -453,25 +482,85 @@ class PrinterRoutingService
         }
 
         $mapping = $categoryMappings->get((int) $menuCategory->id);
-        if (! $mapping instanceof MenuCategoryPrinterMapping) {
+        if ($mapping instanceof MenuCategoryPrinterMapping) {
+            return [
+                'resolutionLayer' => 'category_master_mapping',
+                'menuCategoryId' => (int) $menuCategory->id,
+                'menuCategoryName' => (string) $menuCategory->name,
+                'printerProfileId' => (int) $mapping->printer_profile_id,
+                'categoryMappingId' => (int) $mapping->id,
+            ];
+        }
+
+        // No category printer set → still split one ticket per category via outlet kitchen fallback.
+        $fallbackProfileId = $this->resolveFallbackKitchenPrinterProfileId($outletId);
+        if ($fallbackProfileId === null) {
             Log::warning('print.routing.unmapped_category', [
                 'outlet_id' => $outletId,
                 'item_id' => (int) ($item['item_id'] ?? 0),
                 'menu_category_id' => (int) $menuCategory->id,
                 'menu_category_name' => (string) $menuCategory->name,
-                'reason' => 'no_printer_mapping',
+                'reason' => 'no_printer_mapping_and_no_fallback',
             ]);
 
             return null;
         }
 
+        Log::info('print.routing.category_split_fallback', [
+            'outlet_id' => $outletId,
+            'item_id' => (int) ($item['item_id'] ?? 0),
+            'menu_category_id' => (int) $menuCategory->id,
+            'menu_category_name' => (string) $menuCategory->name,
+            'printer_profile_id' => $fallbackProfileId,
+        ]);
+
         return [
-            'resolutionLayer' => 'category_master_mapping',
+            'resolutionLayer' => 'category_split_fallback',
             'menuCategoryId' => (int) $menuCategory->id,
             'menuCategoryName' => (string) $menuCategory->name,
-            'printerProfileId' => (int) $mapping->printer_profile_id,
-            'categoryMappingId' => (int) $mapping->id,
+            'printerProfileId' => $fallbackProfileId,
+            'categoryMappingId' => 0,
         ];
+    }
+
+    /** Prefer kitchen → bar → dessert SettingPrinter / PrinterProfile for unmapped categories. */
+    private function resolveFallbackKitchenPrinterProfileId(int $outletId): ?int
+    {
+        if ($outletId < 1) {
+            return null;
+        }
+
+        $setting = SettingPrinter::query()
+            ->where('outlet_id', $outletId)
+            ->whereIn('printer_type', ['kitchen', 'bar', 'dessert'])
+            ->orderByRaw("CASE printer_type WHEN 'kitchen' THEN 0 WHEN 'bar' THEN 1 ELSE 2 END")
+            ->orderBy('id')
+            ->first();
+
+        if ($setting instanceof SettingPrinter && $setting->printer_profile_id !== null) {
+            $fromSetting = PrinterProfile::query()->find((int) $setting->printer_profile_id);
+            if ($fromSetting instanceof PrinterProfile && (bool) $fromSetting->is_active) {
+                return (int) $fromSetting->id;
+            }
+        }
+
+        $profile = PrinterProfile::query()
+            ->where('outlet_id', $outletId)
+            ->where('is_active', true)
+            ->where(function ($query): void {
+                $query->whereRaw('LOWER(station) in (?, ?, ?)', ['kitchen', 'bar', 'dessert'])
+                    ->orWhereRaw('LOWER(code) in (?, ?, ?)', ['kitchen', 'bar', 'dessert']);
+            })
+            ->orderByRaw("CASE LOWER(station)
+                WHEN 'kitchen' THEN 0
+                WHEN 'bar' THEN 1
+                WHEN 'dessert' THEN 2
+                ELSE 3
+            END")
+            ->orderBy('id')
+            ->first();
+
+        return $profile instanceof PrinterProfile ? (int) $profile->id : null;
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -13,6 +14,7 @@ class ReservationAllocationApiTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -128,12 +130,15 @@ class ReservationAllocationApiTest extends TestCase
         $outlet = $this->createOutlet('No Table');
         $this->assignUserToOutlets($user, [$outlet->id]);
 
+        [$menuItem] = $this->seedReservationMenuItem((int) $outlet->id);
+
         $this->postJson('/api/v1/reservations', [
             'outletId' => $outlet->id,
             'customerName' => 'Pak Budi',
             'customerPhone' => '08111',
             'partySize' => 10,
             'reservationAt' => now()->addDay()->toISOString(),
+            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
         ])
             ->assertCreated()
             ->assertJsonPath('data.tableId', null);
@@ -187,15 +192,12 @@ class ReservationAllocationApiTest extends TestCase
 
     private function createReservationForOutlet(int $outletId): int
     {
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outletId,
-            'customerName' => 'Pak Budi',
-            'customerPhone' => '08111',
-            'partySize' => 10,
-            'reservationAt' => now()->addHours(2)->toISOString(),
-        ])->assertCreated();
-
-        return (int) $response->json('data.id');
+        return $this->insertDraftReservation($outletId, [
+            'customer_name' => 'Pak Budi',
+            'customer_phone' => '08111',
+            'party_size' => 10,
+            'reservation_at' => now()->addHours(2),
+        ]);
     }
 
     private function createOutlet(string $name): Outlet

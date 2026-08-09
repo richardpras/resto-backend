@@ -7,6 +7,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -14,6 +15,7 @@ class ReservationProjectionIntegrationTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -116,13 +118,11 @@ class ReservationProjectionIntegrationTest extends TestCase
     public function test_draft_allocation_does_not_affect_projection_until_confirmed(): void
     {
         [$outlet, $table] = $this->seedOutletAndTable('T-8');
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Draft Guest',
-            'partySize' => 4,
-            'reservationAt' => now()->addHours(2)->toISOString(),
-        ])->assertCreated();
-        $reservationId = (int) $response->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Draft Guest',
+            'party_size' => 4,
+            'reservation_at' => now()->addHours(2),
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', [
             'tableId' => $table->id,
@@ -210,14 +210,12 @@ class ReservationProjectionIntegrationTest extends TestCase
 
     private function createConfirmedReservation(int $outletId): int
     {
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outletId,
-            'customerName' => 'Pak Budi',
-            'customerPhone' => '08111',
-            'partySize' => 10,
-            'reservationAt' => now()->addHours(2)->toISOString(),
-        ])->assertCreated();
-        $reservationId = (int) $response->json('data.id');
+        $reservationId = $this->insertDraftReservation($outletId, [
+            'customer_name' => 'Pak Budi',
+            'customer_phone' => '08111',
+            'party_size' => 10,
+            'reservation_at' => now()->addHours(2),
+        ]);
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
 
         return $reservationId;

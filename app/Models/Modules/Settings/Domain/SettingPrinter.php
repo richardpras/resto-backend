@@ -23,6 +23,7 @@ class SettingPrinter extends Model
         'printer_type',
         'connection',
         'thermal_paper_width',
+        'auto_cut',
         'ip',
         'bluetooth_device',
         'outlet_id',
@@ -32,6 +33,7 @@ class SettingPrinter extends Model
 
     protected $casts = [
         'assigned_categories' => 'array',
+        'auto_cut' => 'boolean',
     ];
 
     public function outlet(): BelongsTo

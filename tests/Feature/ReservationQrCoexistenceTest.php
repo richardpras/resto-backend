@@ -9,6 +9,7 @@ use App\Models\Modules\Reservations\Domain\Reservation;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -16,6 +17,7 @@ class ReservationQrCoexistenceTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -102,12 +104,10 @@ class ReservationQrCoexistenceTest extends TestCase
             'available' => true,
         ]);
 
-        $reservationId = (int) $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Reserved Guest',
-            'partySize' => 4,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated()->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Reserved Guest',
+            'party_size' => 4,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', [

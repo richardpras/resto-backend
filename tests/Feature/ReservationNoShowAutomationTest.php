@@ -10,6 +10,7 @@ use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -17,6 +18,7 @@ class ReservationNoShowAutomationTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -114,15 +116,12 @@ class ReservationNoShowAutomationTest extends TestCase
         ]);
         $this->assignUserToOutlets($user, [$outlet->id]);
 
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Late Guest',
-            'customerPhone' => '08123',
-            'partySize' => 2,
-            'reservationAt' => $reservationAt->toISOString(),
-        ])->assertCreated();
-
-        $reservationId = (int) $response->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Late Guest',
+            'customer_phone' => '08123',
+            'party_size' => 2,
+            'reservation_at' => $reservationAt,
+        ]);
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
 
         return Reservation::query()->findOrFail($reservationId);

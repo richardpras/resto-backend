@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -18,6 +19,7 @@ class ReservationAuthorityTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -81,15 +83,23 @@ class ReservationAuthorityTest extends TestCase
         Passport::actingAs($cashier);
         $this->assignUserToOutlets($cashier, [(int) $outlet->id]);
 
-        $create = $this->postJson('/api/v1/reservations', $this->reservationPayload($outlet->id))->assertCreated();
+        [$menuItem] = $this->seedReservationMenuItem((int) $outlet->id);
+        $create = $this->postJson('/api/v1/reservations', $this->reservationPayload($outlet->id, (int) $menuItem->id))->assertCreated();
         $reservationId = (int) $create->json('data.id');
+        $this->assertSame('pending_deposit', $create->json('data.status'));
 
         $this->getJson('/api/v1/reservations?outletId='.$outlet->id)->assertOk();
         $this->getJson('/api/v1/reservations/'.$reservationId)->assertOk();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/check-in')->assertOk();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/seat')->assertOk();
+
+        // Lifecycle after deposit uses draft→confirmed path for authority coverage.
+        $lifecycleId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Authority Guest',
+            'party_size' => 2,
+        ]);
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/confirm')->assertOk();
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/allocate-table', ['tableId' => $tableId])->assertOk();
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/check-in')->assertOk();
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/seat')->assertOk();
 
         PosSession::query()->create([
             'outlet_id' => $outlet->id,
@@ -99,11 +109,11 @@ class ReservationAuthorityTest extends TestCase
             'opened_at' => now(),
         ]);
 
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/complete')
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/start-service')->assertOk();
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/complete')
             ->assertUnprocessable()
             ->assertJsonPath('errors.linkedOrder.0', 'Reservation cannot be completed while linked order remains unsettled.');
-        $this->postJson('/api/v1/reservations/'.$reservationId.'/mark-no-show')->assertUnprocessable();
+        $this->postJson('/api/v1/reservations/'.$lifecycleId.'/mark-no-show')->assertUnprocessable();
     }
 
     public function test_admin_can_manage_reservation_lifecycle(): void
@@ -112,8 +122,10 @@ class ReservationAuthorityTest extends TestCase
         $admin = $this->actingAsUserManagementApiAdministrator();
         $this->assignUserToOutlets($admin, [(int) $outlet->id]);
 
-        $create = $this->postJson('/api/v1/reservations', $this->reservationPayload($outlet->id))->assertCreated();
-        $reservationId = (int) $create->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Authority Guest',
+            'party_size' => 2,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();
@@ -129,9 +141,10 @@ class ReservationAuthorityTest extends TestCase
         [$outlet, $tableId] = $this->seedOutletAndTable();
         $admin = $this->actingAsUserManagementApiAdministrator();
         $this->assignUserToOutlets($admin, [(int) $outlet->id]);
-        $reservationId = (int) $this->postJson('/api/v1/reservations', $this->reservationPayload($outlet->id))
-            ->assertCreated()
-            ->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Authority Guest',
+            'party_size' => 2,
+        ]);
 
         return [$outlet, $tableId, $reservationId];
     }
@@ -159,14 +172,19 @@ class ReservationAuthorityTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function reservationPayload(int $outletId): array
+    private function reservationPayload(int $outletId, ?int $menuItemId = null): array
     {
-        return [
+        $payload = [
             'outletId' => $outletId,
             'customerName' => 'Authority Guest',
             'partySize' => 2,
             'reservationAt' => now()->addHour()->toISOString(),
         ];
+        if ($menuItemId !== null) {
+            $payload['items'] = [['menuItemId' => $menuItemId, 'qty' => 1]];
+        }
+
+        return $payload;
     }
 
     /** @param list<string> $permissionCodes */

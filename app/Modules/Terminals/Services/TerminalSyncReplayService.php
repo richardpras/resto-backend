@@ -34,6 +34,7 @@ use App\Modules\Payments\Http\Requests\StorePaymentTransactionRequest;
 use App\Modules\Payments\Services\PaymentGatewayService;
 use App\Modules\Print\Services\PrinterManagementService;
 use App\Modules\Print\Services\ReceiptDocumentService;
+use App\Modules\Reservations\Services\ReservationService;
 use App\Modules\Terminals\Support\TerminalOperationType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -56,6 +57,7 @@ class TerminalSyncReplayService
         private readonly MenuService $menuService,
         private readonly InventoryService $inventoryService,
         private readonly DailyStocktakeService $dailyStocktakeService,
+        private readonly ReservationService $reservationService,
     ) {}
 
     public function assertWithinReplayWindow(?string $clientOccurredAtIso): void
@@ -102,6 +104,7 @@ class TerminalSyncReplayService
             TerminalOperationType::INVENTORY_STOCKTAKE_SAVE_OPENING => $this->replayStocktakeSaveOpening($user, $outletId, $payload),
             TerminalOperationType::INVENTORY_STOCKTAKE_SAVE_CLOSING => $this->replayStocktakeSaveClosing($user, $outletId, $payload),
             TerminalOperationType::INVENTORY_STOCKTAKE_SUBMIT => $this->replayStocktakeSubmit($user, $outletId, $payload),
+            TerminalOperationType::RESERVATION_CREATE => $this->replayReservationCreate($user, $outletId, $payload),
             default => throw ValidationException::withMessages([
                 'operationType' => ['Unsupported sync operation type.'],
             ]),
@@ -690,6 +693,50 @@ class TerminalSyncReplayService
         $session = $this->dailyStocktakeService->getOrCreateSession($outletId, $businessDate, $user);
 
         return (int) $session->id;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function replayReservationCreate(User $user, int $outletId, array $payload): array
+    {
+        if (! isset($payload['outletId'])) {
+            $payload['outletId'] = $outletId;
+        }
+        $this->assertOutletMatches($outletId, (int) $payload['outletId']);
+
+        $clientLocalRef = isset($payload['clientLocalRef']) ? (string) $payload['clientLocalRef'] : null;
+        unset($payload['clientLocalRef']);
+
+        $validated = $this->validate($payload, [
+            'outletId' => ['required', 'integer', 'min:1', 'exists:outlets,id'],
+            'customerName' => ['required', 'string', 'max:120'],
+            'customerPhone' => ['nullable', 'string', 'max:40'],
+            'memberId' => ['nullable', 'integer', 'min:1', 'exists:members,id'],
+            'partySize' => ['required', 'integer', 'min:1', 'max:100'],
+            // Date floor already enforced on device at queue time; avoid rejecting overnight syncs.
+            'reservationAt' => ['required', 'date'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.menuItemId' => ['required', 'integer', 'min:1'],
+            'items.*.qty' => ['required', 'numeric', 'min:0.01'],
+        ]);
+
+        $reservation = $this->reservationService->create($user, $validated);
+        $reservation->loadMissing('linkedOrder');
+
+        return [
+            'entity' => 'reservation',
+            'reservationId' => (int) $reservation->id,
+            'linkedOrderId' => $reservation->linked_order_id !== null ? (int) $reservation->linked_order_id : null,
+            'status' => (string) $reservation->status,
+            'reservationCode' => (string) $reservation->reservation_code,
+            'requiredDepositAmount' => $reservation->required_deposit_amount !== null
+                ? (float) $reservation->required_deposit_amount
+                : null,
+            'clientLocalRef' => $clientLocalRef,
+            'updatedAt' => $reservation->updated_at?->toIso8601String(),
+        ];
     }
 
     private function assertOutletMatches(int $batchOutletId, int $payloadOutletId): void

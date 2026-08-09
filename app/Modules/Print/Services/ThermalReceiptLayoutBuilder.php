@@ -32,6 +32,7 @@ class ThermalReceiptLayoutBuilder
         }
 
         $header = trim((string) ($branding['header'] ?? ''));
+        // Title + subtitle + header stay tight; one blank only before order meta.
         if ($header !== '') {
             foreach (preg_split("/\r\n|\n|\r/", $header) ?: [] as $headerLine) {
                 $trimmed = trim((string) $headerLine);
@@ -39,6 +40,9 @@ class ThermalReceiptLayoutBuilder
                     $lines[] = ['text' => $trimmed, 'align' => 'center'];
                 }
             }
+        }
+        if ($outletName !== '' || $isProforma || $header !== '') {
+            $lines[] = ['text' => ' '];
         }
 
         if ($code = ($snapshot['order_code'] ?? null)) {
@@ -262,6 +266,60 @@ class ThermalReceiptLayoutBuilder
         }
 
         return $plain;
+    }
+
+    /**
+     * Kitchen ticket lines — shared by bridge enqueue snapshot and live bridge payload.
+     *
+     * @param  array<string,mixed>  $snapshot
+     * @return array{lines:list<array<string,mixed>>,cut:bool}
+     */
+    public function buildKitchenTicketDocument(array $snapshot, int $width, ?string $stationFallback = 'kitchen'): array
+    {
+        $station = (string) (
+            data_get($snapshot, 'category')
+            ?: data_get($snapshot, 'station')
+            ?: $stationFallback
+            ?: 'kitchen'
+        );
+        $divider = str_repeat('-', $width);
+        $lines = [
+            ['text' => mb_strtoupper($station).' TICKET', 'bold' => true, 'align' => 'center'],
+            ['text' => $divider, 'align' => 'center'],
+        ];
+
+        if ($orderCode = data_get($snapshot, 'order_code')) {
+            $lines[] = ['text' => 'Order #'.$orderCode];
+        } elseif ($orderId = data_get($snapshot, 'order_id')) {
+            $lines[] = ['text' => 'Order #'.$orderId];
+        }
+
+        if ($table = data_get($snapshot, 'table_name')) {
+            $lines[] = ['text' => 'Table: '.$table];
+        }
+        if ($orderType = data_get($snapshot, 'order_type')) {
+            $lines[] = ['text' => 'Type: '.$orderType];
+        }
+
+        $lines[] = ['text' => $divider];
+
+        /** @var list<array<string,mixed>> $items */
+        $items = is_array($snapshot['items'] ?? null) ? $snapshot['items'] : [];
+        foreach ($items as $item) {
+            $qty = number_format((float) ($item['qty'] ?? 0), 0);
+            $name = (string) ($item['name'] ?? 'Item');
+            $lines[] = ['text' => $qty.' x '.$name, 'bold' => true];
+            $note = trim((string) ($item['notes'] ?? ''));
+            if ($note !== '') {
+                $lines[] = ['text' => '>> CATATAN: '.$note, 'bold' => true];
+            }
+        }
+
+        $lines[] = ['text' => $divider];
+        $lines[] = ['text' => now()->format('Y-m-d H:i:s'), 'align' => 'center'];
+        array_push($lines, ...$this->trailingFeedLines());
+
+        return ['lines' => $lines, 'cut' => true];
     }
 
     /**

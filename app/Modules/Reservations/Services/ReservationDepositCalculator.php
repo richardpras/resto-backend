@@ -10,12 +10,9 @@ class ReservationDepositCalculator
     public function calculate(OutletReservationSetting $settings, float $orderTotal): float
     {
         if ($settings->deposit_mode === 'percent') {
-            $percent = (float) ($settings->deposit_percent ?? 0);
-            if ($percent <= 0) {
-                throw ValidationException::withMessages([
-                    'depositPercent' => ['Deposit percent must be greater than zero when mode is percent.'],
-                ]);
-            }
+            $percent = (float) ($settings->deposit_percent ?? 50);
+            // Floor 50% — matches outlet reservation settings validation.
+            $percent = max(50.0, min(100.0, $percent));
             if ($orderTotal <= 0) {
                 throw ValidationException::withMessages([
                     'items' => ['Pre-order total must be greater than zero for percent deposit mode.'],

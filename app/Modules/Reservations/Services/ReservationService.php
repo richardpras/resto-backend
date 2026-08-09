@@ -7,10 +7,14 @@ use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\PosSession;
 use App\Models\Modules\Reservations\Domain\Reservation;
 use App\Models\Modules\Reservations\Domain\ReservationTableAllocation;
+use App\Models\Modules\Settings\Domain\Outlet;
+use App\Models\Modules\Settings\Domain\OutletReservationSetting;
 use App\Models\User;
 use App\Modules\Members\Services\MemberService;
+use App\Modules\Menu\Services\PublicOutletMenuService;
 use App\Modules\Orders\DTOs\CreateOrderData;
 use App\Modules\Orders\Services\OrderService;
+use App\Modules\Settings\Services\OutletReservationSettingsService;
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -25,6 +29,9 @@ class ReservationService
         private readonly OrderService $orderService,
         private readonly ReservationRealtimePublisher $realtimePublisher,
         private readonly MemberService $memberService,
+        private readonly PublicOutletMenuService $menuService,
+        private readonly ReservationDepositCalculator $depositCalculator,
+        private readonly OutletReservationSettingsService $reservationSettingsService,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -32,6 +39,13 @@ class ReservationService
     {
         $outletId = (int) $data['outletId'];
         $this->assertOutletAllowed($user, $outletId);
+
+        $outlet = Outlet::query()->find($outletId);
+        if ($outlet === null) {
+            throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $outletId]);
+        }
+
+        $settings = $this->reservationSettingsService->show($user, $outletId);
 
         $member = $this->resolveOptionalMember($user, $outletId, isset($data['memberId']) ? (int) $data['memberId'] : null);
         $customerName = (string) $data['customerName'];
@@ -41,21 +55,99 @@ class ReservationService
             $customerPhone = $member->phone ?: $customerPhone;
         }
 
-        $reservation = Reservation::query()->create([
-            'outlet_id' => $outletId,
-            'table_id' => null,
-            'reservation_code' => $this->generateReservationCode(),
-            'customer_name' => $customerName,
-            'customer_phone' => $customerPhone,
-            'member_id' => $member?->id,
-            'party_size' => (int) $data['partySize'],
-            'reservation_at' => (string) $data['reservationAt'],
-            'status' => 'draft',
-        ]);
-        $fresh = $reservation->fresh(['tableAllocations', 'member']) ?? $reservation;
-        $this->realtimePublisher->publishCreated($fresh);
+        $partySize = (int) $data['partySize'];
+        $minParty = (int) config('reservations.party_size_min', 1);
+        $maxParty = (int) config('reservations.party_size_max', 50);
+        if ($partySize < $minParty || $partySize > $maxParty) {
+            throw ValidationException::withMessages([
+                'partySize' => ["Party size must be between {$minParty} and {$maxParty}."],
+            ]);
+        }
 
-        return $fresh;
+        $reservationAt = (string) $data['reservationAt'];
+        if (now()->greaterThanOrEqualTo($reservationAt)) {
+            throw ValidationException::withMessages([
+                'reservationAt' => ['Reservation time must be in the future.'],
+            ]);
+        }
+
+        /** @var array<int, array<string, mixed>> $rawItems */
+        $rawItems = $data['items'] ?? [];
+        if ($rawItems === []) {
+            throw ValidationException::withMessages([
+                'items' => ['Pre-order menu items are required.'],
+            ]);
+        }
+
+        // Staff create always requires pre-order and percent DP (min 50%).
+        $percentSettings = $settings->replicate();
+        $percentSettings->deposit_mode = 'percent';
+        $percentSettings->deposit_percent = max(50.0, (float) ($settings->deposit_percent ?? 50));
+        $percentSettings->preorder_required = true;
+
+        $this->depositCalculator->assertPreorderRules($percentSettings, $rawItems);
+        $totals = $this->menuService->resolvePreorderTotals($outlet, $rawItems);
+        $requiredDeposit = $this->depositCalculator->calculate($percentSettings, (float) $totals['total']);
+
+        return DB::transaction(function () use (
+            $outletId,
+            $customerName,
+            $customerPhone,
+            $member,
+            $partySize,
+            $reservationAt,
+            $totals,
+            $requiredDeposit,
+            $user,
+        ): Reservation {
+            $orderCode = 'RSV-STAFF-'.now()->format('YmdHis').'-'.strtoupper((string) str()->random(4));
+            $order = $this->orderService->create(new CreateOrderData(
+                tenantId: 1,
+                outletId: $outletId,
+                code: $orderCode,
+                source: 'reservation_staff',
+                orderType: 'Reservation Pre-order',
+                status: 'confirmed',
+                paymentStatus: 'unpaid',
+                items: $totals['items'],
+                payments: [],
+                subtotal: (float) $totals['subtotal'],
+                tax: (float) $totals['tax'],
+                total: (float) $totals['total'],
+                discountAmount: 0,
+                customerName: $customerName,
+                customerPhone: $customerPhone,
+                memberId: $member?->id !== null ? (int) $member->id : null,
+                tableId: null,
+                tableNumber: null,
+                createdAt: now()->toISOString(),
+                confirmedAt: now()->toISOString(),
+                splitBill: null,
+                serviceMode: null,
+                orderChannel: 'reservation_deposit',
+                posSessionId: null,
+            ), $user);
+
+            $reservation = Reservation::query()->create([
+                'outlet_id' => $outletId,
+                'table_id' => null,
+                'reservation_code' => $this->generateReservationCode(),
+                'customer_name' => $customerName,
+                'customer_phone' => $customerPhone,
+                'member_id' => $member?->id,
+                'party_size' => $partySize,
+                'reservation_at' => $reservationAt,
+                'status' => 'pending_deposit',
+                'source' => 'staff',
+                'required_deposit_amount' => $requiredDeposit,
+                'linked_order_id' => (int) $order->id,
+            ]);
+
+            $fresh = $reservation->fresh(['tableAllocations', 'member', 'linkedOrder.items', 'depositProofs']) ?? $reservation;
+            $this->realtimePublisher->publishCreated($fresh);
+
+            return $fresh;
+        });
     }
 
     /** @param array<string, mixed> $data */
@@ -95,11 +187,27 @@ class ReservationService
 
         return Reservation::query()
             ->where('outlet_id', $outletId)
-            ->with(['member', 'tableAllocations'])
+            ->with(['member', 'tableAllocations', 'linkedOrder.items'])
             ->when(isset($filters['status']), fn ($q) => $q->where('status', (string) $filters['status']))
+            ->when(isset($filters['from']), fn ($q) => $q->where('reservation_at', '>=', (string) $filters['from']))
+            ->when(isset($filters['to']), fn ($q) => $q->where('reservation_at', '<=', (string) $filters['to']))
             ->orderBy('reservation_at')
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, \App\Models\Modules\Menu\Domain\MenuItem>
+     */
+    public function listMenu(User $user, int $outletId)
+    {
+        $this->assertOutletAllowed($user, $outletId);
+        $outlet = Outlet::query()->find($outletId);
+        if ($outlet === null) {
+            throw (new ModelNotFoundException)->setModel(Outlet::class, [(string) $outletId]);
+        }
+
+        return $this->menuService->listForOutlet($outlet);
     }
 
     public function show(User $user, int $reservationId): Reservation

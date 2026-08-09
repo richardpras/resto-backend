@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -12,6 +13,7 @@ class ReservationFoundationApiTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -26,6 +28,7 @@ class ReservationFoundationApiTest extends TestCase
         $user = $this->actingAsUserManagementApiAdministrator();
         $outlet = $this->createOutlet('Main');
         $this->assignUserToOutlets($user, [$outlet->id]);
+        [$menuItem, $price] = $this->seedReservationMenuItem((int) $outlet->id, 100000);
 
         $response = $this->postJson('/api/v1/reservations', [
             'outletId' => $outlet->id,
@@ -33,11 +36,14 @@ class ReservationFoundationApiTest extends TestCase
             'customerPhone' => '08123456789',
             'partySize' => 4,
             'reservationAt' => now()->addHour()->toISOString(),
+            'items' => [['menuItemId' => $menuItem->id, 'qty' => 2]],
         ])->assertCreated();
 
-        $response->assertJsonPath('data.status', 'draft')
+        $response->assertJsonPath('data.status', 'pending_deposit')
             ->assertJsonPath('data.outletId', $outlet->id)
-            ->assertJsonPath('data.customerName', 'John Doe');
+            ->assertJsonPath('data.customerName', 'John Doe')
+            ->assertJsonPath('data.requiredDepositAmount', (int) ($price * 2 * 0.5))
+            ->assertJsonPath('data.source', 'staff');
     }
 
     public function test_confirm_reservation(): void
@@ -140,15 +146,7 @@ class ReservationFoundationApiTest extends TestCase
         $this->assignUserToOutlets($user, [$outlet->id]);
         $this->outletId = (int) $outlet->id;
 
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'John Doe',
-            'customerPhone' => '08123456789',
-            'partySize' => 4,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated();
-
-        return (int) $response->json('data.id');
+        return $this->insertDraftReservation($this->outletId);
     }
 
     private function createOutlet(string $name): Outlet
@@ -178,22 +176,9 @@ class ReservationFoundationApiTest extends TestCase
             'active' => true,
         ])->id;
 
-        $reservationId = $this->createDraftReservationFromOutlet($outlet->id);
+        $reservationId = $this->insertDraftReservation((int) $outlet->id);
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
 
         return [$reservationId, $tableId];
-    }
-
-    private function createDraftReservationFromOutlet(int $outletId): int
-    {
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outletId,
-            'customerName' => 'John Doe',
-            'customerPhone' => '08123456789',
-            'partySize' => 4,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated();
-
-        return (int) $response->json('data.id');
     }
 }

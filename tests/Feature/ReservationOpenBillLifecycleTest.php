@@ -7,6 +7,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -14,6 +15,7 @@ class ReservationOpenBillLifecycleTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -34,18 +36,26 @@ class ReservationOpenBillLifecycleTest extends TestCase
         $this->assertSame('occupied', $rowAfterService['tableOperationalStatus']);
         $this->assertTrue($rowAfterService['tableOperationalSignals']['hasReservation']);
 
+        $menuItem = \App\Models\Modules\Menu\Domain\MenuItem::query()->create([
+            'tenant_id' => 1,
+            'name' => 'Steak',
+            'category' => 'main',
+            'price' => 100000,
+            'available' => true,
+        ]);
+
         $this->patchJson('/api/v1/orders/'.$linkedOrderId, [
             'items' => [
-                ['id' => '801', 'name' => 'Steak', 'qty' => 1, 'price' => 100000],
+                ['id' => (string) $menuItem->id, 'name' => 'Steak', 'qty' => 1, 'price' => 100000],
             ],
             'subtotal' => 100000,
-            'tax' => 10000,
-            'total' => 110000,
+            'tax' => 0,
+            'total' => 100000,
         ])->assertOk();
 
         $openBill = $this->getJson('/api/v1/open-bills/table?outletId='.$outletId.'&tableId='.$tableId)->assertOk();
         $openBill->assertJsonPath('data.orderCount', 1);
-        $openBill->assertJsonPath('data.remainingPayable', 110000);
+        $openBill->assertJsonPath('data.remainingPayable', 100000);
 
         $this->postJson('/api/v1/orders/'.$linkedOrderId.'/payments', [
             'payments' => [
@@ -55,11 +65,11 @@ class ReservationOpenBillLifecycleTest extends TestCase
 
         $partial = $this->getJson('/api/v1/open-bills/table?outletId='.$outletId.'&tableId='.$tableId)->assertOk();
         $partial->assertJsonPath('data.orderCount', 1);
-        $partial->assertJsonPath('data.remainingPayable', 70000);
+        $partial->assertJsonPath('data.remainingPayable', 60000);
 
         $this->postJson('/api/v1/orders/'.$linkedOrderId.'/payments', [
             'payments' => [
-                ['method' => 'cash', 'amount' => 70000, 'paidAt' => now()->toISOString()],
+                ['method' => 'cash', 'amount' => 60000, 'paidAt' => now()->toISOString()],
             ],
         ])->assertOk();
 
@@ -98,12 +108,10 @@ class ReservationOpenBillLifecycleTest extends TestCase
             'active' => true,
         ])->id;
 
-        $reservationId = (int) $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Open Bill Guest',
-            'partySize' => 4,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated()->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Open Bill Guest',
+            'party_size' => 4,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();

@@ -3,7 +3,9 @@
 namespace App\Modules\Reservations\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Menu\Http\Resources\PublicMenuItemResource;
 use App\Modules\Reservations\Http\Requests\AllocateReservationTableRequest;
+use App\Modules\Reservations\Http\Requests\ListReservationMenuRequest;
 use App\Modules\Reservations\Http\Requests\ListReservationsRequest;
 use App\Modules\Reservations\Http\Requests\ReservationDashboardRequest;
 use App\Modules\Reservations\Http\Requests\StoreReservationRequest;
@@ -45,6 +47,16 @@ class ReservationController extends Controller
 
         return response()->json([
             'data' => ReservationResource::collection($rows),
+        ]);
+    }
+
+    public function menu(ListReservationMenuRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $items = $this->service->listMenu($request->user(), (int) $validated['outletId']);
+
+        return response()->json([
+            'data' => PublicMenuItemResource::collection($items),
         ]);
     }
 

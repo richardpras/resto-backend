@@ -20,6 +20,7 @@ class OutletReservationSettingResource extends JsonResource
             'preorderRequired' => (bool) $this->preorder_required,
             'depositInstructions' => $this->deposit_instructions,
             'depositReviewTimeoutHours' => $this->deposit_review_timeout_hours,
+            'inviteLinkExpiryHours' => (int) ($this->invite_link_expiry_hours ?? 24),
             'publicUrlPath' => '/reserve/'.$this->public_slug,
         ];
     }

@@ -52,6 +52,8 @@ final class TerminalOperationType
 
     public const INVENTORY_STOCKTAKE_SUBMIT = 'inventory.stocktake.submit';
 
+    public const RESERVATION_CREATE = 'reservation.create';
+
     /**
      * @return list<string>
      */
@@ -80,6 +82,7 @@ final class TerminalOperationType
             self::INVENTORY_STOCKTAKE_SAVE_OPENING,
             self::INVENTORY_STOCKTAKE_SAVE_CLOSING,
             self::INVENTORY_STOCKTAKE_SUBMIT,
+            self::RESERVATION_CREATE,
         ];
     }
 }

@@ -6,6 +6,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -13,6 +14,7 @@ class ReservationTimelineApiTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -35,14 +37,10 @@ class ReservationTimelineApiTest extends TestCase
             'active' => true,
         ])->id;
 
-        $create = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Timeline Guest',
-            'partySize' => 2,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated();
-
-        $reservationId = (int) $create->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Timeline Guest',
+            'party_size' => 2,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();

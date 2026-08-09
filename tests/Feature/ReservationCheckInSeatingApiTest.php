@@ -6,6 +6,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -13,6 +14,7 @@ class ReservationCheckInSeatingApiTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -101,14 +103,10 @@ class ReservationCheckInSeatingApiTest extends TestCase
         $outlet = $this->createOutlet('Draft '.uniqid());
         $this->assignUserToOutlets($user, [$outlet->id]);
 
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Guest',
-            'partySize' => 2,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated();
-
-        return (int) $response->json('data.id');
+        return $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Guest',
+            'party_size' => 2,
+        ]);
     }
 
     private function createConfirmedReservation(): int
@@ -133,13 +131,10 @@ class ReservationCheckInSeatingApiTest extends TestCase
             'active' => true,
         ])->id;
 
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Pak Budi',
-            'partySize' => 10,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated();
-        $reservationId = (int) $response->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Pak Budi',
+            'party_size' => 10,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();

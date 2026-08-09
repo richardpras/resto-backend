@@ -1,12 +1,11 @@
 <?php
 
-namespace App\Modules\Settings\Http\Requests;
+namespace App\Modules\Reservations\Http\Requests;
 
 use App\Modules\Settings\Support\OutletAccessResolver;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
-class UpdateOutletReservationSettingsRequest extends FormRequest
+class ListReservationMenuRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -23,15 +22,7 @@ class UpdateOutletReservationSettingsRequest extends FormRequest
         };
 
         return [
-            'publicEnabled' => ['sometimes', 'boolean'],
-            'publicSlug' => ['sometimes', 'string', 'max:80', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/'],
-            'depositMode' => ['sometimes', Rule::in(['percent', 'flat'])],
-            'depositPercent' => ['nullable', 'numeric', 'min:50', 'max:100'],
-            'depositFlatAmount' => ['nullable', 'numeric', 'min:0.01'],
-            'preorderRequired' => ['sometimes', 'boolean'],
-            'depositInstructions' => ['nullable', 'string', 'max:5000'],
-            'depositReviewTimeoutHours' => ['nullable', 'integer', 'min:1', 'max:168'],
-            'inviteLinkExpiryHours' => ['sometimes', 'integer', 'min:1', 'max:168'],
+            'outletId' => ['required', 'integer', 'min:1', 'exists:outlets,id', $mustBeAllowedOutlet],
         ];
     }
 

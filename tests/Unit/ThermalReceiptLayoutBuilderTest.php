@@ -72,6 +72,7 @@ class ThermalReceiptLayoutBuilderTest extends TestCase
             'subtotal' => 45000.0,
             'tax' => 4500.0,
             'total' => 49500.0,
+            'apply_tax' => true,
             'lines' => [
                 ['name' => 'Nasi Goreng', 'qty' => 1, 'price' => 45000.0],
             ],

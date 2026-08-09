@@ -32,6 +32,7 @@ readonly class CreateOrderData
         public ?int $posSessionId = null,
         public ?int $qrOrderRequestId = null,
         public ?string $idempotencyKey = null,
+        public bool $skipKitchenPrint = false,
     ) {}
 
     public static function fromArray(array $payload): self
@@ -70,6 +71,7 @@ readonly class CreateOrderData
             idempotencyKey: isset($payload['idempotencyKey']) && is_string($payload['idempotencyKey'])
                 ? trim($payload['idempotencyKey'])
                 : null,
+            skipKitchenPrint: (bool) ($payload['skipKitchenPrint'] ?? false),
         );
     }
 }

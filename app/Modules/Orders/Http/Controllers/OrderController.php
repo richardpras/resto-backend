@@ -193,11 +193,13 @@ class OrderController extends Controller
         ]);
     }
 
-    public function listPayments(Request $request, int $order): JsonResponse
+    public function listPayments(Request $request, string $order): JsonResponse
     {
         $user = $this->resolveAuthenticatedUser($request);
         abort_if($user === null, Response::HTTP_UNAUTHORIZED, 'Unauthenticated.');
-        $payments = $this->paymentAllocationService->listPayments($user, $order);
+        // Accept route param as string first — non-numeric ids (e.g. local:*) must not TypeError on int.
+        abort_unless(ctype_digit($order), Response::HTTP_NOT_FOUND, 'Order not found');
+        $payments = $this->paymentAllocationService->listPayments($user, (int) $order);
 
         return response()->json([
             'data' => $payments->values()->all(),

@@ -74,6 +74,9 @@ class OutletReservationSettingsService
                 ? (int) $data['depositReviewTimeoutHours']
                 : null;
         }
+        if (array_key_exists('inviteLinkExpiryHours', $data)) {
+            $settings->invite_link_expiry_hours = max(1, min(168, (int) $data['inviteLinkExpiryHours']));
+        }
 
         $settings->save();
 
@@ -105,9 +108,11 @@ class OutletReservationSettingsService
             'outlet_id' => $outletId,
             'public_enabled' => false,
             'public_slug' => $candidate,
-            'deposit_mode' => 'flat',
-            'deposit_flat_amount' => 100000,
-            'preorder_required' => false,
+            'deposit_mode' => 'percent',
+            'deposit_percent' => 50,
+            'deposit_flat_amount' => null,
+            'preorder_required' => true,
+            'invite_link_expiry_hours' => 24,
         ]);
     }
 

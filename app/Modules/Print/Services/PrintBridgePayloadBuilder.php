@@ -19,11 +19,24 @@ class PrintBridgePayloadBuilder
     {
         $width = $this->thermalPaperWidthResolver->resolveWidthChars($profile);
         $document = $this->buildDocument($job, $width);
+        $document['cut'] = $this->resolveAutoCut($profile);
 
         return array_merge(
             $this->resolveTransport($profile),
             ['document' => $document],
         );
+    }
+
+    private function resolveAutoCut(PrinterProfile $profile): bool
+    {
+        $meta = is_array($profile->meta) ? $profile->meta : [];
+        $print = is_array($meta['print'] ?? null) ? $meta['print'] : [];
+        if (array_key_exists('autoCut', $print)) {
+            return (bool) $print['autoCut'];
+        }
+
+        // Default on — printers without a cutter ignore GS V cut commands.
+        return true;
     }
 
     /**
@@ -127,33 +140,13 @@ class PrintBridgePayloadBuilder
      */
     private function buildKitchenDocument(array $snapshot, PrintJob $job, int $width): array
     {
-        $station = (string) data_get($snapshot, 'station', data_get($job->route_snapshot, 'resolved_station', 'kitchen'));
-        $divider = str_repeat('-', $width);
-        $lines = [
-            ['text' => mb_strtoupper($station).' TICKET', 'bold' => true, 'align' => 'center'],
-            ['text' => $divider, 'align' => 'center'],
-        ];
+        $stationFallback = (string) (
+            data_get($job->route_snapshot, 'menu_category_name')
+            ?: data_get($job->route_snapshot, 'resolved_station')
+            ?: 'kitchen'
+        );
 
-        if ($orderId = data_get($snapshot, 'order_id')) {
-            $lines[] = ['text' => 'Order #'.$orderId];
-        }
-
-        /** @var list<array<string,mixed>> $items */
-        $items = is_array($snapshot['items'] ?? null) ? $snapshot['items'] : [];
-        foreach ($items as $item) {
-            $qty = number_format((float) ($item['qty'] ?? 0), 0);
-            $name = (string) ($item['name'] ?? 'Item');
-            $lines[] = ['text' => $qty.' x '.$name, 'bold' => true];
-            if (! empty($item['notes'])) {
-                $lines[] = ['text' => '  Note: '.$item['notes']];
-            }
-        }
-
-        $lines[] = ['text' => $divider];
-        $lines[] = ['text' => now()->format('Y-m-d H:i:s'), 'align' => 'center'];
-        array_push($lines, ...$this->thermalReceiptLayout->trailingFeedLines());
-
-        return ['lines' => $lines, 'cut' => true];
+        return $this->thermalReceiptLayout->buildKitchenTicketDocument($snapshot, $width, $stationFallback);
     }
 
     /**

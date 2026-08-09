@@ -9,9 +9,11 @@ use App\Modules\Reservations\Http\Requests\StorePublicReservationRequest;
 use App\Modules\Reservations\Http\Requests\SubmitReservationDepositProofRequest;
 use App\Modules\Reservations\Http\Resources\ReservationResource;
 use App\Modules\Reservations\Services\PublicReservationService;
+use App\Modules\Reservations\Services\PublicReservationPdfService;
 use App\Modules\Reservations\Services\ReservationDepositService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response as HttpResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class PublicReservationController extends Controller
@@ -20,6 +22,7 @@ class PublicReservationController extends Controller
         private readonly PublicReservationService $publicReservationService,
         private readonly PublicOutletMenuService $publicOutletMenuService,
         private readonly ReservationDepositService $depositService,
+        private readonly PublicReservationPdfService $pdfService,
     ) {}
 
     public function showOutlet(string $outletSlug): JsonResponse
@@ -88,6 +91,24 @@ class PublicReservationController extends Controller
 
         return response()->json([
             'data' => new ReservationResource($reservation),
+        ]);
+    }
+
+    public function pdf(string $reservationCode): HttpResponse|JsonResponse
+    {
+        try {
+            $binary = $this->pdfService->renderByCode($reservationCode);
+        } catch (ModelNotFoundException) {
+            return response()->json([
+                'message' => 'Reservation not found.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        $filename = 'reservation-'.$reservationCode.'.pdf';
+
+        return response($binary, Response::HTTP_OK, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
         ]);
     }
 

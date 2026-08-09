@@ -53,6 +53,8 @@ class StoreOrderRequest extends FormRequest
             'payments.*.paidAt' => ['nullable', 'date'],
             'idempotencyKey' => ['sometimes', 'string', 'max:120'],
             'clientLocalRef' => ['nullable', 'string', 'max:120'],
+            /** Pay Now: defer kitchen printer jobs until after customer receipt is queued/printed. */
+            'skipKitchenPrint' => ['sometimes', 'boolean'],
         ];
     }
 }

@@ -5,8 +5,10 @@ namespace App\Modules\Reservations\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Reservations\Http\Requests\ListPendingDepositsRequest;
 use App\Modules\Reservations\Http\Requests\RejectReservationDepositRequest;
+use App\Modules\Reservations\Http\Requests\SubmitStaffReservationDepositProofRequest;
 use App\Modules\Reservations\Http\Resources\ReservationResource;
 use App\Modules\Reservations\Services\ReservationDepositService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -26,6 +28,21 @@ class ReservationDepositController extends Controller
 
         return response()->json([
             'data' => ReservationResource::collection($rows),
+        ]);
+    }
+
+    public function submitProof(SubmitStaffReservationDepositProofRequest $request, int $id): JsonResponse
+    {
+        $reservation = $this->depositService->submitProofForStaff(
+            $request->user(),
+            $id,
+            $request->file('proof'),
+        );
+        $reservation->load(['linkedOrder.items', 'depositProofs']);
+
+        return response()->json([
+            'message' => 'Deposit proof uploaded. Awaiting review.',
+            'data' => new ReservationResource($reservation),
         ]);
     }
 
@@ -56,10 +73,26 @@ class ReservationDepositController extends Controller
         ]);
     }
 
-    public function proofFile(int $id, int $proofId): Response
+    public function proofFile(int $id, int $proofId): Response|JsonResponse
     {
-        $path = $this->depositService->proofFilePath(request()->user(), $id, $proofId);
+        try {
+            $resolved = $this->depositService->resolveProofFile(request()->user(), $id, $proofId);
+        } catch (ModelNotFoundException) {
+            return response()->json([
+                'message' => 'Deposit proof not found.',
+            ], Response::HTTP_NOT_FOUND);
+        }
 
-        return response()->file($path);
+        $safeFilename = str_replace(['"', "\r", "\n"], '', $resolved['filename']);
+
+        return response()->file($resolved['path'], [
+            'Content-Type' => $resolved['mime'],
+            'Content-Disposition' => 'attachment; filename="'.$safeFilename.'"',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Content-Security-Policy' => "default-src 'none'; sandbox",
+            'X-Frame-Options' => 'DENY',
+        ]);
     }
 }

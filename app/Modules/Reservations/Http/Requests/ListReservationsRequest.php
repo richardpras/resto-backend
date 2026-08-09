@@ -23,7 +23,9 @@ class ListReservationsRequest extends FormRequest
 
         return [
             'outletId' => ['required', 'integer', 'min:1', 'exists:outlets,id', $mustBeAllowedOutlet],
-            'status' => ['sometimes', 'in:draft,confirmed,checked_in,seated,completed,cancelled,no_show'],
+            'status' => ['sometimes', 'in:draft,pending_deposit,deposit_submitted,confirmed,checked_in,seated,completed,cancelled,no_show'],
+            'from' => ['sometimes', 'date'],
+            'to' => ['sometimes', 'date', 'after_or_equal:from'],
         ];
     }
 

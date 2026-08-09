@@ -8,6 +8,7 @@ use App\Models\Modules\Orders\Domain\RestaurantTable;
 use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -15,6 +16,7 @@ class ReservationMemberTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -39,6 +41,7 @@ class ReservationMemberTest extends TestCase
             'points' => 0,
         ]);
 
+        [$menuItem] = $this->seedReservationMenuItem((int) $outlet->id);
         $response = $this->postJson('/api/v1/reservations', [
             'outletId' => (int) $outlet->id,
             'customerName' => 'Ignored Manual',
@@ -46,6 +49,7 @@ class ReservationMemberTest extends TestCase
             'memberId' => (int) $member->id,
             'partySize' => 2,
             'reservationAt' => now()->addHour()->toISOString(),
+            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
         ])->assertCreated();
 
         $response->assertJsonPath('data.memberId', (int) $member->id)
@@ -65,12 +69,14 @@ class ReservationMemberTest extends TestCase
         $outlet = $this->createOutlet('RMW');
         $this->assignUserToOutlets($user, [(int) $outlet->id]);
 
+        [$menuItem] = $this->seedReservationMenuItem((int) $outlet->id);
         $this->postJson('/api/v1/reservations', [
             'outletId' => (int) $outlet->id,
             'customerName' => 'Walk-in Guest',
             'customerPhone' => '081800000001',
             'partySize' => 3,
             'reservationAt' => now()->addHour()->toISOString(),
+            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
         ])->assertCreated()
             ->assertJsonPath('data.memberId', null)
             ->assertJsonPath('data.customerName', 'Walk-in Guest');
@@ -103,12 +109,10 @@ class ReservationMemberTest extends TestCase
         $this->assignUserToOutlets($user, [(int) $outlet->id]);
 
         $memberId = null;
-        $payload = [
-            'outletId' => (int) $outlet->id,
-            'customerName' => 'Guest',
-            'customerPhone' => '08111',
-            'partySize' => 2,
-            'reservationAt' => now()->addHour()->toISOString(),
+        $overrides = [
+            'customer_name' => 'Guest',
+            'customer_phone' => '08111',
+            'party_size' => 2,
         ];
 
         if ($withMember) {
@@ -122,7 +126,9 @@ class ReservationMemberTest extends TestCase
                 'points' => 0,
             ]);
             $memberId = (int) $member->id;
-            $payload['memberId'] = $memberId;
+            $overrides['member_id'] = $memberId;
+            $overrides['customer_name'] = 'Linked Member';
+            $overrides['customer_phone'] = '081700000001';
         }
 
         $tableId = (int) RestaurantTable::query()->create([
@@ -132,7 +138,7 @@ class ReservationMemberTest extends TestCase
             'active' => true,
         ])->id;
 
-        $reservationId = (int) $this->postJson('/api/v1/reservations', $payload)->assertCreated()->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, $overrides);
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/check-in')->assertOk();

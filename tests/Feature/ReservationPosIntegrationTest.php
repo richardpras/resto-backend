@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Modules\Accounting\Domain\Account;
 use App\Models\Modules\Menu\Domain\MenuItem;
 use App\Models\Modules\Orders\Domain\Order;
 use App\Models\Modules\Orders\Domain\RestaurantTable;
@@ -11,6 +10,8 @@ use App\Models\Modules\Settings\Domain\Outlet;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\AccountingRemediationFixture;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -18,6 +19,8 @@ class ReservationPosIntegrationTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
+    use AccountingRemediationFixture;
 
     protected function setUp(): void
     {
@@ -170,13 +173,13 @@ class ReservationPosIntegrationTest extends TestCase
                 ['id' => (string) $menuItem->id, 'name' => $menuItem->name, 'qty' => 1, 'price' => 15000],
             ],
             'subtotal' => 15000,
-            'tax' => 1500,
-            'total' => 16500,
+            'tax' => 0,
+            'total' => 15000,
         ])->assertOk();
 
         $this->postJson('/api/v1/orders/'.$linkedOrderId.'/payments', [
             'payments' => [
-                ['method' => 'cash', 'amount' => 16500, 'paidAt' => now()->toISOString()],
+                ['method' => 'cash', 'amount' => 15000, 'paidAt' => now()->toISOString()],
             ],
         ])->assertOk();
 
@@ -188,7 +191,8 @@ class ReservationPosIntegrationTest extends TestCase
     public function test_accounting_lifecycle_for_linked_order_uses_existing_flow(): void
     {
         [$reservationId, , $outletId] = $this->createSeatedReservationReadyForService();
-        $this->seedBasicAccounts($outletId);
+        $this->seedPosPostingAccounts($outletId);
+        $this->setRevenuePostingMode('on_payment', $outletId);
 
         $menuItem = $this->createMenuItem($outletId, 'Tea');
         $response = $this->postJson('/api/v1/reservations/'.$reservationId.'/start-service')->assertOk();
@@ -199,13 +203,13 @@ class ReservationPosIntegrationTest extends TestCase
                 ['id' => (string) $menuItem->id, 'name' => $menuItem->name, 'qty' => 1, 'price' => 20000],
             ],
             'subtotal' => 20000,
-            'tax' => 2000,
-            'total' => 22000,
+            'tax' => 0,
+            'total' => 20000,
         ])->assertOk();
 
         $this->postJson('/api/v1/orders/'.$linkedOrderId.'/payments', [
             'payments' => [
-                ['method' => 'cash', 'amount' => 22000, 'paidAt' => now()->toISOString()],
+                ['method' => 'cash', 'amount' => 20000, 'paidAt' => now()->toISOString()],
             ],
         ])->assertOk();
 
@@ -256,15 +260,11 @@ class ReservationPosIntegrationTest extends TestCase
 
     private function createDraftReservationForOutlet(int $outletId): int
     {
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outletId,
-            'customerName' => 'Pak Budi',
-            'customerPhone' => '08111',
-            'partySize' => 4,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated();
-
-        return (int) $response->json('data.id');
+        return $this->insertDraftReservation($outletId, [
+            'customer_name' => 'Pak Budi',
+            'customer_phone' => '08111',
+            'party_size' => 4,
+        ]);
     }
 
     private function createOutlet(string $name): Outlet
@@ -291,29 +291,4 @@ class ReservationPosIntegrationTest extends TestCase
         ]);
     }
 
-    private function seedBasicAccounts(int $outletId): void
-    {
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'cash_bank',
-            'code' => '1100',
-            'name' => 'Cash',
-            'type' => 'asset',
-            'subtype' => 'current_asset',
-            'is_active' => true,
-        ]);
-        Account::query()->create([
-            'tenant_id' => 1,
-            'outlet_id' => $outletId,
-            'scope' => 'outlet',
-            'category' => 'sales_revenue',
-            'code' => '4100',
-            'name' => 'Sales',
-            'type' => 'revenue',
-            'subtype' => 'revenue',
-            'is_active' => true,
-        ]);
-    }
 }

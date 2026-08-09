@@ -96,12 +96,80 @@ class OutletLogoProcessor
         $white = imagecolorallocate($resized, 255, 255, 255);
         imagefill($resized, 0, 0, $white);
         imagecopyresampled($resized, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $srcWidth, $srcHeight);
-        imagefilter($resized, IMG_FILTER_GRAYSCALE);
 
         $widthBytes = (int) ceil($targetWidth / 8);
-        $binary = '';
+        $pixelCount = $targetWidth * $targetHeight;
+        $ink = array_fill(0, $pixelCount, 0.0);
+        $inkCount = 0;
+        $min = 255.0;
+        $max = 0.0;
 
         for ($y = 0; $y < $targetHeight; $y++) {
+            for ($x = 0; $x < $targetWidth; $x++) {
+                $rgb = imagecolorat($resized, $x, $y);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
+                $strength = $this->thermalInkStrength($r, $g, $b);
+                $i = ($y * $targetWidth) + $x;
+                $ink[$i] = $strength;
+                if ($strength > 0) {
+                    $inkCount++;
+                    if ($strength < $min) {
+                        $min = $strength;
+                    }
+                    if ($strength > $max) {
+                        $max = $strength;
+                    }
+                }
+            }
+        }
+
+        imagedestroy($resized);
+
+        if ($inkCount === 0) {
+            return [
+                'width' => $targetWidth,
+                'height' => 1,
+                'widthBytes' => $widthBytes,
+                'rasterBase64' => base64_encode(str_repeat("\0", $widthBytes)),
+            ];
+        }
+
+        $span = max(1.0, $max - $min);
+        $normalized = array_fill(0, $pixelCount, 0.0);
+        for ($i = 0; $i < $pixelCount; $i++) {
+            $v = $ink[$i];
+            $normalized[$i] = $v <= 0 ? 0.0 : (($v - $min) / $span) * 255.0;
+        }
+
+        // Floyd–Steinberg dither → 1-bit (handles pastel / light brand logos).
+        $mono = array_fill(0, $pixelCount, 0);
+        for ($y = 0; $y < $targetHeight; $y++) {
+            for ($x = 0; $x < $targetWidth; $x++) {
+                $i = ($y * $targetWidth) + $x;
+                $old = $normalized[$i];
+                $value = $old >= 128.0 ? 255.0 : 0.0;
+                $mono[$i] = $value >= 255.0 ? 1 : 0;
+                $err = $old - $value;
+                if ($x + 1 < $targetWidth) {
+                    $normalized[$i + 1] += ($err * 7.0) / 16.0;
+                }
+                if ($y + 1 < $targetHeight) {
+                    if ($x > 0) {
+                        $normalized[$i + $targetWidth - 1] += ($err * 3.0) / 16.0;
+                    }
+                    $normalized[$i + $targetWidth] += ($err * 5.0) / 16.0;
+                    if ($x + 1 < $targetWidth) {
+                        $normalized[$i + $targetWidth + 1] += ($err * 1.0) / 16.0;
+                    }
+                }
+            }
+        }
+
+        $rows = [];
+        for ($y = 0; $y < $targetHeight; $y++) {
+            $row = '';
             for ($xByte = 0; $xByte < $widthBytes; $xByte++) {
                 $byte = 0;
                 for ($bit = 0; $bit < 8; $bit++) {
@@ -109,24 +177,67 @@ class OutletLogoProcessor
                     if ($x >= $targetWidth) {
                         continue;
                     }
-                    $rgb = imagecolorat($resized, $x, $y);
-                    $gray = ($rgb >> 16) & 0xFF;
-                    if ($gray < 128) {
+                    if (($mono[($y * $targetWidth) + $x] ?? 0) === 1) {
                         $byte |= (1 << (7 - $bit));
                     }
                 }
-                $binary .= chr($byte);
+                $row .= chr($byte);
             }
+            $rows[] = $row;
         }
 
-        imagedestroy($resized);
+        $rows = $this->trimThermalBlankRows($rows, $widthBytes);
+        $binary = implode('', $rows);
 
         return [
             'width' => $targetWidth,
-            'height' => $targetHeight,
+            'height' => count($rows),
             'widthBytes' => $widthBytes,
             'rasterBase64' => base64_encode($binary),
         ];
+    }
+
+    /**
+     * Light pastel colors still produce ink (simple gray&lt;128 would drop mint logos).
+     */
+    private function thermalInkStrength(int $r, int $g, int $b): float
+    {
+        $gray = (0.299 * $r) + (0.587 * $g) + (0.114 * $b);
+        $chroma = max($r, $g, $b) - min($r, $g, $b);
+        if ($gray >= 245.0 && $chroma < 18.0) {
+            return 0.0;
+        }
+
+        $darkness = 255.0 - $gray;
+        $chromaBoost = min(220.0, $chroma * 1.8);
+
+        return min(255.0, max($darkness, $chromaBoost));
+    }
+
+    /**
+     * @param  list<string>  $rows
+     * @return list<string>
+     */
+    private function trimThermalBlankRows(array $rows, int $widthBytes): array
+    {
+        if ($rows === []) {
+            return [str_repeat("\0", $widthBytes)];
+        }
+
+        $isBlank = static fn (string $row): bool => trim($row, "\0") === '';
+        $top = 0;
+        $bottom = count($rows) - 1;
+        while ($top <= $bottom && $isBlank($rows[$top])) {
+            $top++;
+        }
+        while ($bottom >= $top && $isBlank($rows[$bottom])) {
+            $bottom--;
+        }
+        if ($top > $bottom) {
+            return [str_repeat("\0", $widthBytes)];
+        }
+
+        return array_values(array_slice($rows, $top, $bottom - $top + 1));
     }
 
     /**

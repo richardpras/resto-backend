@@ -3,6 +3,7 @@
 namespace App\Modules\Reservations\Services;
 
 use App\Models\Modules\Reservations\Domain\Reservation;
+use App\Models\Modules\Reservations\Domain\ReservationBookingInvite;
 use App\Models\Modules\Settings\Domain\Outlet;
 use App\Models\Modules\Settings\Domain\OutletReservationSetting;
 use App\Modules\Menu\Services\PublicOutletMenuService;
@@ -19,6 +20,7 @@ class PublicReservationService
         private readonly PublicOutletMenuService $menuService,
         private readonly OrderService $orderService,
         private readonly ReservationRealtimePublisher $realtimePublisher,
+        private readonly ReservationBookingInviteService $inviteService,
     ) {}
 
     public function resolveSettings(string $outletSlug): OutletReservationSetting
@@ -55,13 +57,84 @@ class PublicReservationService
         ];
     }
 
+    /** @return array<string, mixed> */
+    public function showInviteContext(string $token): array
+    {
+        $invite = $this->inviteService->resolveValid($token);
+        $settings = $this->inviteService->resolveSettingsForInvite($token);
+        $outlet = $settings->outlet;
+        if ($outlet === null) {
+            throw (new ModelNotFoundException)->setModel(Outlet::class);
+        }
+
+        return [
+            'outlet' => [
+                'id' => (int) $outlet->id,
+                'name' => (string) $outlet->name,
+                'address' => (string) ($outlet->address ?? ''),
+                'phone' => (string) ($outlet->phone ?? ''),
+            ],
+            'settings' => $this->settingsPayload($settings),
+            'publicSlug' => (string) $settings->public_slug,
+            'invite' => [
+                'expiresAt' => $invite->expires_at?->toISOString(),
+                'token' => (string) $invite->token,
+            ],
+        ];
+    }
+
     /**
      * @param  array<string, mixed>  $data
      */
     public function create(string $outletSlug, array $data): Reservation
     {
         $settings = $this->resolveSettings($outletSlug);
+
+        return $this->createFromSettings($settings, $data);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function createFromInvite(string $token, array $data): Reservation
+    {
+        return DB::transaction(function () use ($token, $data): Reservation {
+            $invite = ReservationBookingInvite::query()
+                ->where('token', $token)
+                ->lockForUpdate()
+                ->first();
+
+            if ($invite === null || ! $invite->isValid()) {
+                throw (new ModelNotFoundException)->setModel(ReservationBookingInvite::class, [$token]);
+            }
+
+            $settings = OutletReservationSetting::query()
+                ->where('outlet_id', $invite->outlet_id)
+                ->with('outlet')
+                ->first();
+
+            if ($settings === null) {
+                throw (new ModelNotFoundException)->setModel(OutletReservationSetting::class, [(string) $invite->outlet_id]);
+            }
+
+            $reservation = $this->createFromSettings($settings, $data);
+
+            $invite->used_count = (int) $invite->used_count + 1;
+            $invite->save();
+
+            return $reservation;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function createFromSettings(OutletReservationSetting $settings, array $data): Reservation
+    {
         $outlet = $settings->outlet;
+        if ($outlet === null) {
+            $outlet = Outlet::query()->find($settings->outlet_id);
+        }
         if ($outlet === null) {
             throw (new ModelNotFoundException)->setModel(Outlet::class);
         }

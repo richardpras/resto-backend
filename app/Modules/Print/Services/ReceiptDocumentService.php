@@ -537,8 +537,9 @@ class ReceiptDocumentService
                 $qty = number_format((float) ($row['qty'] ?? 0), 2);
                 $name = mb_substr((string) ($row['name'] ?? ''), 0, max(12, $width - 12));
                 $lines[] = $qty.' × '.$name;
-                if (! empty($row['notes'])) {
-                    $lines[] = ' Notes: '.$row['notes'];
+                $note = trim((string) ($row['notes'] ?? ''));
+                if ($note !== '') {
+                    $lines[] = '>> CATATAN: '.$note;
                 }
             }
         } elseif (in_array($kind, [ReceiptDocumentKind::CashierCloseSummary], true)) {

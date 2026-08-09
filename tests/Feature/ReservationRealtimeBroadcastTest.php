@@ -11,6 +11,7 @@ use App\Modules\Reservations\Events\ReservationTableAllocated;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
+use Tests\Concerns\CreatesDraftReservations;
 use Tests\Concerns\UserManagementApiFixture;
 use Tests\TestCase;
 
@@ -18,6 +19,7 @@ class ReservationRealtimeBroadcastTest extends TestCase
 {
     use RefreshDatabase;
     use UserManagementApiFixture;
+    use CreatesDraftReservations;
 
     protected function setUp(): void
     {
@@ -35,12 +37,15 @@ class ReservationRealtimeBroadcastTest extends TestCase
         $outlet = $this->createOutlet('Realtime Created');
         $this->assignUserToOutlets($user, [$outlet->id]);
 
+        [$menuItem] = $this->seedReservationMenuItem((int) $outlet->id);
+
         $this->postJson('/api/v1/reservations', [
             'outletId' => $outlet->id,
             'customerName' => 'Ani',
             'customerPhone' => '08123',
             'partySize' => 2,
             'reservationAt' => now()->addHour()->toISOString(),
+            'items' => [['menuItemId' => $menuItem->id, 'qty' => 1]],
         ])->assertCreated();
 
         Event::assertDispatched(ReservationCreated::class, function (ReservationCreated $event): bool {
@@ -51,7 +56,7 @@ class ReservationRealtimeBroadcastTest extends TestCase
                 && str_ends_with($channelName, '.reservations')
                 && isset($payload['payload']['reservation_id'])
                 && isset($payload['payload']['allocated_table_ids'])
-                && $payload['payload']['status'] === 'draft';
+                && $payload['payload']['status'] === 'pending_deposit';
         });
     }
 
@@ -123,14 +128,13 @@ class ReservationRealtimeBroadcastTest extends TestCase
         $outlet = $this->createOutlet('Draft '.uniqid());
         $this->assignUserToOutlets($user, [$outlet->id]);
 
-        $response = $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Budi',
-            'partySize' => 3,
-            'reservationAt' => now()->addHours(2)->toISOString(),
-        ])->assertCreated();
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Budi',
+            'party_size' => 3,
+            'reservation_at' => now()->addHours(2),
+        ]);
 
-        return [(int) $response->json('data.id'), $outlet];
+        return [$reservationId, $outlet];
     }
 
     /** @return array{0: int, 1: int} */
@@ -147,12 +151,10 @@ class ReservationRealtimeBroadcastTest extends TestCase
             'active' => true,
         ])->id;
 
-        $reservationId = (int) $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Citra',
-            'partySize' => 2,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated()->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Citra',
+            'party_size' => 2,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
 
@@ -173,12 +175,10 @@ class ReservationRealtimeBroadcastTest extends TestCase
             'active' => true,
         ])->id;
 
-        $reservationId = (int) $this->postJson('/api/v1/reservations', [
-            'outletId' => $outlet->id,
-            'customerName' => 'Dewi',
-            'partySize' => 4,
-            'reservationAt' => now()->addHour()->toISOString(),
-        ])->assertCreated()->json('data.id');
+        $reservationId = $this->insertDraftReservation((int) $outlet->id, [
+            'customer_name' => 'Dewi',
+            'party_size' => 4,
+        ]);
 
         $this->postJson('/api/v1/reservations/'.$reservationId.'/confirm')->assertOk();
         $this->postJson('/api/v1/reservations/'.$reservationId.'/allocate-table', ['tableId' => $tableId])->assertOk();

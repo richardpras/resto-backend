@@ -33,6 +33,7 @@ class SettingPrinterSyncService
         $paperWidthMeta = $this->thermalPaperWidthResolver->metaForPaperWidth(
             (string) ($setting->thermal_paper_width ?? SettingPrinter::PAPER_WIDTH_58MM),
         );
+        $paperWidthMeta['autoCut'] = (bool) ($setting->auto_cut ?? true);
 
         $payload = [
             'outletId' => $outletId,

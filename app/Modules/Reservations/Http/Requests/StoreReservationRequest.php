@@ -27,7 +27,10 @@ class StoreReservationRequest extends FormRequest
             'customerPhone' => ['nullable', 'string', 'max:40'],
             'memberId' => ['nullable', 'integer', 'min:1', 'exists:members,id'],
             'partySize' => ['required', 'integer', 'min:1', 'max:100'],
-            'reservationAt' => ['required', 'date'],
+            'reservationAt' => ['required', 'date', 'after_or_equal:today'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.menuItemId' => ['required', 'integer', 'min:1'],
+            'items.*.qty' => ['required', 'numeric', 'min:0.01'],
         ];
     }
 

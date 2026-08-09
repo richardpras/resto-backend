@@ -100,6 +100,8 @@ use App\Modules\Orders\Http\Controllers\QrOrderPublicController;
 use App\Modules\Orders\Http\Controllers\TableMasterController;
 use App\Modules\Orders\Http\Controllers\TableQrController;
 use App\Modules\Reservations\Http\Controllers\PublicReservationController;
+use App\Modules\Reservations\Http\Controllers\PublicReservationInviteController;
+use App\Modules\Reservations\Http\Controllers\ReservationBookingInviteController;
 use App\Modules\Reservations\Http\Controllers\ReservationController;
 use App\Modules\Reservations\Http\Controllers\ReservationDepositController;
 use App\Modules\Payments\Http\Controllers\PaymentHealthController;
@@ -184,10 +186,14 @@ Route::prefix('v1')->group(function (): void {
     Route::post('public/qr-orders/{orderCode}/approve-adjustments', [QrOrderPublicController::class, 'approveAdjustments']);
     Route::get('public/qr-guest-sessions/{guestSessionToken}/orders', [QrGuestSessionPublicController::class, 'orders']);
     Route::get('public/qr/tables/{qrPublicId}/menu', [PublicQrMenuController::class, 'show']);
+    Route::get('public/reserve/invite/{token}', [PublicReservationInviteController::class, 'show'])->middleware('throttle:60,1');
+    Route::get('public/reserve/invite/{token}/menu', [PublicReservationInviteController::class, 'menu'])->middleware('throttle:60,1');
+    Route::post('public/reserve/invite/{token}', [PublicReservationInviteController::class, 'store'])->middleware('throttle:20,1');
     Route::get('public/reserve/{outletSlug}', [PublicReservationController::class, 'showOutlet'])->middleware('throttle:60,1');
     Route::get('public/reserve/{outletSlug}/menu', [PublicReservationController::class, 'menu'])->middleware('throttle:60,1');
     Route::post('public/reserve/{outletSlug}', [PublicReservationController::class, 'store'])->middleware('throttle:20,1');
     Route::get('public/reservations/{reservationCode}', [PublicReservationController::class, 'show'])->middleware('throttle:60,1');
+    Route::get('public/reservations/{reservationCode}/pdf', [PublicReservationController::class, 'pdf'])->middleware('throttle:20,1');
     Route::post('public/reservations/{reservationCode}/deposit-proof', [PublicReservationController::class, 'submitDepositProof'])->middleware('throttle:10,1');
     Route::get('public/menu-images/{menuItem}', [MenuItemImageController::class, 'serve'])->whereNumber('menuItem');
     Route::get('public/outlet-logos/{outlet}', [OutletLogoController::class, 'serve'])->whereNumber('outlet');
@@ -906,6 +912,8 @@ Route::prefix('v1')->group(function (): void {
         Route::delete('outlets/{outletId}/logo', [OutletLogoController::class, 'destroy'])->middleware('permission:settings.update');
         Route::get('outlets/{outletId}/reservation-settings', [OutletReservationSettingsController::class, 'show'])->middleware('permission:settings.view');
         Route::patch('outlets/{outletId}/reservation-settings', [OutletReservationSettingsController::class, 'update'])->middleware('permission:settings.update');
+        Route::post('outlets/{outletId}/reservation-invites', [ReservationBookingInviteController::class, 'store'])
+            ->middleware('permission.any:pos.use,settings.update');
 
         Route::get('taxes', [TaxSettingsCrudController::class, 'index'])->middleware('permission:settings.view');
         Route::post('taxes', [TaxSettingsCrudController::class, 'store'])->middleware('permission:settings.update');
@@ -1142,11 +1150,13 @@ Route::prefix('v1')->group(function (): void {
         Route::post('qr-orders/{qrOrderRequest}/reject', [QrOrderController::class, 'reject'])->middleware('permission.any:qr_orders.view,pos.use');
         Route::post('qr-orders/{qrOrderRequest}/mark-served', [QrOrderController::class, 'markServed'])->middleware('permission.any:cashier.manage,pos.use,qr_orders.view');
         Route::get('reservations/pending-deposits', [ReservationDepositController::class, 'index'])->middleware('permission:pos.use');
+        Route::post('reservations/{id}/deposit-proof', [ReservationDepositController::class, 'submitProof'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/approve-deposit', [ReservationDepositController::class, 'approve'])->middleware('permission:pos.use');
         Route::post('reservations/{id}/reject-deposit', [ReservationDepositController::class, 'reject'])->middleware('permission:pos.use');
         Route::get('reservations/{id}/deposit-proofs/{proofId}/file', [ReservationDepositController::class, 'proofFile'])->middleware('permission:pos.use');
         Route::post('reservations', [ReservationController::class, 'store'])->middleware('permission:pos.use');
         Route::get('reservations', [ReservationController::class, 'index'])->middleware('permission:pos.use');
+        Route::get('reservations/menu', [ReservationController::class, 'menu'])->middleware('permission:pos.use');
         Route::get('reservations/dashboard', [ReservationController::class, 'dashboard'])->middleware('permission:pos.use');
         Route::get('reservations/pos-queue', [ReservationController::class, 'posQueue'])->middleware('permission:pos.use');
         Route::get('reservations/{id}/timeline', [ReservationController::class, 'timeline'])->middleware('permission:pos.use');
